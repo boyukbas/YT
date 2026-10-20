@@ -12,49 +12,18 @@ enum SilenceDetector {
 
     /// Reads the audio once and returns loudness (dBFS) for every 20 ms window.
     static func levels(url: URL) async throws -> [Float] {
-        let asset = AVURLAsset(url: url)
-        guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return [] }
-
-        let sampleRate = 16_000
-        let reader = try AVAssetReader(asset: asset)
-        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVLinearPCMBitDepthKey: 32,
-            AVLinearPCMIsFloatKey: true,
-            AVLinearPCMIsBigEndianKey: false,
-            AVLinearPCMIsNonInterleaved: false,
-            AVNumberOfChannelsKey: 1,
-            AVSampleRateKey: sampleRate,
-        ])
-        output.alwaysCopiesSampleData = false
-        guard reader.canAdd(output) else { throw EditorError.audioReadFailed }
-        reader.add(output)
-        guard reader.startReading() else { throw reader.error ?? EditorError.audioReadFailed }
-
-        let window = Int(Double(sampleRate) * hop)
-        var pending: [Float] = []
+        let samples = try await AudioLoader.samples(url: url)
+        let window = Int(Double(AudioLoader.sampleRate) * hop)
+        guard window > 0 else { return [] }
         var levels: [Float] = []
-
-        while let sample = output.copyNextSampleBuffer() {
-            guard let block = CMSampleBufferGetDataBuffer(sample) else { continue }
-            let length = CMBlockBufferGetDataLength(block)
-            var chunk = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
-            chunk.withUnsafeMutableBytes { raw in
-                if let base = raw.baseAddress {
-                    _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: raw.count, destination: base)
-                }
-            }
-            pending.append(contentsOf: chunk)
-
-            var i = 0
-            while i + window <= pending.count {
-                var sum: Float = 0
-                for j in i..<(i + window) { sum += pending[j] * pending[j] }
-                let rms = (sum / Float(window)).squareRoot()
-                levels.append(20 * log10(max(rms, 1e-7)))
-                i += window
-            }
-            pending.removeFirst(i)
+        levels.reserveCapacity(samples.count / window)
+        var i = 0
+        while i + window <= samples.count {
+            var sum: Float = 0
+            for j in i..<(i + window) { sum += samples[j] * samples[j] }
+            let rms = (sum / Float(window)).squareRoot()
+            levels.append(20 * log10(max(rms, 1e-7)))
+            i += window
         }
         return levels
     }

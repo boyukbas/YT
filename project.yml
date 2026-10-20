@@ -6,6 +6,10 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
+packages:
+  WhisperKit:
+    url: https://github.com/argmaxinc/WhisperKit
+    exactVersion: 1.1.0
 targets:
   ShortsEditor:
     type: application
@@ -13,6 +17,9 @@ targets:
     deploymentTarget: "18.0"
     sources:
       - path: ShortsEditor
+    dependencies:
+      - package: WhisperKit
+        product: WhisperKit
     info:
       path: ShortsEditor/Info.plist
       properties:
@@ -21,12 +28,20 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        NSSpeechRecognitionUsageDescription: "Creates subtitles from your video's audio, on your iPhone."
         NSPhotoLibraryAddUsageDescription: "Saves your edited videos to Photos."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.yourname.shortseditor   # change "yourname" to something unique
         TARGETED_DEVICE_FAMILY: "1"
-        MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "1.1"
+        CURRENT_PROJECT_VERSION: "2"
         CODE_SIGN_STYLE: Automatic
+schemes:
+  ShortsEditor:
+    build:
+      targets:
+        ShortsEditor: all
+    run:
+      config: Debug
+    archive:
+      config: Release

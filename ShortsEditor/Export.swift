@@ -49,8 +49,12 @@ enum CompositionBuilder {
 }
 
 struct CaptionStyle {
-    var color: UIColor
+    var primaryLang: String
+    var primaryColor: UIColor
+    var secondaryColor: UIColor
     var position: Double   // 0 = bottom edge, 1 = top edge
+
+    func color(for lang: String) -> UIColor { lang == primaryLang ? primaryColor : secondaryColor }
 }
 
 enum VideoExporter {
@@ -118,7 +122,7 @@ enum VideoExporter {
         let font = UIFont.systemFont(ofSize: fontSize, weight: .heavy)
 
         let fill = NSAttributedString(string: c.text, attributes: [
-            .font: font, .foregroundColor: style.color, .paragraphStyle: paragraph])
+            .font: font, .foregroundColor: style.color(for: c.lang), .paragraphStyle: paragraph])
         let outline = NSAttributedString(string: c.text, attributes: [
             .font: font, .foregroundColor: UIColor.clear, .strokeColor: UIColor.black,
             .strokeWidth: 14.0, .paragraphStyle: paragraph])

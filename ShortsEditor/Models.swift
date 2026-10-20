@@ -11,6 +11,7 @@ struct Word: Hashable {
     var text: String
     var start: Double
     var end: Double
+    var lang: String          // Whisper language code, e.g. "de", "tr"
 }
 
 struct Caption: Identifiable, Hashable {
@@ -18,6 +19,7 @@ struct Caption: Identifiable, Hashable {
     var start: Double
     var end: Double
     var text: String
+    var lang: String          // decides the caption's color
 }
 
 /// Maps times between the original video and the edited (cut) video.
@@ -63,16 +65,14 @@ struct TimelineMap {
 }
 
 enum EditorError: LocalizedError {
-    case noVideoTrack, exportFailed, recognizerUnavailable, transcriptionFailed
-    case speechPermission, photosPermission, audioReadFailed
+    case noVideoTrack, exportFailed, transcriptionFailed
+    case photosPermission, audioReadFailed
 
     var errorDescription: String? {
         switch self {
         case .noVideoTrack: return "This file has no video track."
         case .exportFailed: return "Export failed."
-        case .recognizerUnavailable: return "Speech recognition isn't available for this language right now."
         case .transcriptionFailed: return "Couldn't transcribe the audio."
-        case .speechPermission: return "Allow Speech Recognition for this app in Settings."
         case .photosPermission: return "Allow adding to Photos for this app in Settings."
         case .audioReadFailed: return "Couldn't read the audio."
         }

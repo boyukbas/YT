@@ -2,10 +2,25 @@ import AVFoundation
 import SwiftUI
 
 enum CaptionColor: String, CaseIterable, Identifiable {
-    case white, yellow
+    case white, yellow, cyan, green, pink, orange
     var id: String { rawValue }
-    var uiColor: UIColor { self == .white ? .white : UIColor(red: 1, green: 0.86, blue: 0.1, alpha: 1) }
+    var uiColor: UIColor {
+        switch self {
+        case .white: return .white
+        case .yellow: return UIColor(red: 1, green: 0.86, blue: 0.1, alpha: 1)
+        case .cyan: return UIColor(red: 0.3, green: 0.9, blue: 1, alpha: 1)
+        case .green: return UIColor(red: 0.45, green: 1, blue: 0.45, alpha: 1)
+        case .pink: return UIColor(red: 1, green: 0.5, blue: 0.8, alpha: 1)
+        case .orange: return UIColor(red: 1, green: 0.62, blue: 0.2, alpha: 1)
+        }
+    }
     var color: Color { Color(uiColor) }
+}
+
+/// Small helper so choices survive app restarts.
+private enum Saved {
+    static func string(_ key: String, _ fallback: String) -> String { UserDefaults.standard.string(forKey: key) ?? fallback }
+    static func set(_ value: String, _ key: String) { UserDefaults.standard.set(value, forKey: key) }
 }
 
 @MainActor
@@ -26,12 +41,21 @@ final class EditorModel: ObservableObject {
     @Published private(set) var silences: [TimeRange] = []
 
     // Subtitles
-    let locales = Transcriber.supportedLocaleIDs()
-    @Published var localeID = Transcriber.defaultLocaleID()
+    @Published var primaryLang = Saved.string("primaryLang", "de") { didSet { Saved.set(primaryLang, "primaryLang") } }
+    /// "" = only one language in the video.
+    @Published var secondaryLang = Saved.string("secondaryLang", "tr") { didSet { Saved.set(secondaryLang, "secondaryLang") } }
+    @Published var speechModel = SpeechModel(rawValue: Saved.string("speechModel", "")) ?? .fast {
+        didSet { Saved.set(speechModel.rawValue, "speechModel") }
+    }
     @Published var captions: [Caption] = []          // original-video time, editable text
     @Published var wordsPerCaption = 3
     @Published var uppercase = true
-    @Published var captionColor: CaptionColor = .white
+    @Published var primaryColor = CaptionColor(rawValue: Saved.string("primaryColor", "")) ?? .white {
+        didSet { Saved.set(primaryColor.rawValue, "primaryColor") }
+    }
+    @Published var secondaryColor = CaptionColor(rawValue: Saved.string("secondaryColor", "")) ?? .yellow {
+        didSet { Saved.set(secondaryColor.rawValue, "secondaryColor") }
+    }
     @Published var captionPosition = 0.35
     @Published var burnCaptions = true
     @Published private(set) var previewCaptions: [Caption] = []  // edited-video time
@@ -58,6 +82,18 @@ final class EditorModel: ObservableObject {
     var keptRanges: [TimeRange] {
         let removals = (removeSilence ? silences : []) + manualCuts
         return TimelineMap.subtract(from: TimeRange(start: trimStart, end: trimEnd), removing: removals)
+    }
+
+    /// Languages captions can be tagged with (main first).
+    var activeLangs: [String] {
+        secondaryLang.isEmpty || secondaryLang == primaryLang ? [primaryLang] : [primaryLang, secondaryLang]
+    }
+
+    func color(for lang: String) -> CaptionColor { lang == primaryLang ? primaryColor : secondaryColor }
+
+    var captionStyle: CaptionStyle {
+        CaptionStyle(primaryLang: primaryLang, primaryColor: primaryColor.uiColor,
+                     secondaryColor: secondaryColor.uiColor, position: captionPosition)
     }
 
     var currentCaption: Caption? {
@@ -172,10 +208,13 @@ final class EditorModel: ObservableObject {
         guard let url = sourceURL else { return }
         player.pause()
         isBusy = true
-        status = "Creating subtitles on your iPhone…"
+        status = "Reading audio…"
         defer { isBusy = false }
         do {
-            words = try await Transcriber.transcribe(videoURL: url, localeID: localeID)
+            let second = secondaryLang == primaryLang ? "" : secondaryLang
+            words = try await Transcriber.shared.transcribe(
+                videoURL: url, primary: primaryLang, secondary: second, model: speechModel,
+                status: { [weak self] in self?.status = $0 })
             rebuildCaptions()
             status = words.isEmpty ? "No speech found in this video." : nil
         } catch {
@@ -195,9 +234,12 @@ final class EditorModel: ObservableObject {
             let e = previewMap.toOutput(c.end)
             let text = c.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard e - s > 0.05, !text.isEmpty else { return nil }
-            return Caption(id: c.id, start: s, end: e, text: text)
+            return Caption(id: c.id, start: s, end: e, text: text, lang: c.lang)
         }
-        previewCaptions = uppercase ? mapped.map { var c = $0; c.text = c.text.uppercased(); return c } : mapped
+        // Locale-aware caps: Turkish "i" -> "İ", German "ß" -> "SS".
+        previewCaptions = uppercase
+            ? mapped.map { var c = $0; c.text = c.text.uppercased(with: Locale(identifier: c.lang)); return c }
+            : mapped
 
         if mapped.isEmpty {
             srtURL = nil
@@ -221,10 +263,9 @@ final class EditorModel: ObservableObject {
         status = "Exporting video…"
         defer { isBusy = false }
         do {
-            let style = CaptionStyle(color: captionColor.uiColor, position: captionPosition)
             let out = try await VideoExporter.export(sourceURL: url, kept: keptRanges,
                                                      captions: burnCaptions ? previewCaptions : [],
-                                                     style: style)
+                                                     style: captionStyle)
             lastExportURL = out
             try await PhotoSaver.save(videoAt: out)
             status = "Saved to Photos ✅"

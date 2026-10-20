@@ -40,7 +40,8 @@ struct ContentView: View {
         }
         .overlay { if model.isBusy { busyOverlay } }
         .sheet(isPresented: $showCaptionEditor, onDismiss: { model.refreshCaptions() }) {
-            CaptionEditor(captions: $model.captions)
+            CaptionEditor(captions: $model.captions, langs: model.activeLangs,
+                          colorFor: { model.color(for: $0).color })
         }
     }
 
@@ -99,7 +100,7 @@ struct ContentView: View {
                     if let caption = model.currentCaption {
                         Text(caption.text)
                             .font(.system(size: 22, weight: .heavy))
-                            .foregroundStyle(model.captionColor.color)
+                            .foregroundStyle(model.color(for: caption.lang).color)
                             .multilineTextAlignment(.center)
                             .shadow(color: .black, radius: 0, x: 1.5, y: 1.5)
                             .shadow(color: .black, radius: 0, x: -1.5, y: -1.5)
@@ -188,12 +189,29 @@ struct ContentView: View {
     private var subtitleCard: some View {
         Card(title: "Auto subtitles", systemImage: "captions.bubble") {
             HStack {
-                Text("Language")
+                Text("Spoken language")
                 Spacer()
-                Picker("Language", selection: $model.localeID) {
-                    ForEach(model.locales, id: \.self) { Text(Transcriber.displayName($0)).tag($0) }
+                Picker("Spoken language", selection: $model.primaryLang) {
+                    ForEach(Transcriber.languageCodes, id: \.self) { Text(Transcriber.displayName($0)).tag($0) }
                 }
                 .pickerStyle(.menu)
+            }
+            HStack {
+                Text("Words in")
+                Spacer()
+                Picker("Second language", selection: $model.secondaryLang) {
+                    Text("No second language").tag("")
+                    ForEach(Transcriber.languageCodes, id: \.self) { Text(Transcriber.displayName($0)).tag($0) }
+                }
+                .pickerStyle(.menu)
+            }
+            Picker("Accuracy", selection: $model.speechModel) {
+                ForEach(SpeechModel.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            if !Transcriber.shared.isDownloaded(model.speechModel) {
+                Text("First use downloads the speech model (\(model.speechModel.downloadSize)) — use Wi-Fi. After that it works offline.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             Button(model.captions.isEmpty ? "Generate subtitles" : "Regenerate subtitles") {
                 Task { await model.generateCaptions() }
@@ -205,13 +223,13 @@ struct ContentView: View {
                     .onChange(of: model.wordsPerCaption) { model.rebuildCaptions() }
                 Toggle("ALL CAPS", isOn: $model.uppercase)
                     .onChange(of: model.uppercase) { model.refreshCaptions() }
-                Picker("Color", selection: $model.captionColor) {
-                    ForEach(CaptionColor.allCases) { Text($0.rawValue.capitalized).tag($0) }
+                ColorRow(title: Transcriber.displayName(model.primaryLang), selection: $model.primaryColor)
+                if model.activeLangs.count > 1 {
+                    ColorRow(title: Transcriber.displayName(model.secondaryLang), selection: $model.secondaryColor)
                 }
-                .pickerStyle(.segmented)
                 LabeledSlider(title: "Height on screen", value: $model.captionPosition, range: 0.12...0.85,
                               format: { "\(Int($0 * 100))%" }) {}
-                Button("Fix subtitle text") { showCaptionEditor = true }
+                Button("Fix subtitle text or language") { showCaptionEditor = true }
                 Toggle("Burn subtitles into video", isOn: $model.burnCaptions)
                 Text("Changing words per line rebuilds the subtitles and drops text fixes.")
                     .font(.caption2).foregroundStyle(.secondary)
@@ -235,7 +253,7 @@ struct ContentView: View {
             }
             if let srt = model.srtURL {
                 ShareLink(item: srt) { Label("Share subtitles (.srt)", systemImage: "doc.text") }
-                Text("Upload the .srt in YouTube Studio only if you didn't burn subtitles in.")
+                Text("YouTube shows .srt subtitles in one color. Upload it in YouTube Studio only if you didn't burn subtitles in.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -292,8 +310,32 @@ struct LabeledSlider: View {
     }
 }
 
+/// One tappable color swatch per option, for one language.
+struct ColorRow: View {
+    let title: String
+    @Binding var selection: CaptionColor
+
+    var body: some View {
+        HStack {
+            Text(title).font(.subheadline)
+            Spacer()
+            ForEach(CaptionColor.allCases) { c in
+                Circle()
+                    .fill(c.color)
+                    .frame(width: 26, height: 26)
+                    .overlay(Circle().stroke(Color.primary, lineWidth: selection == c ? 3 : 0).padding(-3))
+                    .onTapGesture { selection = c }
+                    .accessibilityLabel(c.rawValue)
+                    .accessibilityAddTraits(selection == c ? .isSelected : [])
+            }
+        }
+    }
+}
+
 struct CaptionEditor: View {
     @Binding var captions: [Caption]
+    let langs: [String]
+    let colorFor: (String) -> Color
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -301,8 +343,26 @@ struct CaptionEditor: View {
             List {
                 ForEach($captions) { $caption in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(formatTime(caption.start)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        HStack {
+                            Text(formatTime(caption.start)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                            Spacer()
+                            if langs.count > 1 {
+                                // Tap to switch the caption between the two languages (changes its color).
+                                Button {
+                                    let i = langs.firstIndex(of: caption.lang) ?? -1
+                                    caption.lang = langs[(i + 1) % langs.count]
+                                } label: {
+                                    Text(caption.lang.uppercased())
+                                        .font(.caption.bold())
+                                        .padding(.horizontal, 8).padding(.vertical, 2)
+                                        .foregroundStyle(.black)
+                                        .background(colorFor(caption.lang), in: Capsule())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
                         TextField("Subtitle", text: $caption.text, axis: .vertical)
+                            .foregroundStyle(colorFor(caption.lang))
                     }
                 }
                 .onDelete { captions.remove(atOffsets: $0) }
