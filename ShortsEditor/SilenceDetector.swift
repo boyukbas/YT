@@ -1,0 +1,96 @@
+import AVFoundation
+
+enum SilenceDetector {
+    struct Settings: Equatable {
+        var thresholdDB: Double = -38   // quieter than this counts as silence
+        var minSilence: Double = 0.4    // shortest pause that gets cut (seconds)
+        var padding: Double = 0.12      // breathing room kept around speech (seconds)
+    }
+
+    /// Length of one analysis window in seconds.
+    static let hop = 0.02
+
+    /// Reads the audio once and returns loudness (dBFS) for every 20 ms window.
+    static func levels(url: URL) async throws -> [Float] {
+        let asset = AVURLAsset(url: url)
+        guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return [] }
+
+        let sampleRate = 16_000
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false,
+            AVNumberOfChannelsKey: 1,
+            AVSampleRateKey: sampleRate,
+        ])
+        output.alwaysCopiesSampleData = false
+        guard reader.canAdd(output) else { throw EditorError.audioReadFailed }
+        reader.add(output)
+        guard reader.startReading() else { throw reader.error ?? EditorError.audioReadFailed }
+
+        let window = Int(Double(sampleRate) * hop)
+        var pending: [Float] = []
+        var levels: [Float] = []
+
+        while let sample = output.copyNextSampleBuffer() {
+            guard let block = CMSampleBufferGetDataBuffer(sample) else { continue }
+            let length = CMBlockBufferGetDataLength(block)
+            var chunk = [Float](repeating: 0, count: length / MemoryLayout<Float>.size)
+            chunk.withUnsafeMutableBytes { raw in
+                if let base = raw.baseAddress {
+                    _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: raw.count, destination: base)
+                }
+            }
+            pending.append(contentsOf: chunk)
+
+            var i = 0
+            while i + window <= pending.count {
+                var sum: Float = 0
+                for j in i..<(i + window) { sum += pending[j] * pending[j] }
+                let rms = (sum / Float(window)).squareRoot()
+                levels.append(20 * log10(max(rms, 1e-7)))
+                i += window
+            }
+            pending.removeFirst(i)
+        }
+        return levels
+    }
+
+    /// Turns loudness levels into time ranges that should be removed.
+    static func silences(in levels: [Float], settings: Settings) -> [TimeRange] {
+        var ranges: [TimeRange] = []
+        var runStart: Int?
+
+        func close(_ s: Int, _ e: Int) {
+            let start = Double(s) * hop
+            let end = Double(e) * hop
+            guard end - start >= settings.minSilence else { return }
+            let a = s == 0 ? 0 : start + settings.padding
+            let b = e == levels.count ? end : end - settings.padding
+            if b - a > 0.05 { ranges.append(TimeRange(start: a, end: b)) }
+        }
+
+        for (i, db) in levels.enumerated() {
+            if Double(db) < settings.thresholdDB {
+                if runStart == nil { runStart = i }
+            } else if let s = runStart {
+                close(s, i)
+                runStart = nil
+            }
+        }
+        if let s = runStart { close(s, levels.count) }
+        return ranges
+    }
+
+    /// Picks a threshold between the room noise and the speech level.
+    static func suggestedThreshold(levels: [Float]) -> Double? {
+        guard levels.count > 50 else { return nil }
+        let sorted = levels.sorted()
+        let noise = Double(sorted[Int(Double(sorted.count) * 0.1)])
+        let speech = Double(sorted[Int(Double(sorted.count) * 0.9)])
+        return min(-20, max(-60, (noise + (speech - noise) * 0.35).rounded()))
+    }
+}

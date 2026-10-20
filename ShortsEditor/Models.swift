@@ -1,0 +1,100 @@
+import Foundation
+
+struct TimeRange: Hashable, Identifiable {
+    var start: Double
+    var end: Double
+    var id: String { "\(start)-\(end)" }
+    var duration: Double { max(0, end - start) }
+}
+
+struct Word: Hashable {
+    var text: String
+    var start: Double
+    var end: Double
+}
+
+struct Caption: Identifiable, Hashable {
+    var id = UUID()
+    var start: Double
+    var end: Double
+    var text: String
+}
+
+/// Maps times between the original video and the edited (cut) video.
+struct TimelineMap {
+    var kept: [TimeRange]
+
+    var outputDuration: Double { kept.reduce(0) { $0 + $1.duration } }
+
+    /// Original time -> edited time. Times inside removed parts snap to the next kept part.
+    func toOutput(_ t: Double) -> Double {
+        var acc = 0.0
+        for r in kept {
+            if t < r.start { return acc }
+            if t <= r.end { return acc + (t - r.start) }
+            acc += r.duration
+        }
+        return acc
+    }
+
+    /// Edited time -> original time.
+    func toSource(_ o: Double) -> Double {
+        var acc = 0.0
+        for r in kept {
+            if o <= acc + r.duration { return r.start + max(0, o - acc) }
+            acc += r.duration
+        }
+        return kept.last?.end ?? 0
+    }
+
+    static func subtract(from base: TimeRange, removing removals: [TimeRange]) -> [TimeRange] {
+        var result = [base]
+        for cut in removals {
+            result = result.flatMap { r -> [TimeRange] in
+                if cut.end <= r.start || cut.start >= r.end { return [r] }
+                var parts: [TimeRange] = []
+                if cut.start > r.start { parts.append(TimeRange(start: r.start, end: cut.start)) }
+                if cut.end < r.end { parts.append(TimeRange(start: cut.end, end: r.end)) }
+                return parts
+            }
+        }
+        return result.filter { $0.duration > 0.04 }
+    }
+}
+
+enum EditorError: LocalizedError {
+    case noVideoTrack, exportFailed, recognizerUnavailable, transcriptionFailed
+    case speechPermission, photosPermission, audioReadFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .noVideoTrack: return "This file has no video track."
+        case .exportFailed: return "Export failed."
+        case .recognizerUnavailable: return "Speech recognition isn't available for this language right now."
+        case .transcriptionFailed: return "Couldn't transcribe the audio."
+        case .speechPermission: return "Allow Speech Recognition for this app in Settings."
+        case .photosPermission: return "Allow adding to Photos for this app in Settings."
+        case .audioReadFailed: return "Couldn't read the audio."
+        }
+    }
+}
+
+func formatTime(_ t: Double) -> String {
+    guard t.isFinite, t >= 0 else { return "0:00.0" }
+    let m = Int(t) / 60
+    let s = t - Double(m * 60)
+    return String(format: "%d:%04.1f", m, s)
+}
+
+enum SRTWriter {
+    static func make(_ captions: [Caption]) -> String {
+        captions.enumerated().map { i, c in
+            "\(i + 1)\n\(stamp(c.start)) --> \(stamp(c.end))\n\(c.text)\n"
+        }.joined(separator: "\n")
+    }
+
+    private static func stamp(_ t: Double) -> String {
+        let ms = Int((t * 1000).rounded())
+        return String(format: "%02d:%02d:%02d,%03d", ms / 3_600_000, (ms / 60_000) % 60, (ms / 1000) % 60, ms % 1000)
+    }
+}
