@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths-ignore: ['docs/**', 'README.md']
 jobs:
   build:
     runs-on: macos-15

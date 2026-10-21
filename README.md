@@ -19,3 +19,11 @@ Trim, cut, remove silences, auto-subtitle (on-device), export to Photos + .srt.
 - The .srt is always created too. YouTube shows .srt in a single color.
 - Silences: "Auto level" adapts to your mic/room. Raise "Keep around speech" if cuts feel abrupt.
 - Burned-in subtitles OR upload the .srt to YouTube Studio — not both.
+
+## Web version (no install, no 7-day expiry)
+
+`docs/` is a web app with the same core features: trim, remove pauses, on-device Whisper
+subtitles in two languages with a color per language, burned-in export and .srt.
+Hosted with GitHub Pages at https://boyukbas.github.io/YT/ (Settings → Pages → Branch `main`, folder `/docs`).
+On iPhone: open it in Safari → Share → Add to Home Screen.
+First subtitle run downloads the speech model (~250 MB, cached afterwards).
