@@ -1,5 +1,6 @@
 // Runs Whisper off the main thread so the page stays responsive.
-import { pipeline, Tensor, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.1/dist/transformers.min.js';
+// Served from this site (not a CDN): Safari refuses cross-site scripts inside an isolated worker.
+import { pipeline, Tensor, env } from './lib/transformers.min.js';
 import { transcribeMixed, alignScript } from './core.js';
 
 const MODELS = {
@@ -7,6 +8,8 @@ const MODELS = {
   turbo: 'onnx-community/whisper-large-v3-turbo_timestamped',
 };
 env.allowLocalModels = false;
+env.backends.onnx.wasm.wasmPaths = new URL('./lib/', import.meta.url).href;
+self.addEventListener('unhandledrejection', (e) => postMessage({ type: 'error', message: e.reason?.message || String(e.reason) }));
 if (self.crossOriginIsolated) env.backends.onnx.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 2);
 
 const loaded = {};   // "small|webgpu" -> Promise<pipeline>
