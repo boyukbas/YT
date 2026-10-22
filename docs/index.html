@@ -102,6 +102,34 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 10
 
 .result { display: grid; gap: 8px; margin-top: 12px; }
 .hidden { display: none !important; }
+
+/* Segmented control */
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 3px; gap: 3px; }
+.seg button { border: 0; background: none; border-radius: 9px; padding: 8px 6px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--panel); color: var(--text); box-shadow: 0 1px 0 var(--line); }
+details { margin-top: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; }
+details[open] { padding-bottom: 12px; }
+summary { cursor: pointer; padding: 12px 0; font-weight: 600; list-style: none; display: flex; justify-content: space-between; }
+summary::-webkit-details-marker { display: none; }
+summary::after { content: "+"; color: var(--muted); }
+details[open] summary::after { content: "−"; }
+summary .hint { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: auto; margin-right: 10px; }
+.area { width: 100%; min-height: 7em; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; resize: vertical; line-height: 1.4; }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.cap-row { grid-template-columns: 1fr; gap: 6px; }
+.cap-row .top { display: flex; align-items: center; gap: 8px; }
+.cap-row .t { padding-top: 0; width: auto; }
+.cap-row .grow { flex: 1; }
+.nudge { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+.nudge button { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 4px 9px; font-weight: 600; cursor: pointer; }
+.cutlist { display: grid; gap: 6px; margin-top: 10px; }
+.cutlist .item { display: flex; justify-content: space-between; align-items: center; background: var(--bg); border-radius: 10px; padding: 8px 10px; font-variant-numeric: tabular-nums; }
+.projects { display: grid; gap: 8px; text-align: left; width: min(100%, 420px); justify-self: center; }
+.projects h3 { margin: 6px 0 0; font-size: 15px; color: var(--muted); font-weight: 600; }
+.proj { display: flex; align-items: center; gap: 10px; background: var(--panel); border-radius: 14px; padding: 10px 12px; }
+.proj .name { flex: 1; min-width: 0; }
+.proj .name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.saved { font-size: 13px; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -109,25 +137,26 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 10
 <main>
   <header>
     <h1><span class="bar" aria-hidden="true"></span>Shorts Editor</h1>
-    <label class="btn hidden" id="newBtn">New video<input type="file" accept="video/*" class="hidden" id="fileInput2"></label>
+    <button class="btn hidden" id="newBtn">Projects</button>
   </header>
 
   <div class="hero" id="empty">
     <div class="demo" aria-hidden="true"><span>Im Wald</span><span class="tr">ormanda</span></div>
-    <p class="muted">Pick a video. Subtitles are made on this phone, in two languages and two colors.</p>
+    <p class="muted">Pick a video. Subtitles are made on this device, in two languages and two colors.</p>
     <label class="btn primary big">Choose video<input type="file" accept="video/*" class="hidden" id="fileInput"></label>
     <p class="status" id="loadStatus"></p>
+    <div class="projects hidden" id="projects"><h3>Recent projects</h3><div id="projList"></div></div>
   </div>
 
   <div id="editor" class="hidden">
     <div class="stage" id="stage">
       <video id="video" playsinline controls preload="metadata"></video>
-      <div class="overlay"><div class="cap hidden" id="capEl"></div></div>
+      <canvas id="overlay"></canvas>
     </div>
-    <div class="timebar"><span id="tNow">0:00.0</span><span id="tLen"></span></div>
+    <div class="timebar"><span id="tNow">0:00.0</span><span id="saved" class="saved"></span><span id="tLen"></span></div>
 
     <section>
-      <h2>Trim</h2>
+      <h2>Trim and cut</h2>
       <div class="stack"><div class="head"><span>Start</span><output id="trimStartOut"></output></div>
         <input type="range" id="trimStart" min="0" step="0.05"></div>
       <div class="stack"><div class="head"><span>End</span><output id="trimEndOut"></output></div>
@@ -136,6 +165,12 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 10
         <button class="btn" id="startHere">Start at playhead</button>
         <button class="btn" id="endHere">End at playhead</button>
       </div>
+      <p class="muted" style="margin-top:14px">Cut out a part: play to where it starts, tap “Cut from here”, then to where it ends and tap “Cut to here”.</p>
+      <div class="pair">
+        <button class="btn" id="cutIn">Cut from here</button>
+        <button class="btn" id="cutOut" disabled>Cut to here</button>
+      </div>
+      <div class="cutlist" id="cutList"></div>
     </section>
 
     <section>
@@ -156,21 +191,46 @@ select { background: var(--bg); border: 1px solid var(--line); border-radius: 10
         <span class="plus">+</span>
         <label>Words in<select id="secondary"></select></label>
       </div>
+      <details id="scriptBox">
+        <summary>My script <span class="hint" id="scriptHint">optional</span></summary>
+        <p class="muted" style="margin-bottom:8px">Paste what you say. The subtitles use your exact words; the app only finds the timing. Each line of the script becomes its own subtitle break.</p>
+        <textarea class="area" id="script" placeholder="Der Wald – orman.&#10;Im Wald – ormanda."></textarea>
+      </details>
+      <details id="glossBox">
+        <summary>Word list <span class="hint" id="glossHint">optional</span></summary>
+        <p class="muted" style="margin-bottom:8px">The words you teach in this video, one pair per line. Misheard second-language words are corrected to these.</p>
+        <textarea class="area" id="glossary" placeholder="der Wald – orman&#10;im Wald – ormanda&#10;die Freizeit – boş zaman"></textarea>
+      </details>
+      <div class="row" style="margin-top:12px"><label for="accurateToggle">Accurate second language<br><span class="muted">Bigger model for those words, about 760 MB extra, slower</span></label><input type="checkbox" class="switch" id="accurateToggle"></div>
+      <div class="row"><label for="gpuToggle">Use the graphics chip<br><span class="muted">Faster on recent iPads, iPhones and Android phones</span></label><input type="checkbox" class="switch" id="gpuToggle"></div>
       <button class="btn primary big" id="genBtn" style="margin-top:14px">Make subtitles</button>
       <div class="progress hidden" id="genBar"><div></div></div>
-      <p class="status" id="genStatus">First run downloads the speech model (about 250 MB) — use Wi‑Fi. It stays on the phone afterwards.</p>
+      <p class="status" id="genStatus">First run downloads the speech model (about 250 MB) — use Wi‑Fi. It stays on the device afterwards.</p>
+    </section>
 
-      <div id="styleBox" class="hidden">
-        <div class="row" style="margin-top:14px"><span id="c1Label"></span><div class="swatches" id="c1"></div></div>
-        <div class="row" id="c2Row"><span id="c2Label"></span><div class="swatches" id="c2"></div></div>
-        <div class="row"><label for="capsToggle">All caps</label><input type="checkbox" class="switch" id="capsToggle"></div>
-        <div class="row"><span>Words per line</span>
-          <div style="display:flex;gap:6px;align-items:center"><button class="btn" id="wpMinus" aria-label="Fewer words">−</button><output id="wpOut" style="min-width:1.5em;text-align:center"></output><button class="btn" id="wpPlus" aria-label="More words">+</button></div></div>
-        <div class="stack"><div class="head"><span>Height on screen</span><output id="posOut"></output></div>
-          <input type="range" id="pos" min="0.12" max="0.85" step="0.01"></div>
-        <p class="muted" style="margin-top:12px">Tap a line to fix the text. Tap its language tag to switch language and color. Changing words per line rebuilds the lines and drops text fixes.</p>
-        <div class="caps" id="capList"></div>
+    <section id="styleBox" class="hidden">
+      <h2>Look</h2>
+      <div class="seg" id="layoutSeg" role="group" aria-label="Layout">
+        <button data-v="single">One line at a time</button>
+        <button data-v="pair">Word + translation</button>
       </div>
+      <div class="row" style="margin-top:14px"><span id="c1Label"></span><div class="swatches" id="c1"></div></div>
+      <div class="row" id="c2Row"><span id="c2Label"></span><div class="swatches" id="c2"></div></div>
+      <div class="stack"><div class="head"><span>Text size</span><output id="sizeOut"></output></div>
+        <input type="range" id="size" min="0.05" max="0.11" step="0.005"></div>
+      <div class="stack"><div class="head"><span>Height on screen</span><output id="posOut"></output></div>
+        <input type="range" id="pos" min="0.12" max="0.85" step="0.01"></div>
+      <div class="row"><label for="boxToggle">Dark box behind text</label><input type="checkbox" class="switch" id="boxToggle"></div>
+      <div class="row"><label for="hlToggle">Highlight the spoken word</label><input type="checkbox" class="switch" id="hlToggle"></div>
+      <div class="row"><label for="capsToggle">All caps</label><input type="checkbox" class="switch" id="capsToggle"></div>
+      <div class="row"><span>Words per line</span>
+        <div style="display:flex;gap:6px;align-items:center"><button class="btn" id="wpMinus" aria-label="Fewer words">−</button><output id="wpOut" style="min-width:1.5em;text-align:center"></output><button class="btn" id="wpPlus" aria-label="More words">+</button></div></div>
+    </section>
+
+    <section id="linesBox" class="hidden">
+      <h2>Lines</h2>
+      <p class="muted">Tap a line to fix the text. The tag switches language and color. Start/End move a line earlier or later by 0.1 s. Changing words per line rebuilds the lines and drops text fixes.</p>
+      <div class="caps" id="capList"></div>
     </section>
 
     <section>
