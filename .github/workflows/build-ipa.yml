@@ -30,6 +30,10 @@ jobs:
         run: |
           mkdir Payload
           cp -R build/Build/Products/Release-iphoneos/ShortsEditor.app Payload/
+          # Ad-hoc signature so sideloading tools find a signature to replace
+          # (a fully unsigned app fails with "No code signature found").
+          codesign --force --sign - --timestamp=none Payload/ShortsEditor.app
+          codesign -dv Payload/ShortsEditor.app
           zip -qr ShortsEditor.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
