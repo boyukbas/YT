@@ -12,12 +12,12 @@ const $ = (id) => document.getElementById(id);
 // ---------- Settings (remembered between visits) ----------
 const COLORS = { white: '#ffffff', yellow: '#ffd21a', cyan: '#4de6ff', green: '#73ff73', pink: '#ff80cc', orange: '#ff9e33' };
 const SETTINGS = ['primary', 'secondary', 'color1', 'color2', 'caps', 'wordsPer', 'pos', 'burn', 'removePauses',
-  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs'];
+  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs', 'accuracy'];
 const saved = (() => { try { return JSON.parse(localStorage.getItem('settings') || '{}'); } catch { return {}; } })();
 const S = {
   primary: 'de', secondary: 'tr', color1: 'white', color2: 'yellow', caps: true, wordsPer: 3, pos: 0.35, burn: true,
   removePauses: true, minPause: 0.4, layout: 'single', size: 0.075, box: false, highlight: false, accurate: false, gpu: true,
-  posX: 0.5, font: 'modern', anim: false, hookSecs: 3,
+  posX: 0.5, font: 'modern', anim: false, hookSecs: 3, accuracy: saved.accurate ? 'second' : 'normal',
   ...saved,
   // per project
   id: null, name: '', file: null, url: null, duration: 0, width: 0, height: 0,
@@ -369,7 +369,12 @@ function syncSubs() {
   $('script').value = S.script; $('glossary').value = S.glossary;
   $('scriptHint').textContent = S.script.trim() ? 'added' : 'optional';
   $('glossHint').textContent = S.glossary.trim() ? `${S.glossary.trim().split('\n').length} words` : 'optional';
-  $('accurateToggle').checked = S.accurate;
+  for (const b of $('accSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === S.accuracy));
+  $('accHint').textContent = {
+    normal: 'Small model (about 250 MB once). Good for most videos.',
+    second: 'Adds the big model (about 760 MB once) just for the second-language words.',
+    all: 'Big model for everything (about 760 MB once). Slowest; best on iPad or with the graphics chip.',
+  }[S.accuracy];
   $('gpuToggle').checked = S.gpu;
 }
 function syncStyle() {
@@ -475,7 +480,53 @@ $('primary').onchange = e => { S.primary = e.target.value; persist(); syncStyle(
 $('secondary').onchange = e => { S.secondary = e.target.value; persist(); syncStyle(); };
 $('script').oninput = e => { S.script = e.target.value; $('scriptHint').textContent = S.script.trim() ? 'added' : 'optional'; dirty(); };
 $('glossary').oninput = e => { S.glossary = e.target.value; dirty(); syncSubs(); };
-$('accurateToggle').onchange = e => { S.accurate = e.target.checked; persist(); };
+for (const b of $('accSeg').children) b.onclick = () => { S.accuracy = b.dataset.v; persist(); syncSubs(); };
+
+// ---------- Copy the transcript (e.g. to let Claude fix it) ----------
+/** The subtitles as plain text: a new line after each sentence and at each language switch. */
+function transcriptText() {
+  const lines = [];
+  let cur = '', lang = null;
+  for (const c of S.captions) {
+    const text = c.text.trim();
+    if (!text) continue;
+    if (cur && lang !== c.lang) { lines.push(cur); cur = ''; }
+    cur = cur ? `${cur} ${text}` : text;
+    lang = c.lang;
+    if (/[.!?…]$/.test(text)) { lines.push(cur); cur = ''; }
+  }
+  if (cur) lines.push(cur);
+  return lines.join('\n');
+}
+function claudePrompt() {
+  const langs = activeLangs().map(langName).join(' and ');
+  return `This is an automatic transcript of my short video, spoken in ${langs}. ` +
+    `Speech recognition misheard some words${activeLangs().length > 1 ? `, especially the ${langName(S.secondary)} ones` : ''}. ` +
+    `Please fix the mistakes using the context. Keep my words and their order, keep one line per line ` +
+    `(a new line where a sentence ends or the language changes), don't translate or add anything, ` +
+    `and reply with only the corrected text.` +
+    (S.glossary.trim() ? `\n\nWords I teach in this video:\n${S.glossary.trim()}` : '') +
+    `\n\nTranscript:\n${transcriptText()}`;
+}
+async function copy(text, btn) {
+  const old = btn.textContent;
+  try { await navigator.clipboard.writeText(text); btn.textContent = 'Copied ✓'; }
+  catch {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); btn.textContent = 'Copied ✓'; } catch { btn.textContent = 'Copy failed'; }
+    ta.remove();
+  }
+  setTimeout(() => { btn.textContent = old; }, 1800);
+}
+$('copyText').onclick = () => copy(transcriptText(), $('copyText'));
+$('copyClaude').onclick = () => copy(claudePrompt(), $('copyClaude'));
+$('pasteScript').onclick = async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text.trim()) { S.script = text.trim(); syncSubs(); dirty(); }
+  } catch { $('script').focus(); }
+};
+$('clearScript').onclick = () => { S.script = ''; syncSubs(); dirty(); };
 $('gpuToggle').onchange = e => { S.gpu = e.target.checked; persist(); };
 for (const b of $('layoutSeg').children) b.onclick = () => { S.layout = b.dataset.v; persist(); syncStyle(); };
 $('size').oninput = e => { S.size = +e.target.value; persist(); $('sizeOut').textContent = `${Math.round(S.size / 0.075 * 100)}%`; };
@@ -568,7 +619,7 @@ $('genBtn').onclick = () => {
   };
   worker.postMessage({
     type: 'transcribe', audio: S.audio16k, primary: S.primary, secondary: second,
-    script: S.script, glossary: S.glossary, accurate: S.accurate && !!second, gpu: S.gpu,
+    script: S.script, glossary: S.glossary, accuracy: S.accuracy, gpu: S.gpu,
   });
 };
 

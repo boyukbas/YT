@@ -44,8 +44,11 @@ function load(kind, device, f16, label) {
 
 async function run(data, device, f16) {
   postMessage({ type: 'status', stage: 'model', device });
-  const asr = await load('small', device, f16, 'speech model');
-  const asrSecondary = data.accurate && data.secondary ? await load('turbo', device, f16, 'accurate model') : null;
+  // accuracy: "normal" = small model; "second" = big model only for second-language words;
+  // "all" = big model for everything (slowest, best).
+  const all = data.accuracy === 'all';
+  const asr = await load(all ? 'turbo' : 'small', device, f16, all ? 'accurate model' : 'speech model');
+  const asrSecondary = data.accuracy === 'second' && data.secondary ? await load('turbo', device, f16, 'accurate model') : null;
   let words = await transcribeMixed({
     asr, asrSecondary, Tensor, audio: data.audio, primary: data.primary, secondary: data.secondary,
     glossary: data.script ? '' : data.glossary,

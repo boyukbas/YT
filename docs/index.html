@@ -197,13 +197,18 @@ summary .hint { color: var(--muted); font-weight: 400; font-size: 14px; margin-l
         <summary>My script <span class="hint" id="scriptHint">optional</span></summary>
         <p class="muted" style="margin-bottom:8px">Paste what you say. The subtitles use your exact words; the app only finds the timing. Each line of the script becomes its own subtitle break.</p>
         <textarea class="area" id="script" placeholder="Der Wald – orman.&#10;Im Wald – ormanda."></textarea>
+        <div class="pair"><button class="btn" id="pasteScript">Paste from clipboard</button><button class="btn" id="clearScript">Clear</button></div>
       </details>
       <details id="glossBox">
         <summary>Word list <span class="hint" id="glossHint">optional</span></summary>
         <p class="muted" style="margin-bottom:8px">The words you teach in this video, one pair per line. Misheard second-language words are corrected to these.</p>
         <textarea class="area" id="glossary" placeholder="der Wald – orman&#10;im Wald – ormanda&#10;die Freizeit – boş zaman"></textarea>
       </details>
-      <div class="row" style="margin-top:12px"><label for="accurateToggle">Accurate second language<br><span class="muted">Bigger model for those words, about 760 MB extra, slower</span></label><input type="checkbox" class="switch" id="accurateToggle"></div>
+      <div class="stack" style="margin-top:12px"><div class="head"><span>Accuracy</span></div>
+        <div class="seg" id="accSeg" role="group" aria-label="Accuracy">
+          <button data-v="normal">Fast</button><button data-v="second">Better 2nd language</button><button data-v="all">Best</button>
+        </div>
+        <p class="muted" id="accHint" style="margin-top:6px"></p></div>
       <div class="row"><label for="gpuToggle">Use the graphics chip<br><span class="muted">Faster on recent iPads, iPhones and Android phones</span></label><input type="checkbox" class="switch" id="gpuToggle"></div>
       <button class="btn primary big" id="genBtn" style="margin-top:14px">Make subtitles</button>
       <div class="progress hidden" id="genBar"><div></div></div>
@@ -247,6 +252,11 @@ summary .hint { color: var(--muted); font-weight: 400; font-size: 14px; margin-l
     <section id="linesBox" class="hidden">
       <h2>Lines</h2>
       <p class="muted">Tap a line to fix the text. The tag switches language and color. Start/End move a line earlier or later by 0.1 s. Changing words per line rebuilds the lines and drops text fixes.</p>
+      <div class="pair" style="margin-top:12px">
+        <button class="btn" id="copyText">Copy text</button>
+        <button class="btn" id="copyClaude">Copy for Claude</button>
+      </div>
+      <p class="muted" id="copyHint" style="margin-top:6px">“Copy for Claude” adds instructions. Paste it into Claude, then paste Claude’s answer into “My script” and make the subtitles again — they keep Claude’s words with the right timing.</p>
       <div class="caps" id="capList"></div>
     </section>
 
