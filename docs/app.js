@@ -4,7 +4,7 @@ import {
   getFirstEncodableVideoCodec, getFirstEncodableAudioCodec,
 } from './lib/mediabunny.min.mjs';
 import { LANGS, SR, buildCaptions, toSRT } from './core.js';
-import { blocksAt, drawCaptions, FONT } from './render.js';
+import { blocksAt, drawCaptions, drawHook, drawSafeZones, FONTS, fontCss } from './render.js';
 import { saveFile, saveProject, listProjects, loadProject, deleteProject } from './store.js';
 
 const $ = (id) => document.getElementById(id);
@@ -12,16 +12,17 @@ const $ = (id) => document.getElementById(id);
 // ---------- Settings (remembered between visits) ----------
 const COLORS = { white: '#ffffff', yellow: '#ffd21a', cyan: '#4de6ff', green: '#73ff73', pink: '#ff80cc', orange: '#ff9e33' };
 const SETTINGS = ['primary', 'secondary', 'color1', 'color2', 'caps', 'wordsPer', 'pos', 'burn', 'removePauses',
-  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu'];
+  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs'];
 const saved = (() => { try { return JSON.parse(localStorage.getItem('settings') || '{}'); } catch { return {}; } })();
 const S = {
   primary: 'de', secondary: 'tr', color1: 'white', color2: 'yellow', caps: true, wordsPer: 3, pos: 0.35, burn: true,
   removePauses: true, minPause: 0.4, layout: 'single', size: 0.075, box: false, highlight: false, accurate: false, gpu: true,
+  posX: 0.5, font: 'modern', anim: false, hookSecs: 3,
   ...saved,
   // per project
   id: null, name: '', file: null, url: null, duration: 0, width: 0, height: 0,
   audio16k: null, levels: [], threshold: -38, silences: [], cuts: [], cutFrom: null,
-  trimStart: 0, trimEnd: 0, words: [], captions: [], script: '', glossary: '',
+  trimStart: 0, trimEnd: 0, words: [], captions: [], script: '', glossary: '', hook: '', dragMode: false,
   videoBlob: null, srtBlob: null,
 };
 function persist() {
@@ -40,7 +41,7 @@ const langName = (() => {
 })();
 const colorFor = (lang) => COLORS[lang === S.primary ? S.color1 : S.color2];
 const activeLangs = () => (S.secondary && S.secondary !== S.primary ? [S.primary, S.secondary] : [S.primary]);
-const style = () => ({ size: S.size, pos: S.pos, box: S.box, highlight: S.highlight, caps: S.caps, colorFor });
+const style = () => ({ size: S.size, pos: S.pos, posX: S.posX, box: S.box, highlight: S.highlight, caps: S.caps, font: S.font, anim: S.anim, colorFor });
 const fmt = (t) => {
   if (!isFinite(t) || t < 0) t = 0;
   const m = Math.floor(t / 60);
@@ -58,7 +59,7 @@ function dirty() {
       await saveProject({
         id: S.id, name: S.name, updatedAt: Date.now(), duration: S.duration, width: S.width, height: S.height,
         trimStart: S.trimStart, trimEnd: S.trimEnd, cuts: S.cuts, threshold: S.threshold,
-        words: S.words, captions: S.captions, script: S.script, glossary: S.glossary,
+        words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook,
       });
       $('saved').textContent = 'Saved';
     } catch { $('saved').textContent = 'Not saved'; }
@@ -186,17 +187,18 @@ async function openVideo(file, project = null) {
     if (S.url) URL.revokeObjectURL(S.url);
     S.file = file;
     S.url = URL.createObjectURL(file);
-    S.videoBlob = null; S.srtBlob = null; S.cutFrom = null;
+    S.videoBlob = null; S.srtBlob = null; S.cutFrom = null; S.dragMode = false;
+    $('stage').classList.remove('dragging'); $('dragHint').classList.add('hidden'); $('dragDone').classList.add('hidden');
     if (project) {
       Object.assign(S, {
         id: project.id, name: project.name, trimStart: project.trimStart, trimEnd: project.trimEnd,
         cuts: project.cuts || [], threshold: project.threshold ?? suggestThreshold(S.levels), words: project.words || [],
-        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '',
+        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '',
       });
     } else {
       Object.assign(S, {
         id: crypto.randomUUID(), name: file.name || 'Video', trimStart: 0, trimEnd: S.duration, cuts: [],
-        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '',
+        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '',
       });
       try {
         await saveFile(S.id, file);
@@ -287,7 +289,16 @@ function tick() {
     const t = video.currentTime;
     const ctx = overlay.getContext('2d');
     ctx.clearRect(0, 0, overlay.width, overlay.height);
-    drawCaptions(ctx, overlay.width, overlay.height, t, blocksAt(t, S.captions, S.layout, S.primary), style());
+    const W = overlay.width, H = overlay.height;
+    if (S.dragMode) drawSafeZones(ctx, W, H);
+    let blocks = blocksAt(t, S.captions, S.layout, S.primary);
+    if (S.dragMode && !blocks.length) {
+      // Something to aim with while placing the subtitles.
+      blocks = [{ id: 'demo', start: t - 1, end: t + 1, text: S.captions[0]?.text || 'Subtitles here', lang: S.captions[0]?.lang || S.primary }];
+    }
+    drawCaptions(ctx, W, H, t, blocks, style());
+    const outT = toOutput(t);
+    if (S.hook.trim() && outT < S.hookSecs) drawHook(ctx, W, H, S.hook, outT, style());
     $('tNow').textContent = fmt(toOutput(t));
   }
   requestAnimationFrame(tick);
@@ -345,6 +356,14 @@ function swatches(el, key) {
     el.appendChild(b);
   }
 }
+function syncPos() {
+  const side = S.posX < 0.42 ? ', left' : S.posX > 0.58 ? ', right' : '';
+  $('posOut').textContent = `${Math.round(S.pos * 100)}% up${side}`;
+}
+function syncHook() {
+  $('hook').value = S.hook;
+  $('hookSecs').value = S.hookSecs; $('hookSecsOut').textContent = `${S.hookSecs} s`;
+}
 function syncSubs() {
   $('primary').value = S.primary; $('secondary').value = S.secondary;
   $('script').value = S.script; $('glossary').value = S.glossary;
@@ -363,7 +382,19 @@ function syncStyle() {
   $('c2Row').classList.toggle('hidden', !two);
   swatches($('c1'), 'color1'); swatches($('c2'), 'color2');
   $('size').value = S.size; $('sizeOut').textContent = `${Math.round(S.size / 0.075 * 100)}%`;
-  $('pos').value = S.pos; $('posOut').textContent = `${Math.round(S.pos * 100)}%`;
+  $('pos').value = S.pos; syncPos();
+  for (const b of $('posSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === 'drag' ? S.dragMode : false));
+  const fs = $('fontSeg');
+  if (!fs.children.length) {
+    for (const [k, f] of Object.entries(FONTS)) {
+      const b = document.createElement('button');
+      b.dataset.v = k; b.textContent = f.label; b.style.font = fontCss(k, 15);
+      b.onclick = () => { S.font = k; persist(); syncStyle(); };
+      fs.appendChild(b);
+    }
+  }
+  for (const b of fs.children) b.setAttribute('aria-pressed', String(b.dataset.v === S.font));
+  $('animToggle').checked = S.anim;
   $('boxToggle').checked = S.box; $('hlToggle').checked = S.highlight; $('capsToggle').checked = S.caps;
   $('wpOut').textContent = S.wordsPer;
   $('burnToggle').checked = S.burn;
@@ -419,7 +450,7 @@ function renderCapList() {
     list.appendChild(row);
   });
 }
-function syncAll() { syncTrim(); syncPauses(); syncLength(); syncSubs(); syncStyle(); }
+function syncAll() { syncTrim(); syncPauses(); syncLength(); syncSubs(); syncStyle(); syncHook(); }
 
 const nowT = () => video.currentTime;
 $('trimStart').addEventListener('input', e => {
@@ -448,7 +479,38 @@ $('accurateToggle').onchange = e => { S.accurate = e.target.checked; persist(); 
 $('gpuToggle').onchange = e => { S.gpu = e.target.checked; persist(); };
 for (const b of $('layoutSeg').children) b.onclick = () => { S.layout = b.dataset.v; persist(); syncStyle(); };
 $('size').oninput = e => { S.size = +e.target.value; persist(); $('sizeOut').textContent = `${Math.round(S.size / 0.075 * 100)}%`; };
-$('pos').oninput = e => { S.pos = +e.target.value; persist(); $('posOut').textContent = `${Math.round(S.pos * 100)}%`; };
+$('pos').oninput = e => { S.pos = +e.target.value; persist(); syncPos(); };
+const PRESETS = { top: 0.8, middle: 0.5, bottom: 0.3 };
+function setDrag(on) {
+  S.dragMode = on;
+  $('stage').classList.toggle('dragging', on);
+  $('dragHint').classList.toggle('hidden', !on);
+  $('dragDone').classList.toggle('hidden', !on);
+  if (on) { video.pause(); $('stage').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  syncStyle();
+}
+$('dragDone').onclick = () => setDrag(false);
+for (const b of $('posSeg').children) b.onclick = () => {
+  const v = b.dataset.v;
+  if (v === 'drag') { setDrag(!S.dragMode); return; }
+  S.pos = PRESETS[v]; S.posX = 0.5; persist(); setDrag(false);
+};
+// Drag on the video to place the subtitles (center of the text follows the finger).
+let dragging = false;
+const placeAt = (e) => {
+  const r = overlay.getBoundingClientRect();
+  S.posX = Math.min(0.85, Math.max(0.15, (e.clientX - r.left) / r.width));
+  S.pos = Math.min(0.92, Math.max(0.08, 1 - (e.clientY - r.top) / r.height));
+  $('pos').value = S.pos; syncPos();
+};
+overlay.addEventListener('pointerdown', (e) => { if (!S.dragMode) return; dragging = true; overlay.setPointerCapture(e.pointerId); placeAt(e); });
+overlay.addEventListener('pointermove', (e) => { if (dragging) placeAt(e); });
+const endDrag = () => { if (dragging) { dragging = false; persist(); } };
+overlay.addEventListener('pointerup', endDrag);
+overlay.addEventListener('pointercancel', endDrag);
+$('animToggle').onchange = e => { S.anim = e.target.checked; persist(); };
+$('hook').oninput = e => { S.hook = e.target.value; dirty(); };
+$('hookSecs').oninput = e => { S.hookSecs = +e.target.value; persist(); syncHook(); };
 $('boxToggle').onchange = e => { S.box = e.target.checked; persist(); };
 $('hlToggle').onchange = e => { S.highlight = e.target.checked; persist(); };
 $('capsToggle').onchange = e => { S.caps = e.target.checked; persist(); };
@@ -517,7 +579,7 @@ async function exportVideo() {
   video.pause();
   for (const id of ['shareVideo', 'dlVideo', 'shareSrt', 'dlSrt', 'srtNote']) $(id).classList.add('hidden');
   try {
-    await document.fonts.load(`800 40px ${FONT}`).catch(() => {});
+    await document.fonts.load(fontCss(S.font, 40)).catch(() => {});
     const input = new Input({ source: new BlobSource(S.file), formats: ALL_FORMATS });
     const vTrack = await input.getPrimaryVideoTrack();
     const aTrack = await input.getPrimaryAudioTrack();
@@ -542,6 +604,7 @@ async function exportVideo() {
     const total = ranges.reduce((a, r) => a + r.end - r.start, 0);
     const caps = S.burn ? S.captions.filter(c => c.text.trim()) : [];
     const st0 = style();
+    const hook = S.hook.trim() ? S.hook : '';
 
     const doVideo = async () => {
       const sink = new CanvasSink(vTrack, { width: W, height: H, fit: 'fill' });
@@ -555,6 +618,7 @@ async function exportVideo() {
           if (outT <= lastOut) continue;
           ctx.drawImage(f.canvas, 0, 0, W, H);
           if (caps.length) drawCaptions(ctx, W, H, srcT, blocksAt(srcT, caps, S.layout, S.primary), st0);
+          if (hook && outT < S.hookSecs) drawHook(ctx, W, H, hook, outT, st0);
           const dur = Math.min(f.duration, r.end - srcT);
           await vSource.add(outT, dur > 0 ? dur : 1 / fps);
           lastOut = outT;
@@ -631,5 +695,5 @@ $('shareSrt').onclick = () => share(S.srtBlob, 'subtitles.srt', 'text/plain');
 
 window.__editor = S; // handy for debugging in the console
 fillLangSelects();
-document.fonts.load(`800 40px ${FONT}`).catch(() => {});
+for (const k of Object.keys(FONTS)) document.fonts.load(fontCss(k, 40)).catch(() => {});
 showProjects();

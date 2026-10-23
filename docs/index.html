@@ -13,7 +13,7 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link crossorigin="anonymous" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<link crossorigin="anonymous" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Anton&family=Nunito:wght@900&display=swap" rel="stylesheet">
 <script src="coi.js"></script>
 <style>
 :root {
@@ -115,7 +115,8 @@ summary::after { content: "+"; color: var(--muted); }
 details[open] summary::after { content: "−"; }
 summary .hint { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: auto; margin-right: 10px; }
 .area { width: 100%; min-height: 7em; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; resize: vertical; line-height: 1.4; }
-.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; touch-action: none; }
+.stage.dragging canvas { pointer-events: auto; cursor: grab; }
 .cap-row { grid-template-columns: 1fr; gap: 6px; }
 .cap-row .top { display: flex; align-items: center; gap: 8px; }
 .cap-row .t { padding-top: 0; width: auto; }
@@ -152,6 +153,7 @@ summary .hint { color: var(--muted); font-weight: 400; font-size: 14px; margin-l
     <div class="stage" id="stage">
       <video id="video" playsinline controls preload="metadata"></video>
       <canvas id="overlay"></canvas>
+      <button class="btn primary hidden" id="dragDone" style="position:absolute;top:10px;left:50%;transform:translateX(-50%);padding:8px 16px">Done placing</button>
     </div>
     <div class="timebar"><span id="tNow">0:00.0</span><span id="saved" class="saved"></span><span id="tLen"></span></div>
 
@@ -218,13 +220,28 @@ summary .hint { color: var(--muted); font-weight: 400; font-size: 14px; margin-l
       <div class="row" id="c2Row"><span id="c2Label"></span><div class="swatches" id="c2"></div></div>
       <div class="stack"><div class="head"><span>Text size</span><output id="sizeOut"></output></div>
         <input type="range" id="size" min="0.05" max="0.11" step="0.005"></div>
-      <div class="stack"><div class="head"><span>Height on screen</span><output id="posOut"></output></div>
-        <input type="range" id="pos" min="0.12" max="0.85" step="0.01"></div>
+      <div class="stack"><div class="head"><span>Position</span><output id="posOut"></output></div>
+        <div class="seg" id="posSeg" role="group" aria-label="Position">
+          <button data-v="top">Top</button><button data-v="middle">Middle</button><button data-v="bottom">Bottom</button><button data-v="drag">Drag</button>
+        </div>
+        <p class="muted hidden" id="dragHint" style="margin-top:6px">Drag on the video to place the subtitles. Red areas are covered by YouTube’s buttons and text. Tap “Done placing” when finished.</p>
+        <input type="range" id="pos" min="0.08" max="0.92" step="0.01" aria-label="Height on screen"></div>
+      <div class="stack"><div class="head"><span>Font</span></div>
+        <div class="seg" id="fontSeg" role="group" aria-label="Font"></div></div>
       <div class="row"><label for="boxToggle">Dark box behind text</label><input type="checkbox" class="switch" id="boxToggle"></div>
       <div class="row"><label for="hlToggle">Highlight the spoken word</label><input type="checkbox" class="switch" id="hlToggle"></div>
+      <div class="row"><label for="animToggle">Pop-in animation</label><input type="checkbox" class="switch" id="animToggle"></div>
       <div class="row"><label for="capsToggle">All caps</label><input type="checkbox" class="switch" id="capsToggle"></div>
       <div class="row"><span>Words per line</span>
         <div style="display:flex;gap:6px;align-items:center"><button class="btn" id="wpMinus" aria-label="Fewer words">−</button><output id="wpOut" style="min-width:1.5em;text-align:center"></output><button class="btn" id="wpPlus" aria-label="More words">+</button></div></div>
+    </section>
+
+    <section>
+      <h2>Opening title</h2>
+      <p class="muted">A short hook shown at the top for the first seconds, like “3 words for nature 🌲”. Leave empty for none.</p>
+      <textarea class="area" id="hook" style="min-height:4em;margin-top:10px" placeholder="3 German words for nature"></textarea>
+      <div class="stack"><div class="head"><span>Show for</span><output id="hookSecsOut"></output></div>
+        <input type="range" id="hookSecs" min="1" max="8" step="0.5"></div>
     </section>
 
     <section id="linesBox" class="hidden">
