@@ -24,8 +24,7 @@ enum SpeechModel: String, CaseIterable, Identifiable {
 final class Transcriber {
     static let shared = Transcriber()
 
-    private var kit: WhisperKit?
-    private var loadedModel: SpeechModel?
+    private var kits: [SpeechModel: WhisperKit] = [:]
 
     /// Margin the second language must win by (Whisper avg log-prob). Keeps the main language as default.
     private let switchMargin: Float = 0.15
@@ -49,10 +48,7 @@ final class Transcriber {
     }
 
     private func prepare(_ model: SpeechModel, status: @escaping (String) -> Void) async throws -> WhisperKit {
-        if let kit, loadedModel == model { return kit }
-        kit = nil
-        loadedModel = nil
-
+        if let kit = kits[model] { return kit }
         let folder: String
         if isDownloaded(model), let saved = UserDefaults.standard.string(forKey: folderKey(model)) {
             folder = saved
@@ -65,20 +61,22 @@ final class Transcriber {
             folder = url.path
             UserDefaults.standard.set(folder, forKey: folderKey(model))
         }
-
         status("Loading speech model… (first time takes a minute)")
         let config = WhisperKitConfig(modelFolder: folder, verbose: false, logLevel: .error,
                                       prewarm: true, load: true, download: false)
         let newKit = try await WhisperKit(config)
-        kit = newKit
-        loadedModel = model
+        kits[model] = newKit
         return newKit
     }
 
     // MARK: Transcription
 
     /// Returns words (original-video time) tagged with their language.
+    /// - accurateSecondary: re-listen to second-language phrases with the Best model.
+    /// - glossary: "der Wald – orman" lines; used as a hint and to correct look-alike words.
+    /// - script: the user's own text; when given, only its timing is taken from the audio.
     func transcribe(videoURL: URL, primary: String, secondary: String?, model: SpeechModel,
+                    accurateSecondary: Bool = false, glossary: String = "", script: String = "",
                     status: @escaping (String) -> Void) async throws -> [Word] {
         let samples = try await Task.detached(priority: .userInitiated) {
             try await AudioLoader.samples(url: videoURL)
@@ -86,56 +84,89 @@ final class Transcriber {
         guard !samples.isEmpty else { return [] }
 
         let kit = try await prepare(model, status: status)
+        let terms = TextTools.parseGlossary(glossary)
 
         status("Listening in \(Self.displayName(primary))…")
         let main = try await kit.transcribe(audioArray: samples, decodeOptions: Self.options(primary))
         var words = Self.words(from: main, offset: 0, lang: primary)
 
-        guard let secondary, !secondary.isEmpty, secondary != primary, !words.isEmpty else { return words }
-
-        status("Looking for \(Self.displayName(secondary)) words…")
-        let phrases = Self.phrases(words)
-        let sampleRate = Double(WhisperKit.sampleRate)
-        let clips: [(start: Double, end: Double, audio: [Float])] = phrases.map { p in
-            let s = max(0, p.first!.start - 0.15)
-            let e = min(Double(samples.count) / sampleRate, p.last!.end + 0.15)
-            let a = min(Int(s * sampleRate), samples.count - 1)
-            let b = max(a + 1, min(samples.count, Int(e * sampleRate)))
-            return (s, e, Array(samples[a..<b]))
-        }
-        let audios = clips.map(\.audio)
-        let asSecondary = await kit.transcribe(audioArrays: audios, decodeOptions: Self.options(secondary, workers: 4))
-        let asPrimary = await kit.transcribe(audioArrays: audios, decodeOptions: Self.options(primary, workers: 4))
-
-        words = []
-        for (i, phrase) in phrases.enumerated() {
-            let sec = asSecondary[i] ?? []
-            let pri = asPrimary[i] ?? []
-            let secText = sec.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
-            if !secText.isEmpty, let ss = Self.score(sec), ss > (Self.score(pri) ?? -.infinity) + switchMargin {
-                var replaced = Self.words(from: sec, offset: clips[i].start, lang: secondary)
-                    .map { w -> Word in
-                        var w = w
-                        w.start = min(max(w.start, clips[i].start), clips[i].end)
-                        w.end = min(max(w.end, w.start), clips[i].end)
-                        return w
-                    }
-                if replaced.isEmpty {
-                    replaced = [Word(text: secText, start: phrase.first!.start, end: phrase.last!.end, lang: secondary)]
-                }
-                words += replaced
-            } else {
-                words += phrase
+        if let secondary, !secondary.isEmpty, secondary != primary, !words.isEmpty {
+            status("Looking for \(Self.displayName(secondary)) words…")
+            let phrases = Self.phrases(words)
+            let sampleRate = Double(WhisperKit.sampleRate)
+            let duration = Double(samples.count) / sampleRate
+            let clips: [(start: Double, end: Double, audio: [Float])] = phrases.enumerated().map { i, p in
+                // Pad a little, but never into the neighbouring phrases.
+                let prevEnd = i > 0 ? phrases[i - 1].last!.end : 0
+                let nextStart = i + 1 < phrases.count ? phrases[i + 1].first!.start : duration
+                let s = max(0, prevEnd, p.first!.start - 0.15)
+                let e = min(duration, nextStart, p.last!.end + 0.15)
+                let a = min(Int(s * sampleRate), samples.count - 1)
+                let b = max(a + 1, min(samples.count, Int(e * sampleRate)))
+                return (s, e, Array(samples[a..<b]))
             }
+            let audios = clips.map(\.audio)
+            let asSecondary = await kit.transcribe(audioArrays: audios, decodeOptions: Self.options(secondary, workers: 4))
+            let asPrimary = await kit.transcribe(audioArrays: audios, decodeOptions: Self.options(primary, workers: 4))
+
+            var switched: [Int] = []
+            var perPhrase: [[Word]] = phrases
+            for i in phrases.indices {
+                let sec = asSecondary[i] ?? []
+                let pri = asPrimary[i] ?? []
+                let secText = sec.map(\.text).joined().trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !secText.isEmpty, let ss = Self.score(sec), ss > (Self.score(pri) ?? -.infinity) + switchMargin else { continue }
+                perPhrase[i] = Self.clamped(Self.words(from: sec, offset: clips[i].start, lang: secondary), clips[i])
+                if perPhrase[i].isEmpty {
+                    perPhrase[i] = [Word(text: secText, start: phrases[i].first!.start, end: phrases[i].last!.end, lang: secondary)]
+                }
+                switched.append(i)
+            }
+
+            // Second pass on the second-language phrases: bigger model and/or the word list as a hint.
+            let useBest = accurateSecondary && model != .best
+            if !switched.isEmpty && (useBest || !terms.secondary.isEmpty) {
+                let fixKit: WhisperKit
+                if useBest { fixKit = try await prepare(.best, status: status) } else { fixKit = kit }
+                status("Polishing \(Self.displayName(secondary)) words…")
+                var prompt: [Int]? = nil
+                if !terms.secondary.isEmpty, let tok = fixKit.tokenizer {
+                    prompt = tok.encode(text: " " + terms.secondary.joined(separator: ", "))
+                        .filter { $0 < tok.specialTokens.specialTokenBegin }
+                }
+                let redo = await fixKit.transcribe(audioArrays: switched.map { clips[$0].audio },
+                                                   decodeOptions: Self.options(secondary, workers: 4, prompt: prompt))
+                for (k, i) in switched.enumerated() {
+                    let w = Self.clamped(Self.words(from: redo[k] ?? [], offset: clips[i].start, lang: secondary), clips[i])
+                    if !w.isEmpty { perPhrase[i] = w }
+                }
+            }
+            for i in switched { perPhrase[i] = TextTools.snap(perPhrase[i], to: terms.secondary, lang: secondary) }
+            words = perPhrase.flatMap { $0 }.sorted { $0.start < $1.start }
+        } else if !terms.primary.isEmpty {
+            words = TextTools.snap(words, to: terms.primary + terms.secondary, lang: primary)
         }
-        return words.sorted { $0.start < $1.start }
+
+        if !script.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            words = TextTools.alignScript(script, words: words, primary: primary, secondary: secondary ?? "")
+        }
+        return words
     }
 
-    private static func options(_ lang: String, workers: Int? = nil) -> DecodingOptions {
+    private static func clamped(_ words: [Word], _ clip: (start: Double, end: Double, audio: [Float])) -> [Word] {
+        words.map { w in
+            var w = w
+            w.start = min(max(w.start, clip.start), clip.end)
+            w.end = min(max(w.end, w.start), clip.end)
+            return w
+        }
+    }
+
+    private static func options(_ lang: String, workers: Int? = nil, prompt: [Int]? = nil) -> DecodingOptions {
         DecodingOptions(task: .transcribe, language: lang, temperature: 0,
                         usePrefillPrompt: true, detectLanguage: false,
                         skipSpecialTokens: true, wordTimestamps: true,
-                        concurrentWorkerCount: workers)
+                        promptTokens: prompt, concurrentWorkerCount: workers)
     }
 
     /// Average confidence of a result (higher = better), weighted by text length.
@@ -242,7 +273,8 @@ enum CaptionBuilder {
             guard let first = current.first, let last = current.last else { return }
             captions.append(Caption(start: first.start, end: last.end,
                                     text: current.map(\.text).joined(separator: " "),
-                                    lang: first.lang))
+                                    lang: first.lang,
+                                    words: current.map { TimedWord(text: $0.text, start: $0.start, end: $0.end) }))
             current.removeAll()
         }
 
@@ -250,7 +282,7 @@ enum CaptionBuilder {
             if let last = current.last,
                w.lang != last.lang || w.start - last.end > 0.6 || current.count >= maxWords { flush() }
             current.append(w)
-            if let ch = w.text.last, ".!?,;:".contains(ch) { flush() }
+            if w.lineEnd || (w.text.last.map { ".!?,;:".contains($0) } ?? false) { flush() }
         }
         flush()
 

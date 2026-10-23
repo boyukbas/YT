@@ -1,25 +1,46 @@
 import Foundation
 
-struct TimeRange: Hashable, Identifiable {
+struct TimeRange: Hashable, Identifiable, Codable {
     var start: Double
     var end: Double
     var id: String { "\(start)-\(end)" }
     var duration: Double { max(0, end - start) }
 }
 
-struct Word: Hashable {
+struct Word: Hashable, Codable {
     var text: String
     var start: Double
     var end: Double
     var lang: String          // Whisper language code, e.g. "de", "tr"
+    var lineEnd = false       // last word of a line in the user's script
 }
 
-struct Caption: Identifiable, Hashable {
+/// A word inside a caption, with its own timing (for highlighting the spoken word).
+struct TimedWord: Hashable, Codable {
+    var text: String
+    var start: Double
+    var end: Double
+}
+
+struct Caption: Identifiable, Hashable, Codable {
     var id = UUID()
     var start: Double
     var end: Double
     var text: String
     var lang: String          // decides the caption's color
+    var words: [TimedWord] = []
+
+    /// Word timings that still fit the (possibly edited) text; spread evenly if the word count changed.
+    var timedWords: [TimedWord] {
+        let parts = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        if words.count == parts.count {
+            return zip(parts, words).map { TimedWord(text: $0, start: $1.start, end: $1.end) }
+        }
+        let step = (end - start) / Double(max(1, parts.count))
+        return parts.enumerated().map { i, p in
+            TimedWord(text: p, start: start + step * Double(i), end: start + step * Double(i + 1))
+        }
+    }
 }
 
 /// Maps times between the original video and the edited (cut) video.

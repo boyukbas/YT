@@ -285,7 +285,8 @@ export function alignScript(script, words, primary, secondary) {
   const score = Array.from({ length: S + 1 }, () => new Float32Array(R + 1));
   const move = Array.from({ length: S + 1 }, () => new Uint8Array(R + 1)); // 1 diag, 2 up, 3 left
   for (let i = 1; i <= S; i++) { score[i][0] = i * GAP; move[i][0] = 2; }
-  for (let j = 1; j <= R; j++) { score[0][j] = j * GAP; move[0][j] = 3; }
+  // Skipping recognized words before/after the script is free (the script may cover only part).
+  for (let j = 1; j <= R; j++) { score[0][j] = 0; move[0][j] = 3; }
   for (let i = 1; i <= S; i++) {
     for (let j = 1; j <= R; j++) {
       const s = sim[i - 1][j - 1];
@@ -297,7 +298,9 @@ export function alignScript(script, words, primary, secondary) {
     }
   }
   const match = new Array(S).fill(-1);
-  for (let i = S, j = R; i > 0 || j > 0;) {
+  let bestJ = 0;
+  for (let j = 1; j <= R; j++) if (score[S][j] > score[S][bestJ]) bestJ = j;
+  for (let i = S, j = bestJ; i > 0 || j > 0;) {
     const m = move[i][j];
     if (m === 1) { if (sim[i - 1][j - 1] >= 0.5) match[i - 1] = j - 1; i--; j--; }
     else if (m === 2) i--;

@@ -48,25 +48,16 @@ enum CompositionBuilder {
     }
 }
 
-struct CaptionStyle {
-    var primaryLang: String
-    var primaryColor: UIColor
-    var secondaryColor: UIColor
-    var position: Double   // 0 = bottom edge, 1 = top edge
-
-    func color(for lang: String) -> UIColor { lang == primaryLang ? primaryColor : secondaryColor }
-}
-
 enum VideoExporter {
     @MainActor
-    static func export(sourceURL: URL, kept: [TimeRange], captions: [Caption], style: CaptionStyle) async throws -> URL {
+    static func export(sourceURL: URL, kept: [TimeRange], captions: [Caption], look: CaptionLook) async throws -> URL {
         let built = try await CompositionBuilder.build(sourceURL: sourceURL, kept: kept)
         guard let session = AVAssetExportSession(asset: built.composition,
                                                  presetName: AVAssetExportPresetHighestQuality) else {
             throw EditorError.exportFailed
         }
         if !captions.isEmpty {
-            session.videoComposition = captionComposition(built: built, captions: captions, style: style)
+            session.videoComposition = captionComposition(built: built, captions: captions, look: look)
         }
         let out = FileManager.default.temporaryDirectory
             .appendingPathComponent("short-\(UUID().uuidString.prefix(8)).mp4")
@@ -76,7 +67,7 @@ enum VideoExporter {
 
     @MainActor
     private static func captionComposition(built: BuiltComposition, captions: [Caption],
-                                           style: CaptionStyle) -> AVMutableVideoComposition? {
+                                           look: CaptionLook) -> AVMutableVideoComposition? {
         guard let track = built.videoTrack else { return nil }
         let total = built.composition.duration.seconds
         guard total > 0 else { return nil }
@@ -103,57 +94,46 @@ enum VideoExporter {
         let videoLayer = CALayer()
         videoLayer.frame = parent.frame
         parent.addSublayer(videoLayer)
-        for c in captions {
-            if let layer = captionLayer(c, renderSize: renderSize, total: total, style: style) {
-                parent.addSublayer(layer)
-            }
+        // One image per distinct subtitle picture, shown during each stretch where it applies.
+        let segments = CaptionRenderer.segments(captions, total: total, look: look)
+        var groups: [String: (blocks: [Caption], t: Double, ranges: [(Double, Double)])] = [:]
+        var order: [String] = []
+        for s in segments {
+            if groups[s.key] == nil { groups[s.key] = (s.blocks, s.t, []); order.append(s.key) }
+            groups[s.key]!.ranges.append((s.start, s.end))
+        }
+        for key in order {
+            guard let g = groups[key],
+                  let r = CaptionRenderer.render(g.blocks, at: g.t, canvas: renderSize, look: look),
+                  let cg = r.image.cgImage else { continue }
+            parent.addSublayer(timedLayer(cg, frame: r.frame, renderSize: renderSize, ranges: g.ranges, total: total))
         }
         vc.animationTool = AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, in: parent)
         return vc
     }
 
-    /// Renders one caption as a bitmap (bold text with black outline) that is only visible during its time.
+    /// A layer that is visible only during the given time ranges (output time, seconds).
     @MainActor
-    private static func captionLayer(_ c: Caption, renderSize: CGSize, total: Double, style: CaptionStyle) -> CALayer? {
-        let fontSize = renderSize.width * 0.075
-        let maxWidth = renderSize.width * 0.86
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
-        let font = UIFont.systemFont(ofSize: fontSize, weight: .heavy)
-
-        let fill = NSAttributedString(string: c.text, attributes: [
-            .font: font, .foregroundColor: style.color(for: c.lang), .paragraphStyle: paragraph])
-        let outline = NSAttributedString(string: c.text, attributes: [
-            .font: font, .foregroundColor: UIColor.clear, .strokeColor: UIColor.black,
-            .strokeWidth: 14.0, .paragraphStyle: paragraph])
-
-        let options: NSStringDrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
-        let textHeight = ceil(fill.boundingRect(with: CGSize(width: maxWidth, height: .greatestFiniteMagnitude),
-                                                options: options, context: nil).height)
-        let pad = fontSize * 0.25
-        let size = CGSize(width: maxWidth + pad * 2, height: textHeight + pad * 2)
-
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = false
-        let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            let r = CGRect(x: pad, y: pad, width: maxWidth, height: textHeight)
-            outline.draw(with: r, options: options, context: nil)
-            fill.draw(with: r, options: options, context: nil)
-        }
-        guard let cg = image.cgImage else { return nil }
-
+    private static func timedLayer(_ image: CGImage, frame: CGRect, renderSize: CGSize,
+                                   ranges: [(Double, Double)], total: Double) -> CALayer {
         let layer = CALayer()
-        layer.contents = cg
-        layer.frame = CGRect(x: (renderSize.width - size.width) / 2,
-                             y: renderSize.height * style.position - size.height / 2,
-                             width: size.width, height: size.height)
+        layer.contents = image
+        // Core Animation here has its origin at the bottom-left.
+        layer.frame = CGRect(x: frame.minX, y: renderSize.height - frame.maxY, width: frame.width, height: frame.height)
         layer.opacity = 0
 
+        var keyTimes: [Double] = [0], values: [Float] = []
+        var cursor = 0.0
+        for (a, b) in ranges.sorted(by: { $0.0 < $1.0 }) {
+            if a > cursor + 1e-6 { values.append(0); keyTimes.append(a) }
+            values.append(1); keyTimes.append(b)
+            cursor = b
+        }
+        if cursor < total - 1e-6 { values.append(0); keyTimes.append(total) }
+
         let anim = CAKeyframeAnimation(keyPath: "opacity")
-        anim.values = [0.0, 1.0, 0.0]
-        anim.keyTimes = [NSNumber(value: 0.0), NSNumber(value: c.start / total),
-                         NSNumber(value: c.end / total), NSNumber(value: 1.0)]
+        anim.values = values
+        anim.keyTimes = keyTimes.map { NSNumber(value: min(1, $0 / total)) }
         anim.calculationMode = .discrete
         anim.beginTime = AVCoreAnimationBeginTimeAtZero
         anim.duration = total

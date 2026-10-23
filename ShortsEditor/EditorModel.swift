@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import SwiftUI
 
 enum CaptionColor: String, CaseIterable, Identifiable {
@@ -21,6 +22,9 @@ enum CaptionColor: String, CaseIterable, Identifiable {
 private enum Saved {
     static func string(_ key: String, _ fallback: String) -> String { UserDefaults.standard.string(forKey: key) ?? fallback }
     static func set(_ value: String, _ key: String) { UserDefaults.standard.set(value, forKey: key) }
+    static func bool(_ key: String, _ fallback: Bool) -> Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? fallback }
+    static func double(_ key: String, _ fallback: Double) -> Double { UserDefaults.standard.object(forKey: key) as? Double ?? fallback }
+    static func set(_ value: Any, key: String) { UserDefaults.standard.set(value, forKey: key) }
 }
 
 @MainActor
@@ -56,7 +60,16 @@ final class EditorModel: ObservableObject {
     @Published var secondaryColor = CaptionColor(rawValue: Saved.string("secondaryColor", "")) ?? .yellow {
         didSet { Saved.set(secondaryColor.rawValue, "secondaryColor") }
     }
-    @Published var captionPosition = 0.35
+    @Published var captionPosition = Saved.double("captionPosition", 0.35) { didSet { Saved.set(captionPosition, key: "captionPosition") } }
+    @Published var textSize = Saved.double("textSize", 0.075) { didSet { Saved.set(textSize, key: "textSize") } }
+    @Published var boxBehind = Saved.bool("boxBehind", false) { didSet { Saved.set(boxBehind, key: "boxBehind") } }
+    @Published var highlightWords = Saved.bool("highlightWords", false) { didSet { Saved.set(highlightWords, key: "highlightWords") } }
+    @Published var layout = CaptionLayout(rawValue: Saved.string("layout", "single")) ?? .single {
+        didSet { Saved.set(layout.rawValue, "layout") }
+    }
+    @Published var accurateSecondary = Saved.bool("accurateSecondary", false) { didSet { Saved.set(accurateSecondary, key: "accurateSecondary") } }
+    @Published var script = ""
+    @Published var glossary = ""
     @Published var burnCaptions = true
     @Published private(set) var previewCaptions: [Caption] = []  // edited-video time
 
@@ -68,15 +81,88 @@ final class EditorModel: ObservableObject {
     @Published private(set) var srtURL: URL?
     @Published private(set) var lastExportURL: URL?
 
+    // Projects
+    @Published private(set) var projects: [Project] = []
+    @Published private(set) var projectName = ""
+    private var projectID: String?
+    private var saveCancellable: AnyCancellable?
+    @Published private(set) var videoSize = CGSize(width: 9, height: 16)
+
     let player = AVPlayer()
     private var words: [Word] = []
     private var levels: [Float] = []
     private var previewMap = TimelineMap(kept: [])
 
     init() {
-        _ = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 10), queue: .main) { [weak self] time in
+        _ = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 15), queue: .main) { [weak self] time in
             MainActor.assumeIsolated { self?.currentOutputTime = time.seconds }
         }
+        projects = ProjectStore.list()
+        // Autosave a moment after edits stop.
+        saveCancellable = objectWillChange
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.saveProject() } }
+    }
+
+    // MARK: Projects
+
+    private func saveProject() {
+        guard let id = projectID, let url = sourceURL, !isBusy else { return }
+        ProjectStore.save(Project(
+            id: id, name: projectName, updated: Date(), videoFile: url.lastPathComponent, duration: duration,
+            trimStart: trimStart, trimEnd: trimEnd, manualCuts: manualCuts, removeSilence: removeSilence,
+            thresholdDB: silenceSettings.thresholdDB, words: words, captions: captions, script: script, glossary: glossary))
+    }
+
+    func refreshProjects() { projects = ProjectStore.list() }
+
+    func closeProject() {
+        saveProject()
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        sourceURL = nil
+        projectID = nil
+        refreshProjects()
+    }
+
+    func deleteProject(_ p: Project) {
+        ProjectStore.delete(p.id)
+        refreshProjects()
+    }
+
+    /// A newly picked video becomes a new project.
+    func startProject(with pickedURL: URL, name: String) async {
+        let id = UUID().uuidString
+        do {
+            let url = try ProjectStore.adopt(videoAt: pickedURL, id: id)
+            projectID = id
+            projectName = name
+            script = ""; glossary = ""
+            await load(url)
+            saveProject()
+            ProjectStore.pruneOld()
+            refreshProjects()
+        } catch {
+            status = "Couldn't save the video: \(error.localizedDescription)"
+        }
+    }
+
+    func openProject(_ p: Project) async {
+        projectID = p.id
+        projectName = p.name
+        await load(ProjectStore.videoURL(p), restoring: p)
+    }
+
+    var captionLook: CaptionLook {
+        CaptionLook(primaryLang: primaryLang, primaryColor: primaryColor.uiColor, secondaryColor: secondaryColor.uiColor,
+                    position: captionPosition, size: textSize, box: boxBehind, highlight: highlightWords, layout: layout)
+    }
+
+    /// The subtitle picture for the preview, drawn exactly like the export.
+    func previewOverlay(canvas: CGSize, scale: CGFloat) -> (image: UIImage, frame: CGRect)? {
+        let look = captionLook
+        let blocks = CaptionRenderer.blocks(at: currentOutputTime, in: previewCaptions, look: look)
+        return CaptionRenderer.render(blocks, at: currentOutputTime, canvas: canvas, look: look, scale: scale)
     }
 
     var keptRanges: [TimeRange] {
@@ -91,24 +177,21 @@ final class EditorModel: ObservableObject {
 
     func color(for lang: String) -> CaptionColor { lang == primaryLang ? primaryColor : secondaryColor }
 
-    var captionStyle: CaptionStyle {
-        CaptionStyle(primaryLang: primaryLang, primaryColor: primaryColor.uiColor,
-                     secondaryColor: secondaryColor.uiColor, position: captionPosition)
-    }
-
-    var currentCaption: Caption? {
-        previewCaptions.first { currentOutputTime >= $0.start && currentOutputTime < $0.end }
-    }
-
     var playheadSourceTime: Double { previewMap.toSource(currentOutputTime) }
 
     // MARK: Loading
 
-    func load(_ url: URL) async {
+    func load(_ url: URL, restoring project: Project? = nil) async {
         isBusy = true
         status = "Analyzing audio…"
         player.pause()
-        duration = (try? await AVURLAsset(url: url).load(.duration))?.seconds ?? 0
+        let asset = AVURLAsset(url: url)
+        duration = (try? await asset.load(.duration))?.seconds ?? 0
+        if let track = try? await asset.loadTracks(withMediaType: .video).first,
+           let loaded = try? await track.load(.naturalSize, .preferredTransform) {
+            let r = CGRect(origin: .zero, size: loaded.0).applying(loaded.1)
+            videoSize = CGSize(width: abs(r.width), height: abs(r.height))
+        }
         sourceURL = url
         trimStart = 0
         trimEnd = duration
@@ -127,6 +210,11 @@ final class EditorModel: ObservableObject {
         }.value) ?? []
         if let auto = SilenceDetector.suggestedThreshold(levels: levels) {
             silenceSettings.thresholdDB = auto
+        }
+        if let p = project {
+            trimStart = p.trimStart; trimEnd = p.trimEnd; manualCuts = p.manualCuts
+            removeSilence = p.removeSilence; silenceSettings.thresholdDB = p.thresholdDB
+            words = p.words; captions = p.captions; script = p.script; glossary = p.glossary
         }
         recomputeSilences()
         await rebuildPreview()
@@ -214,6 +302,7 @@ final class EditorModel: ObservableObject {
             let second = secondaryLang == primaryLang ? "" : secondaryLang
             words = try await Transcriber.shared.transcribe(
                 videoURL: url, primary: primaryLang, secondary: second, model: speechModel,
+                accurateSecondary: accurateSecondary, glossary: glossary, script: script,
                 status: { [weak self] in self?.status = $0 })
             rebuildCaptions()
             status = words.isEmpty ? "No speech found in this video." : nil
@@ -234,7 +323,8 @@ final class EditorModel: ObservableObject {
             let e = previewMap.toOutput(c.end)
             let text = c.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard e - s > 0.05, !text.isEmpty else { return nil }
-            return Caption(id: c.id, start: s, end: e, text: text, lang: c.lang)
+            let timed = c.words.map { TimedWord(text: $0.text, start: previewMap.toOutput($0.start), end: previewMap.toOutput($0.end)) }
+            return Caption(id: c.id, start: s, end: e, text: text, lang: c.lang, words: timed)
         }
         // Locale-aware caps: Turkish "i" -> "İ", German "ß" -> "SS".
         previewCaptions = uppercase
@@ -265,7 +355,7 @@ final class EditorModel: ObservableObject {
         do {
             let out = try await VideoExporter.export(sourceURL: url, kept: keptRanges,
                                                      captions: burnCaptions ? previewCaptions : [],
-                                                     style: captionStyle)
+                                                     look: captionLook)
             lastExportURL = out
             try await PhotoSaver.save(videoAt: out)
             status = "Saved to Photos ✅"
