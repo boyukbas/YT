@@ -2,7 +2,7 @@ import {
   Input, Output, BlobSource, BufferTarget, Mp4OutputFormat, ALL_FORMATS,
   CanvasSink, AudioBufferSink, CanvasSource, AudioBufferSource, QUALITY_HIGH,
   getFirstEncodableVideoCodec, getFirstEncodableAudioCodec,
-} from 'https://cdn.jsdelivr.net/npm/mediabunny@1.61.3/dist/bundles/mediabunny.min.mjs';
+} from './lib/mediabunny.min.mjs';
 import { LANGS, SR, buildCaptions, toSRT } from './core.js';
 import { blocksAt, drawCaptions, FONT } from './render.js';
 import { saveFile, saveProject, listProjects, loadProject, deleteProject } from './store.js';
