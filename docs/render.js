@@ -43,12 +43,18 @@ function pairsOf(caps) {
   const key = caps.map(c => `${c.lang}${c.start}${c.end}`).join('|');
   const hit = pairCache.get(caps);
   if (hit && hit.key === key) return hit.map;
+  // Candidates: neighbours in different languages. The tightest links win, so a word and its
+  // translation (said right after it) pair up before an explanation and the next new word do.
+  const cands = [];
+  for (let i = 0; i + 1 < caps.length; i++) {
+    const a = caps[i], b = caps[i + 1], gap = b.start - a.end;
+    if (a.lang !== b.lang && gap <= PAIR_GAP && a.text.trim() && b.text.trim()) cands.push({ i, gap });
+  }
+  cands.sort((x, y) => x.gap - y.gap);
   const map = new Map();
-  for (let i = 0; i + 1 < caps.length;) {
-    const a = caps[i], b = caps[i + 1];
-    if (a.lang !== b.lang && b.start - a.end <= PAIR_GAP && a.text.trim() && b.text.trim()) {
-      map.set(i, i + 1); map.set(i + 1, i); i += 2;
-    } else i++;
+  for (const { i } of cands) {
+    if (map.has(i) || map.has(i + 1)) continue;
+    map.set(i, i + 1); map.set(i + 1, i);
   }
   pairCache.set(caps, { key, map });
   return map;
