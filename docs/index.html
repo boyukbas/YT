@@ -135,6 +135,11 @@ dialog#helpDlg { background: var(--panel); color: var(--text); border: 1px solid
 dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
 #logView { background: var(--bg); border-radius: 10px; padding: 10px; font-size: 11px; line-height: 1.35; max-height: 45svh; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 10px 0; }
 #helpBtn { padding: 10px 14px; }
+.frames { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px; }
+.frames canvas { width: 100%; border-radius: 8px; cursor: pointer; border: 3px solid transparent; }
+.frames canvas[aria-pressed="true"] { border-color: var(--amber); }
+.titleopt { text-align: left; }
+.titleopt[aria-pressed="true"] { border-color: var(--amber); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -297,16 +302,49 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
       <h2>Export</h2>
       <div class="row"><label for="burnToggle">Burn subtitles into the video</label><input type="checkbox" class="switch" id="burnToggle"></div>
       <p class="muted" id="lenWarn" style="margin-top:8px"></p>
+      <div class="stack" style="margin-top:12px"><div class="head"><span>Format</span></div>
+        <div class="seg" id="fmtSeg" role="group" aria-label="Format">
+          <button data-v="original">Original</button><button data-v="crop">Short · crop</button><button data-v="blur">Short · blur</button>
+        </div>
+        <p class="muted" style="margin-top:6px">Shorts are 9:16 (1080×1920). “Crop” cuts the sides; “blur” keeps the whole picture on a blurred background.</p>
+        <canvas id="fmtPreview" class="hidden" style="width:135px;height:240px;border-radius:12px;margin:10px auto 0;display:block;background:#000"></canvas></div>
       <button class="btn primary big" id="exportBtn" style="margin-top:12px">Export video</button>
+      <button class="btn" id="exportBoth" style="width:100%;margin-top:8px">Export both</button>
       <div class="progress hidden" id="expBar"><div></div></div>
       <p class="status" id="expStatus"></p>
       <div class="result">
-        <button class="btn hidden" id="shareVideo">Share or save video</button>
-        <a class="btn hidden" id="dlVideo" download="short.mp4" style="text-align:center;text-decoration:none">Download video</a>
+        <div id="exportList" style="display:grid;gap:10px"></div>
         <button class="btn hidden" id="shareSrt">Share subtitles (.srt)</button>
         <a class="btn hidden" id="dlSrt" download="subtitles.srt" style="text-align:center;text-decoration:none">Download .srt</a>
         <p class="muted hidden" id="srtNote">YouTube shows .srt subtitles in one color. Upload it in YouTube Studio only if you didn't burn subtitles in.</p>
       </div>
+    </section>
+    <section id="ytBox">
+      <h2>YouTube</h2>
+      <p class="muted">Thumbnail, title, description and hashtags. Upload the exported video in the YouTube app or YouTube Studio and paste these in.</p>
+      <div class="row"><span>Description language</span><select id="descLang"></select></div>
+      <button class="btn" id="findFrames" style="width:100%;margin-top:10px">Find good thumbnail frames</button>
+      <div id="frameGrid" class="frames"></div>
+      <button class="btn primary hidden" id="prepClaude" style="width:100%;margin-top:8px">Prepare with Claude: best frame, titles, description, hashtags</button>
+      <p class="status" id="ytStatus"></p>
+      <div id="thumbBox" class="hidden">
+        <div class="seg" id="thumbFmt" role="group" aria-label="Thumbnail format"><button data-v="wide">Video 16:9</button><button data-v="tall">Short 9:16</button></div>
+        <canvas id="thumbCanvas" style="width:100%;border-radius:12px;margin-top:10px;background:#000"></canvas>
+        <input class="area" id="thumbL1" placeholder="Line 1, e.g. ANMELDUNG" style="min-height:auto;margin-top:8px">
+        <input class="area" id="thumbL2" placeholder="Line 2, e.g. ikamet kaydı" style="min-height:auto;margin-top:8px">
+        <div id="thumbIdeas" class="cutlist"></div>
+        <div class="row"><label for="thumbTop">Text at the top</label><input type="checkbox" class="switch" id="thumbTop"></div>
+        <div class="pair"><button class="btn" id="thumbShare">Share or save</button><a class="btn" id="thumbDl" download="thumbnail.png" style="text-align:center;text-decoration:none">Download</a></div>
+      </div>
+      <div id="textBox" class="hidden">
+        <h3 style="margin:14px 0 6px">Title (tap to choose)</h3>
+        <div id="titleList" class="cutlist"></div>
+        <p class="muted" style="margin-top:10px">Short title</p><input class="area" id="shortTitle" style="min-height:auto">
+        <p class="muted" style="margin-top:10px">Description</p><textarea class="area" id="desc" style="min-height:10em"></textarea>
+        <p class="muted" style="margin-top:10px">Hashtags</p><textarea class="area" id="tags" style="min-height:3em"></textarea>
+        <div class="pair"><button class="btn" id="copyTitle">Copy title</button><button class="btn" id="copyDesc">Copy description + tags</button></div>
+      </div>
+      <p class="muted" style="margin-top:10px">Uploading straight from this app needs Google to review and approve the app first. Until then, upload in the YouTube app or <a href="https://studio.youtube.com" target="_blank" rel="noopener" style="color:inherit">YouTube Studio</a>.</p>
     </section>
   </div>
 </main>

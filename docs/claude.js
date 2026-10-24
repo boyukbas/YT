@@ -23,7 +23,7 @@ export function keyShape(raw) {
   };
 }
 
-async function call(key, model, system, user, maxTokens) {
+export async function call(key, model, system, user, maxTokens) {
   let res;
   try {
     res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -34,7 +34,7 @@ async function call(key, model, system, user, maxTokens) {
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true',
       },
-      body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: 'user', content: user }] }),
+      body: JSON.stringify({ model, max_tokens: maxTokens, ...(system ? { system } : {}), messages: [{ role: 'user', content: user }] }),
     });
   } catch (e) {
     throw new Error('Could not reach Claude (check the internet connection)');

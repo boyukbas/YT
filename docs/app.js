@@ -6,6 +6,7 @@ import {
 import { LANGS, SR, buildCaptions, toSRT, alignScript } from './core.js';
 import * as C from './claude.js';
 import * as O from './openai.js';
+import * as P from './publish.js';
 import { blocksAt, drawCaptions, drawHook, drawSafeZones, FONTS, fontCss } from './render.js';
 import { saveFile, saveProject, listProjects, loadProject, deleteProject } from './store.js';
 import * as L from './log.js';
@@ -18,12 +19,12 @@ const $ = (id) => document.getElementById(id);
 // ---------- Settings (remembered between visits) ----------
 const COLORS = { white: '#ffffff', yellow: '#ffd21a', cyan: '#4de6ff', green: '#73ff73', pink: '#ff80cc', orange: '#ff9e33' };
 const SETTINGS = ['primary', 'secondary', 'color1', 'color2', 'caps', 'wordsPer', 'pos', 'burn', 'removePauses',
-  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs', 'accuracy', 'claudeModel', 'claudeFast', 'claudeAuto', 'engine'];
+  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs', 'accuracy', 'claudeModel', 'claudeFast', 'claudeAuto', 'engine', 'format'];
 const saved = (() => { try { return JSON.parse(localStorage.getItem('settings') || '{}'); } catch { return {}; } })();
 const S = {
   primary: 'de', secondary: 'tr', color1: 'white', color2: 'yellow', caps: true, wordsPer: 3, pos: 0.35, burn: true,
   removePauses: true, minPause: 0.4, layout: 'single', size: 0.075, box: false, highlight: false, accurate: false, gpu: true,
-  posX: 0.5, font: 'modern', anim: false, hookSecs: 3, claudeModel: 'claude-sonnet-5-5', claudeFast: false, claudeAuto: true, engine: 'device', accuracy: saved.accurate ? 'second' : 'normal',
+  posX: 0.5, font: 'modern', anim: false, hookSecs: 3, claudeModel: 'claude-sonnet-5-5', claudeFast: false, claudeAuto: true, engine: 'device', format: 'original', accuracy: saved.accurate ? 'second' : 'normal',
   ...saved,
   // per project
   id: null, name: '', file: null, url: null, duration: 0, width: 0, height: 0,
@@ -65,7 +66,7 @@ async function saveNow() {
     await saveProject({
       id: S.id, name: S.name, updatedAt: Date.now(), duration: S.duration, width: S.width, height: S.height,
       trimStart: S.trimStart, trimEnd: S.trimEnd, cuts: S.cuts, threshold: S.threshold,
-      words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job,
+      words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job, pub: S.pub,
     });
     $('saved').textContent = 'Saved';
   } catch { $('saved').textContent = 'Not saved'; }
@@ -206,12 +207,12 @@ async function openVideo(file, project = null) {
       Object.assign(S, {
         id: project.id, name: project.name, trimStart: project.trimStart, trimEnd: project.trimEnd,
         cuts: project.cuts || [], threshold: project.threshold ?? suggestThreshold(S.levels), words: project.words || [],
-        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '', job: project.job || null,
+        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '', job: project.job || null, pub: { ...newPub(), ...(project.pub || {}) },
       });
     } else {
       Object.assign(S, {
         id: crypto.randomUUID(), name: file.name || 'Video', trimStart: 0, trimEnd: S.duration, cuts: [],
-        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '', job: null,
+        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '', job: null, pub: newPub(),
       });
       try {
         await saveFile(S.id, file);
@@ -235,7 +236,7 @@ async function openVideo(file, project = null) {
       crashed = null;
     }
     $('expStatus').textContent = '';
-    for (const id of ['shareVideo', 'dlVideo', 'shareSrt', 'dlSrt', 'srtNote']) $(id).classList.add('hidden');
+    for (const id of ['shareSrt', 'dlSrt', 'srtNote']) $(id).classList.add('hidden');
     st.textContent = '';
     syncAll();
     layoutStage();
@@ -363,6 +364,7 @@ function tick() {
     const outT = toOutput(t);
     if (S.hook.trim() && outT < S.hookSecs) drawHook(ctx, W, H, S.hook, outT, style());
     $('tNow').textContent = fmt(toOutput(t));
+    if (S.format !== 'original') drawFormatPreview();
   }
   requestAnimationFrame(tick);
 }
@@ -519,7 +521,11 @@ function renderCapList() {
     list.appendChild(row);
   });
 }
-function syncAll() { syncTrim(); syncPauses(); syncLength(); syncSubs(); syncStyle(); syncHook(); }
+function syncAll() {
+  syncTrim(); syncPauses(); syncLength(); syncSubs(); syncStyle(); syncHook(); syncFormat(); $('exportList').innerHTML = '';
+  frames = []; thumbFrame = null; $('frameGrid').innerHTML = ''; $('ytStatus').textContent = ''; syncPub();
+  if (S.pub.t != null) selectFrame(S.pub.t);
+}
 
 const nowT = () => video.currentTime;
 $('trimStart').addEventListener('input', e => {
@@ -737,8 +743,9 @@ $('genBtn').onclick = () => {
 };
 
 // ---------- Export ----------
-async function exportVideo() {
+async function exportVideo(format = S.format) {
   const btn = $('exportBtn'), st = $('expStatus');
+  const vertical = format !== 'original' && S.width > S.height * 0.6;
   // Guard against exporting almost nothing by accident (trim, cuts or pause settings).
   const L0 = outLength();
   if (S.duration > 10 && L0 < S.duration * 0.2) {
@@ -750,7 +757,7 @@ async function exportVideo() {
   btn.disabled = true; st.className = 'status'; st.textContent = 'Preparing…'; setBar('expBar', 0);
   busy = 'export';
   video.pause();
-  for (const id of ['shareVideo', 'dlVideo', 'shareSrt', 'dlSrt', 'srtNote']) $(id).classList.add('hidden');
+  for (const id of ['shareSrt', 'dlSrt', 'srtNote']) $(id).classList.add('hidden');
   try {
     await document.fonts.load(fontCss(S.font, 40)).catch(() => {});
     const input = new Input({ source: new BlobSource(S.file), formats: ALL_FORMATS });
@@ -758,7 +765,9 @@ async function exportVideo() {
     const aTrack = await input.getPrimaryAudioTrack();
 
     const scale = Math.min(1, 1920 / Math.max(S.width, S.height));
-    const W = Math.round(S.width * scale / 2) * 2, H = Math.round(S.height * scale / 2) * 2;
+    // Source frames at (at most) 1080p; the output is either the same or a 1080×1920 Short.
+    const SW = Math.round(S.width * scale / 2) * 2, SH = Math.round(S.height * scale / 2) * 2;
+    const W = vertical ? 1080 : SW, H = vertical ? 1920 : SH;
     const vCodec = await getFirstEncodableVideoCodec(['avc', 'hevc', 'vp9', 'av1'], { width: W, height: H });
     if (!vCodec) throw new Error('This browser cannot encode video');
     const aCodec = aTrack ? await getFirstEncodableAudioCodec(['aac', 'opus']) : null;
@@ -774,8 +783,9 @@ async function exportVideo() {
     let fileHandle = null, target;
     try {
       const root = await navigator.storage.getDirectory();
-      try { await root.removeEntry('export.mp4'); } catch {}
-      fileHandle = await root.getFileHandle('export.mp4', { create: true });
+      const fname = `export-${vertical ? 'short' : 'video'}.mp4`;
+      try { await root.removeEntry(fname); } catch {}
+      fileHandle = await root.getFileHandle(fname, { create: true });
       target = new StreamTarget(await fileHandle.createWritable(), { chunked: true });
     } catch { fileHandle = null; target = new BufferTarget(); }
     L.info('Export target: ' + (fileHandle ? 'device storage' : 'memory'));
@@ -794,7 +804,7 @@ async function exportVideo() {
     const hook = S.hook.trim() ? S.hook : '';
 
     const doVideo = async () => {
-      const sink = new CanvasSink(vTrack, { width: W, height: H, fit: 'fill' });
+      const sink = new CanvasSink(vTrack, { width: SW, height: SH, fit: 'fill' });
       let acc = 0, lastOut = -1;
       for (const r of ranges) {
         for await (const f of sink.canvases(r.start, r.end)) {
@@ -803,7 +813,7 @@ async function exportVideo() {
           const srcT = Math.max(f.timestamp, r.start);
           const outT = acc + srcT - r.start;
           if (outT <= lastOut) continue;
-          ctx.drawImage(f.canvas, 0, 0, W, H);
+          composeFrame(ctx, f.canvas, SW, SH, W, H, vertical ? format : 'original');
           if (caps.length) drawCaptions(ctx, W, H, srcT, blocksAt(srcT, caps, S.layout, S.primary), st0);
           if (hook && outT < S.hookSecs) drawHook(ctx, W, H, hook, outT, st0);
           const dur = Math.min(f.duration, r.end - srcT);
@@ -852,12 +862,7 @@ async function exportVideo() {
     const srtCaps = outputCaptions();
     S.srtBlob = srtCaps.length ? new Blob([toSRT(srtCaps)], { type: 'text/plain' }) : null;
     const base = (S.name || 'short').replace(/\.[^.]+$/, '');
-
-    const dl = $('dlVideo');
-    if (dl.href) URL.revokeObjectURL(dl.href);
-    dl.href = URL.createObjectURL(S.videoBlob); dl.download = `${base}-edited.mp4`;
-    dl.classList.remove('hidden');
-    if (navigator.canShare?.({ files: [new File([S.videoBlob], 'short.mp4', { type: 'video/mp4' })] })) $('shareVideo').classList.remove('hidden');
+    addExportResult(S.videoBlob, `${base}-${vertical ? 'short' : 'video'}.mp4`, vertical ? 'Short (9:16)' : 'Video', total);
     if (S.srtBlob) {
       const ds = $('dlSrt');
       if (ds.href) URL.revokeObjectURL(ds.href);
@@ -865,8 +870,9 @@ async function exportVideo() {
       ds.classList.remove('hidden'); $('srtNote').classList.remove('hidden');
       if (navigator.canShare?.({ files: [new File([S.srtBlob], 'subtitles.srt', { type: 'text/plain' })] })) $('shareSrt').classList.remove('hidden');
     }
-    st.textContent = `Done — ${fmt(total)} long. Share it to save it to Photos.`;
-    L.info('Export done', { secs: Math.round((Date.now() - exportStart) / 1000), sizeMB: +(S.videoBlob.size / 1e6).toFixed(1) });
+    st.textContent = `Done — ${vertical ? 'Short' : 'video'}, ${fmt(total)} long. Share it to save it to Photos.`;
+    if (vertical && total > 180) st.textContent += ' Note: Shorts can be at most 3 minutes.';
+    L.info('Export done', { format, secs: Math.round((Date.now() - exportStart) / 1000), sizeMB: +(S.videoBlob.size / 1e6).toFixed(1) });
   } catch (e) {
     st.className = 'status error';
     st.textContent = `Export failed: ${String(e.message).replace(/\.$/, '')}. (Tap ? → Copy log)`;
@@ -876,11 +882,72 @@ async function exportVideo() {
     btn.disabled = false; setBar('expBar', null);
   }
 }
-$('exportBtn').onclick = exportVideo;
+$('exportBtn').onclick = () => exportVideo(S.format);
+$('exportBoth').onclick = async () => {
+  await exportVideo('original');
+  if (!$('expStatus').classList.contains('error')) await exportVideo(S.format === 'original' ? 'blur' : S.format);
+};
+
+/** Draws one source frame into the output: as is, cropped to 9:16, or fitted on a blurred 9:16 background. */
+const blurCanvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(54, 96) : document.createElement('canvas');
+function composeFrame(ctx, src, sw, sh, W, H, format) {
+  if (format === 'original') { ctx.drawImage(src, 0, 0, W, H); return; }
+  const coverScale = Math.max(W / sw, H / sh);
+  const cw = W / coverScale, ch = H / coverScale;
+  if (format === 'crop') { ctx.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, W, H); return; }
+  // Blurred background: draw tiny, then stretch (a cheap blur that works in every browser).
+  const bc = blurCanvas.getContext('2d');
+  bc.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, 54, 96);
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(blurCanvas, 0, 0, 54, 96, 0, 0, W, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(0, 0, W, H);
+  const fit = Math.min(W / sw, H / sh), fw = sw * fit, fh = sh * fit;
+  ctx.drawImage(src, (W - fw) / 2, (H - fh) / 2, fw, fh);
+}
+
+function addExportResult(blob, name, label, secs) {
+  const row = document.createElement('div');
+  row.className = 'cutlist';
+  const info = document.createElement('p'); info.className = 'muted';
+  info.textContent = `${label} · ${fmt(secs)} · ${(blob.size / 1e6).toFixed(1)} MB`;
+  const pair = document.createElement('div'); pair.className = 'pair';
+  if (navigator.canShare?.({ files: [new File([blob], name, { type: 'video/mp4' })] })) {
+    const sh = document.createElement('button'); sh.className = 'btn'; sh.textContent = 'Share or save';
+    sh.onclick = () => share(blob, name, 'video/mp4'); pair.appendChild(sh);
+  }
+  const dl = document.createElement('a'); dl.className = 'btn'; dl.textContent = 'Download';
+  dl.style.textAlign = 'center'; dl.style.textDecoration = 'none';
+  dl.href = URL.createObjectURL(blob); dl.download = name; pair.appendChild(dl);
+  row.append(info, pair);
+  $('exportList').prepend(row);
+}
+
+// Still preview of the chosen format (from the video at the playhead).
+let fmtPreviewAt = 0;
+function drawFormatPreview(force = false) {
+  const cv = $('fmtPreview');
+  const show = S.format !== 'original' && S.width > S.height * 0.6;
+  cv.classList.toggle('hidden', !show);
+  if (!show || !video.videoWidth || (!force && performance.now() - fmtPreviewAt < 400)) return;
+  fmtPreviewAt = performance.now();
+  const W = 270, H = 480, ctx = cv.getContext('2d');
+  cv.width = W; cv.height = H;
+  composeFrame(ctx, video, video.videoWidth, video.videoHeight, W, H, S.format);
+  const t = video.currentTime;
+  drawCaptions(ctx, W, H, t, blocksAt(t, S.captions, S.layout, S.primary), style());
+  const outT = toOutput(t);
+  if (S.hook.trim() && outT < S.hookSecs) drawHook(ctx, W, H, S.hook, outT, style());
+}
+function syncFormat() {
+  for (const b of $('fmtSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === S.format));
+  $('exportBoth').textContent = S.format === 'original' ? 'Export both: video + Short (blur)' : 'Export both: video + this Short';
+  drawFormatPreview(true);
+}
+for (const b of $('fmtSeg').children) b.onclick = () => { S.format = b.dataset.v; persist(); syncFormat(); };
+
 const share = async (blob, name, type) => {
   try { await navigator.share({ files: [new File([blob], name, { type })] }); } catch (e) { if (e.name !== 'AbortError') { $('expStatus').textContent = `Sharing failed: ${e.message}`; L.error('Share failed: ' + e.message); } }
 };
-$('shareVideo').onclick = () => share(S.videoBlob, `${(S.name || 'short').replace(/\.[^.]+$/, '')}-edited.mp4`, 'video/mp4');
 $('shareSrt').onclick = () => share(S.srtBlob, 'subtitles.srt', 'text/plain');
 
 // ---------- OpenAI cloud speech recognition (optional, own API key) ----------
@@ -1030,6 +1097,123 @@ $('undoClaude').onclick = () => {
   L.info('Claude fix undone');
 };
 syncClaude();
+
+// ---------- YouTube: thumbnail, titles, description, hashtags ----------
+const newPub = () => ({ t: null, l1: '', l2: '', top: false, fmt: 'wide', titles: [], title: '', shortTitle: '', description: '', hashtags: '', ideas: [] });
+let frames = [], thumbFrame = null;
+function syncPub() {
+  const p = S.pub;
+  $('descLang').innerHTML = [S.primary, secondLang(), 'en'].filter((v, i, a) => v && a.indexOf(v) === i)
+    .map(c => `<option value="${c}">${langName(c)}</option>`).join('');
+  $('descLang').value = p.descLang || S.primary;
+  $('prepClaude').classList.toggle('hidden', !C.getKey());
+  $('thumbBox').classList.toggle('hidden', p.t == null);
+  $('thumbL1').value = p.l1; $('thumbL2').value = p.l2; $('thumbTop').checked = p.top;
+  for (const b of $('thumbFmt').children) b.setAttribute('aria-pressed', String(b.dataset.v === p.fmt));
+  $('thumbIdeas').innerHTML = '';
+  for (const [a, b] of p.ideas || []) {
+    const btn = document.createElement('button'); btn.className = 'btn titleopt'; btn.textContent = `${a} / ${b}`;
+    btn.onclick = () => { p.l1 = a; p.l2 = b; syncPub(); renderThumb(); dirty(); };
+    $('thumbIdeas').appendChild(btn);
+  }
+  const has = p.titles.length || p.description;
+  $('textBox').classList.toggle('hidden', !has);
+  $('titleList').innerHTML = '';
+  for (const t of p.titles) {
+    const btn = document.createElement('button'); btn.className = 'btn titleopt'; btn.textContent = t;
+    btn.setAttribute('aria-pressed', String(t === p.title));
+    btn.onclick = () => { p.title = t; syncPub(); dirty(); };
+    $('titleList').appendChild(btn);
+  }
+  $('shortTitle').value = p.shortTitle; $('desc').value = p.description; $('tags').value = p.hashtags;
+}
+function showFrames() {
+  const grid = $('frameGrid'); grid.innerHTML = '';
+  for (const f of frames) {
+    const c = f.canvas; c.setAttribute('aria-pressed', String(Math.abs((S.pub.t ?? -9) - f.t) < 0.05));
+    c.title = fmt(toOutput(f.t)); c.onclick = () => selectFrame(f.t);
+    grid.appendChild(c);
+  }
+}
+async function selectFrame(t) {
+  S.pub.t = t; showFrames(); syncPub(); dirty();
+  $('ytStatus').textContent = 'Loading the frame…';
+  thumbFrame = await P.grabFrame(S.file, t).catch(() => null);
+  $('ytStatus').textContent = thumbFrame ? '' : 'Could not read that frame.';
+  renderThumb();
+}
+function renderThumb() {
+  if (!thumbFrame) return;
+  const p = S.pub, cv = $('thumbCanvas');
+  const [W, H] = p.fmt === 'tall' ? [1080, 1920] : [1280, 720];
+  cv.width = W; cv.height = H;
+  P.drawThumbnail(cv.getContext('2d'), thumbFrame, W, H, {
+    line1: p.l1, line2: p.l2, color1: COLORS[S.color2], color2: COLORS[S.color1], font: S.font, top: p.top,
+    lang1: secondLang() || S.primary, lang2: S.primary,
+  });
+  cv.style.maxWidth = p.fmt === 'tall' ? '240px' : '100%'; cv.style.display = 'block'; cv.style.margin = '10px auto 0';
+  cv.toBlob(b => {
+    if (!b) return;
+    const a = $('thumbDl'); if (a.href) URL.revokeObjectURL(a.href);
+    a.href = URL.createObjectURL(b); a.download = `thumbnail-${p.fmt === 'tall' ? 'short' : 'video'}.png`;
+    S.thumbBlob = b;
+  }, 'image/png');
+}
+async function loadFrames() {
+  $('ytStatus').className = 'status'; $('ytStatus').textContent = 'Looking for sharp, well-lit frames…';
+  $('findFrames').disabled = true;
+  try {
+    frames = await P.findFrames(S.file, kept());
+    showFrames();
+    $('ytStatus').textContent = 'Tap a frame to make the thumbnail.';
+    L.info('Thumbnail frames found', { count: frames.length });
+    if (S.pub.t == null && frames.length) await selectFrame(frames[0].t);
+  } catch (e) {
+    $('ytStatus').className = 'status error'; $('ytStatus').textContent = `Could not read frames: ${e.message}`;
+    L.error('Find frames failed: ' + e.message);
+  } finally { $('findFrames').disabled = false; }
+}
+$('findFrames').onclick = loadFrames;
+$('thumbL1').oninput = (e) => { S.pub.l1 = e.target.value; renderThumb(); dirty(); };
+$('thumbL2').oninput = (e) => { S.pub.l2 = e.target.value; renderThumb(); dirty(); };
+$('thumbTop').onchange = (e) => { S.pub.top = e.target.checked; renderThumb(); dirty(); };
+for (const b of $('thumbFmt').children) b.onclick = () => { S.pub.fmt = b.dataset.v; syncPub(); renderThumb(); dirty(); };
+$('thumbShare').onclick = () => S.thumbBlob && share(S.thumbBlob, $('thumbDl').download, 'image/png');
+$('descLang').onchange = (e) => { S.pub.descLang = e.target.value; dirty(); };
+$('shortTitle').oninput = (e) => { S.pub.shortTitle = e.target.value; dirty(); };
+$('desc').oninput = (e) => { S.pub.description = e.target.value; dirty(); };
+$('tags').oninput = (e) => { S.pub.hashtags = e.target.value; dirty(); };
+$('copyTitle').onclick = () => copy(S.pub.title || S.pub.titles[0] || '', $('copyTitle'));
+$('copyDesc').onclick = () => copy(`${S.pub.description}\n\n${S.pub.hashtags}`.trim(), $('copyDesc'));
+$('prepClaude').onclick = async () => {
+  if (!S.captions.length) { $('ytStatus').textContent = 'Make the subtitles first — Claude writes from them.'; return; }
+  const btn = $('prepClaude'), st = $('ytStatus');
+  btn.disabled = true;
+  try {
+    if (!frames.length) await loadFrames();
+    st.className = 'status'; st.textContent = 'Claude is looking at the frames and writing…';
+    const t0 = Date.now();
+    const descLang = langName(S.pub.descLang || S.primary);
+    const r = await P.prepareWithClaude((content, max) => C.call(C.getKey(), S.claudeModel, '', content, max), {
+      frames, transcript: transcriptText(), descLang, glossary: S.glossary,
+      langs: activeLangs().map(langName).join(' and '),
+    });
+    const p = S.pub;
+    p.titles = r.titles || []; p.title = p.titles[0] || '';
+    p.shortTitle = r.shortTitle || ''; p.description = r.description || '';
+    p.hashtags = (r.hashtags || []).map(h => '#' + String(h).replace(/^#/, '').replace(/\s+/g, '')).join(' ');
+    p.ideas = (r.thumbnailTexts || []).filter(x => Array.isArray(x));
+    if (p.ideas[0]) { [p.l1, p.l2] = p.ideas[0]; }
+    const best = frames[(r.bestFrame || 1) - 1];
+    syncPub(); dirty();
+    if (best) await selectFrame(best.t); else renderThumb();
+    st.textContent = `Ready. Claude picked frame ${r.bestFrame}${r.frameReason ? ` — ${r.frameReason}` : ''}.`;
+    L.info('Claude YouTube prep done', { secs: Math.round((Date.now() - t0) / 1000), titles: p.titles.length, bestFrame: r.bestFrame });
+  } catch (e) {
+    st.className = 'status error'; st.textContent = `Claude couldn't prepare it: ${String(e.message).replace(/\.$/, '')}. (Tap ? → Copy log)`;
+    L.error('Claude YouTube prep failed: ' + e.message);
+  } finally { btn.disabled = false; }
+};
 
 // ---------- Help & diagnostics ----------
 async function openHelp() {
