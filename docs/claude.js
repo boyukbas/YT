@@ -47,7 +47,7 @@ async function call(key, model, system, user, maxTokens) {
     throw new Error(`Claude error: ${msg}`);
   }
   const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
-  return { text, usage: data.usage || {} };
+  return { text, usage: data.usage || {}, stop: data.stop_reason };
 }
 
 export async function testKey(key, model) {
@@ -59,25 +59,39 @@ export async function testKey(key, model) {
  * Returns corrected lines, each starting with a language tag like "[de] ".
  * names: { primary: 'Turkish', secondary: 'German' } for the prompt.
  */
-export async function fixTranscript({ key, model, primary, secondary, names, glossary, transcript }) {
+export async function fixTranscript({ key, model, primary, secondary, names, glossary, transcript, onPart = () => {} }) {
   const langs = secondary ? `${names.primary} [${primary}] and ${names.secondary} [${secondary}]` : `${names.primary} [${primary}]`;
   const system = 'You correct automatic speech-recognition transcripts of short language-teaching videos. ' +
-    'You only fix misrecognized words; you never translate, summarize, or add content.';
-  const user =
-    `The video is spoken in ${langs}. Below is the automatic transcript, one line per line. ` +
-    `Speech recognition often misheard words, especially when the language switches mid-sentence ` +
-    `(it may have written ${secondary ? names.secondary : 'some'} words as gibberish in the other language). ` +
-    `Use the context to restore what was actually said.\n\n` +
-    `Rules:\n` +
-    `- Keep the speaker's words and their order. Don't translate, don't add or remove sentences.\n` +
-    `- One line per sentence; start a new line wherever the language changes.\n` +
-    `- Start every line with its language tag: ${secondary ? `[${primary}] or [${secondary}]` : `[${primary}]`}.\n` +
-    `- If Whisper repeated a word many times, keep it once.\n` +
-    `- Reply with only the corrected lines, nothing else.` +
-    (glossary?.trim() ? `\n\nWords taught in this video:\n${glossary.trim()}` : '') +
-    `\n\nTranscript:\n${transcript}`;
-  const maxTokens = Math.min(16000, Math.round(transcript.length / 2) + 1500);
-  const r = await call(key, model, system, user, maxTokens);
-  const text = r.text.replace(/^```[a-z]*\n?|```$/gim, '').trim();
-  return { text, usage: r.usage };
+    'You only fix misrecognized words; you never translate, summarize, shorten, or add content.';
+  // Long transcripts go in parts, so an answer can never be cut off halfway.
+  const lines = transcript.split('\n').filter(l => l.trim());
+  const parts = [];
+  for (let i = 0; i < lines.length; i += 30) parts.push(lines.slice(i, i + 30));
+  const out = [];
+  const usage = { input_tokens: 0, output_tokens: 0 };
+  for (let k = 0; k < parts.length; k++) {
+    onPart(k + 1, parts.length);
+    const chunk = parts[k].join('\n');
+    const user =
+      `The video is spoken in ${langs}. Below is ${parts.length > 1 ? `part ${k + 1} of ${parts.length} of ` : ''}the automatic transcript, one line per line. ` +
+      `Speech recognition often misheard words, especially when the language switches mid-sentence ` +
+      `(it may have written ${secondary ? names.secondary : 'some'} words as gibberish in the other language). ` +
+      `Use the context to restore what was actually said.\n\n` +
+      `Rules:\n` +
+      `- Keep every line's content and the order. Don't translate, don't add, drop or summarize anything.\n` +
+      `- Start a new line wherever the language changes.\n` +
+      `- Start every line with its language tag: ${secondary ? `[${primary}] or [${secondary}]` : `[${primary}]`}.\n` +
+      `- If a word is repeated many times in a row by mistake, keep it once.\n` +
+      `- Reply with only the corrected lines, nothing else.` +
+      (k > 0 ? `\n\nFor context, the previous part ended with:\n${parts[k - 1].slice(-3).join('\n')}` : '') +
+      (glossary?.trim() ? `\n\nWords taught in this video:\n${glossary.trim()}` : '') +
+      `\n\nTranscript:\n${chunk}`;
+    const maxTokens = Math.min(8000, chunk.length * 2 + 1000);
+    const r = await call(key, model, system, user, maxTokens);
+    if (r.stop === 'max_tokens') throw new Error("Claude's answer was cut off — nothing was changed");
+    usage.input_tokens += r.usage.input_tokens || 0;
+    usage.output_tokens += r.usage.output_tokens || 0;
+    out.push(r.text.replace(/^```[a-z]*\n?|```$/gim, '').trim());
+  }
+  return { text: out.join('\n'), usage, parts: parts.length };
 }

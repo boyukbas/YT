@@ -941,26 +941,44 @@ async function runClaudeFix() {
   st.className = 'status'; st.textContent = 'Claude is fixing the words…';
   const t0 = Date.now();
   try {
-    const { text, usage } = await C.fixTranscript({
+    const transcript = transcriptText();
+    const { text, usage, parts } = await C.fixTranscript({
       key: C.getKey(), model: S.claudeModel, primary: S.primary, secondary: secondLang(),
       names: { primary: langName(S.primary), secondary: secondLang() ? langName(secondLang()) : '' },
-      glossary: S.glossary, transcript: transcriptText(),
+      glossary: S.glossary, transcript,
+      onPart: (i, n) => { if (n > 1) st.textContent = `Claude is fixing the words… part ${i}/${n}`; },
     });
     if (!text.trim()) throw new Error('Claude returned no text');
+    // Safety check: the fix must cover about as much as the original, or it's not applied.
+    const count = (t) => t.replace(/^\s*\[[a-z]{2,3}\]/gim, '').split(/\s+/).filter(Boolean).length;
+    const before = count(transcript), after = count(text);
+    L.info('Claude answer', { parts, wordsBefore: before, wordsAfter: after });
+    if (after < before * 0.7) throw new Error(`Claude's text was much shorter (${after} vs ${before} words) — nothing was changed`);
+    S.undo = { words: S.words, captions: S.captions, script: S.script };
     S.script = text;
     S.words = alignScript(text, S.words, S.primary, secondLang());
     rebuildCaptions(); syncSubs();
+    $('undoClaude').classList.remove('hidden');
     st.textContent = `Fixed by Claude: ${S.captions.length} lines. The corrected text is in “My script”.`;
-    L.info('Claude fix done', { model: S.claudeModel, secs: Math.round((Date.now() - t0) / 1000), inTokens: usage.input_tokens, outTokens: usage.output_tokens });
+    L.info('Claude fix done', { model: S.claudeModel, secs: Math.round((Date.now() - t0) / 1000), inTokens: usage.input_tokens, outTokens: usage.output_tokens, lines: S.captions.length, endsAt: +(S.captions.at(-1)?.end || 0).toFixed(1) });
   } catch (e) {
     st.className = 'status error';
-    st.textContent = `${before} — Claude fix failed: ${e.message}. (Tap ? → Copy log)`;
+    st.textContent = `Claude fix failed: ${String(e.message).replace(/\.$/, '')}. Your subtitles are unchanged. (Tap ? → Copy log)`;
     L.error('Claude fix failed: ' + e.message);
   } finally {
     fixing = false; btn.disabled = false;
   }
 }
 $('fixClaude').onclick = runClaudeFix;
+$('undoClaude').onclick = () => {
+  if (!S.undo) return;
+  Object.assign(S, { words: S.undo.words, script: S.undo.script });
+  S.captions = S.undo.captions; S.undo = null;
+  syncStyle(); syncSubs(); dirty();
+  $('undoClaude').classList.add('hidden');
+  $('genStatus').textContent = 'Claude’s changes were undone.';
+  L.info('Claude fix undone');
+};
 syncClaude();
 
 // ---------- Help & diagnostics ----------
