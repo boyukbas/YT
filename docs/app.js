@@ -3,7 +3,8 @@ import {
   CanvasSink, AudioBufferSink, CanvasSource, AudioBufferSource, QUALITY_HIGH,
   getFirstEncodableVideoCodec, getFirstEncodableAudioCodec,
 } from './lib/mediabunny.min.mjs';
-import { LANGS, SR, buildCaptions, toSRT } from './core.js';
+import { LANGS, SR, buildCaptions, toSRT, alignScript } from './core.js';
+import * as C from './claude.js';
 import { blocksAt, drawCaptions, drawHook, drawSafeZones, FONTS, fontCss } from './render.js';
 import { saveFile, saveProject, listProjects, loadProject, deleteProject } from './store.js';
 import * as L from './log.js';
@@ -16,12 +17,12 @@ const $ = (id) => document.getElementById(id);
 // ---------- Settings (remembered between visits) ----------
 const COLORS = { white: '#ffffff', yellow: '#ffd21a', cyan: '#4de6ff', green: '#73ff73', pink: '#ff80cc', orange: '#ff9e33' };
 const SETTINGS = ['primary', 'secondary', 'color1', 'color2', 'caps', 'wordsPer', 'pos', 'burn', 'removePauses',
-  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs', 'accuracy'];
+  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs', 'accuracy', 'claudeModel', 'claudeFast', 'claudeAuto'];
 const saved = (() => { try { return JSON.parse(localStorage.getItem('settings') || '{}'); } catch { return {}; } })();
 const S = {
   primary: 'de', secondary: 'tr', color1: 'white', color2: 'yellow', caps: true, wordsPer: 3, pos: 0.35, burn: true,
   removePauses: true, minPause: 0.4, layout: 'single', size: 0.075, box: false, highlight: false, accurate: false, gpu: true,
-  posX: 0.5, font: 'modern', anim: false, hookSecs: 3, accuracy: saved.accurate ? 'second' : 'normal',
+  posX: 0.5, font: 'modern', anim: false, hookSecs: 3, claudeModel: 'claude-sonnet-5-5', claudeFast: false, claudeAuto: true, accuracy: saved.accurate ? 'second' : 'normal',
   ...saved,
   // per project
   id: null, name: '', file: null, url: null, duration: 0, width: 0, height: 0,
@@ -606,7 +607,8 @@ function setBar(id, frac) {
   bar.firstElementChild.style.width = `${Math.round((frac || 0) * 100)}%`;
 }
 const secondLang = () => (S.secondary && S.secondary !== S.primary ? S.secondary : '');
-const jobKey = () => JSON.stringify({ p: S.primary, s: secondLang(), a: S.accuracy, g: S.glossary.trim(), n: S.audio16k?.length || 0 });
+const claudeHandlesLangs = () => !!(S.claudeFast && C.getKey() && secondLang());
+const jobKey = () => JSON.stringify({ p: S.primary, s: secondLang(), a: S.accuracy, g: S.glossary.trim(), n: S.audio16k?.length || 0, d: !claudeHandlesLangs() });
 const jobPct = (st) => !st ? 0 : st.stage === 'main'
   ? Math.round(30 * st.mainDone / st.mainTotal)
   : Math.round(30 + 70 * (st.detectDone || 0) / (st.detectTotal || 1));
@@ -670,6 +672,7 @@ $('genBtn').onclick = () => {
       const secs = Math.round((Date.now() - started) / 1000);
       L.info('Subtitles done', { secs, words: S.words.length, lines: S.captions.length });
       st.textContent = (S.words.length ? `${S.captions.length} subtitle lines in ${secs} s. Check them below.` : 'No speech found in this video.') + note;
+      if (S.words.length && C.getKey() && (S.claudeAuto || claudeHandlesLangs())) runClaudeFix();
     } else if (data.type === 'error') {
       localStorage.removeItem('jobRunning'); keepAwake(false);
       btn.disabled = false; syncGenButton(); setBar('genBar', null);
@@ -688,7 +691,7 @@ $('genBtn').onclick = () => {
   };
   worker.postMessage({
     type: 'transcribe', audio: S.audio16k, primary: S.primary, secondary: second,
-    script: S.script, glossary: S.glossary, accuracy: S.accuracy, gpu: S.gpu, resume,
+    script: S.script, glossary: S.glossary, accuracy: S.accuracy, gpu: S.gpu, resume, detect: !claudeHandlesLangs(),
   });
 };
 
@@ -828,6 +831,66 @@ const share = async (blob, name, type) => {
 };
 $('shareVideo').onclick = () => share(S.videoBlob, `${(S.name || 'short').replace(/\.[^.]+$/, '')}-edited.mp4`, 'video/mp4');
 $('shareSrt').onclick = () => share(S.srtBlob, 'subtitles.srt', 'text/plain');
+
+// ---------- Claude (optional, own API key) ----------
+function syncClaude() {
+  const has = !!C.getKey();
+  $('claudeHint').textContent = has ? 'on' : 'not set up';
+  $('claudeKey').value = has ? '••••••••••••' + C.getKey().slice(-4) : '';
+  $('claudeModel').value = S.claudeModel;
+  $('claudeFast').checked = S.claudeFast; $('claudeAuto').checked = S.claudeAuto;
+  $('fixClaude').classList.toggle('hidden', !has);
+}
+$('claudeModel').innerHTML = Object.entries(C.CLAUDE_MODELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+$('claudeKey').onchange = (e) => {
+  const v = e.target.value.trim();
+  if (v && !v.startsWith('••')) { C.setKey(v); L.info('Claude key saved'); }
+  syncClaude(); syncGenButton();
+};
+$('claudeKey').onfocus = (e) => { if (e.target.value.startsWith('••')) e.target.value = ''; };
+$('claudeModel').onchange = (e) => { S.claudeModel = e.target.value; persist(); };
+$('claudeFast').onchange = (e) => { S.claudeFast = e.target.checked; persist(); syncGenButton(); };
+$('claudeAuto').onchange = (e) => { S.claudeAuto = e.target.checked; persist(); };
+$('claudeRemove').onclick = () => { C.setKey(''); L.info('Claude key removed'); $('claudeStatus').textContent = 'Key removed from this device.'; syncClaude(); };
+$('claudeTest').onclick = async () => {
+  const st = $('claudeStatus');
+  if (!C.getKey()) { st.textContent = 'Paste your API key first.'; return; }
+  st.className = 'status'; st.textContent = 'Testing…';
+  try { await C.testKey(C.getKey(), S.claudeModel); st.textContent = 'The key works ✓'; L.info('Claude key test ok', { model: S.claudeModel }); }
+  catch (e) { st.className = 'status error'; st.textContent = e.message; L.error('Claude key test failed: ' + e.message); }
+};
+
+let fixing = false;
+async function runClaudeFix() {
+  if (fixing || !S.captions.length) return;
+  fixing = true;
+  const st = $('genStatus'), btn = $('fixClaude');
+  btn.disabled = true;
+  const before = st.textContent;
+  st.className = 'status'; st.textContent = 'Claude is fixing the words…';
+  const t0 = Date.now();
+  try {
+    const { text, usage } = await C.fixTranscript({
+      key: C.getKey(), model: S.claudeModel, primary: S.primary, secondary: secondLang(),
+      names: { primary: langName(S.primary), secondary: secondLang() ? langName(secondLang()) : '' },
+      glossary: S.glossary, transcript: transcriptText(),
+    });
+    if (!text.trim()) throw new Error('Claude returned no text');
+    S.script = text;
+    S.words = alignScript(text, S.words, S.primary, secondLang());
+    rebuildCaptions(); syncSubs();
+    st.textContent = `Fixed by Claude: ${S.captions.length} lines. The corrected text is in “My script”.`;
+    L.info('Claude fix done', { model: S.claudeModel, secs: Math.round((Date.now() - t0) / 1000), inTokens: usage.input_tokens, outTokens: usage.output_tokens });
+  } catch (e) {
+    st.className = 'status error';
+    st.textContent = `${before} — Claude fix failed: ${e.message}. (Tap ? → Copy log)`;
+    L.error('Claude fix failed: ' + e.message);
+  } finally {
+    fixing = false; btn.disabled = false;
+  }
+}
+$('fixClaude').onclick = runClaudeFix;
+syncClaude();
 
 // ---------- Help & diagnostics ----------
 async function openHelp() {

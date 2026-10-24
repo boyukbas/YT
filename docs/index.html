@@ -218,6 +218,16 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
         </div>
         <p class="muted" id="accHint" style="margin-top:6px"></p></div>
       <div class="row"><label for="gpuToggle">Use the graphics chip<br><span class="muted">Faster on recent iPads, iPhones and Android phones</span></label><input type="checkbox" class="switch" id="gpuToggle"></div>
+      <details id="claudeBox">
+        <summary>Claude <span class="hint" id="claudeHint">not set up</span></summary>
+        <p class="muted" style="margin-bottom:8px">Optional: with your own Claude API key, Claude fixes the transcript using the context and marks each line's language. Claude can't hear audio, so the speech recognition still runs on this device. The key is stored only on this device and is never logged — set a spending limit in the Claude Console.</p>
+        <input type="password" class="area" id="claudeKey" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" style="min-height:auto">
+        <div class="row" style="margin-top:10px"><span>Model</span><select id="claudeModel"></select></div>
+        <div class="row"><label for="claudeFast">Let Claude handle the second language<br><span class="muted">Skips the slow on-device language check; much faster on phones</span></label><input type="checkbox" class="switch" id="claudeFast"></div>
+        <div class="row"><label for="claudeAuto">Fix with Claude right after subtitles</label><input type="checkbox" class="switch" id="claudeAuto"></div>
+        <div class="pair"><button class="btn" id="claudeTest">Test key</button><button class="btn" id="claudeRemove">Remove key</button></div>
+        <p class="status" id="claudeStatus"></p>
+      </details>
       <button class="btn primary big" id="genBtn" style="margin-top:14px">Make subtitles</button>
       <button class="btn hidden" id="genRestart" style="margin-top:8px;width:100%">Start over instead</button>
       <div class="progress hidden" id="genBar"><div></div></div>
@@ -265,6 +275,7 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
         <button class="btn" id="copyText">Copy text</button>
         <button class="btn" id="copyClaude">Copy for Claude</button>
       </div>
+      <button class="btn primary hidden" id="fixClaude" style="width:100%;margin-top:8px">Fix with Claude</button>
       <p class="muted" id="copyHint" style="margin-top:6px">“Copy for Claude” adds instructions. Paste it into Claude, then paste Claude’s answer into “My script” and make the subtitles again — they keep Claude’s words with the right timing.</p>
       <div class="caps" id="capList"></div>
     </section>

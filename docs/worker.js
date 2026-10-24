@@ -79,7 +79,7 @@ async function run(data, device, f16) {
     asr, asrSecondary, Tensor, audio: data.audio, primary: data.primary, secondary: data.secondary,
     glossary: data.script ? '' : data.glossary,
     onStatus: (stage, i, n) => postMessage({ type: 'status', stage, i, n }),
-    resume: checkpoint,
+    resume: checkpoint, detect: data.detect !== false,
     onCheckpoint: (state) => { checkpoint = state; postMessage({ type: 'checkpoint', state }); },
   });
   if (data.script?.trim()) words = alignScript(data.script, words, data.primary, data.secondary);

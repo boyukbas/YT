@@ -263,7 +263,7 @@ export async function applyGlossary(asr, ctx, Tensor, lang, words, terms, allowW
 export async function transcribeMixed({
   asr, asrSecondary = null, Tensor, audio, primary, secondary, glossary = '',
   prefilter = 0.2, sure = 0.97, margin = 0.3, onStatus = () => {},
-  resume = null, onCheckpoint = () => {},
+  resume = null, onCheckpoint = () => {}, detect = true,
 }) {
   const terms = parseGlossary(glossary);
   const duration = audio.length / SR;
@@ -283,6 +283,8 @@ export async function transcribeMixed({
   if (!words.length) return words;
 
   // 2) Per phrase: which language, and fixes. Saved every few phrases.
+  // (Skipped when Claude will label the languages afterwards — much faster on slow devices.)
+  if (!detect) return words;
   const two = secondary && secondary !== primary;
   const groups = phrases(words);
   const fixer = asrSecondary || asr;
@@ -366,9 +368,12 @@ export function splitPoints(audio, target = 28, window = 6) {
  */
 export function alignScript(script, words, primary, secondary) {
   const tokens = [];
-  for (const line of script.split('\n')) {
+  for (const raw of script.split('\n')) {
+    // A line may start with a language tag like "[de]" (Claude adds these).
+    const m = raw.trim().match(/^\[([a-z]{2,3})\]\s*/i);
+    const line = m ? raw.trim().slice(m[0].length) : raw;
     const parts = line.trim().split(/\s+/).filter(Boolean);
-    parts.forEach((p, i) => tokens.push({ text: p, lineEnd: i === parts.length - 1 }));
+    parts.forEach((p, i) => tokens.push({ text: p, lineEnd: i === parts.length - 1, forced: m ? m[1].toLowerCase() : null }));
   }
   if (!tokens.length) return words;
   if (!words.length) return [];
@@ -401,7 +406,7 @@ export function alignScript(script, words, primary, secondary) {
   }
   const out = tokens.map((t, i) => {
     const w = match[i] >= 0 ? words[match[i]] : null;
-    return { text: t.text, lineEnd: t.lineEnd, start: w?.start, end: w?.end, lang: w?.lang };
+    return { text: t.text, lineEnd: t.lineEnd, start: w?.start, end: w?.end, lang: t.forced || w?.lang };
   });
   // Fill times for unmatched runs between their matched neighbours.
   for (let i = 0; i < S;) {
