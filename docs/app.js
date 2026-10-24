@@ -1237,6 +1237,23 @@ $('reportLog').onclick = async () => {
   open(`https://github.com/boyukbas/YT/issues/new?title=${encodeURIComponent('Problem in Shorts Editor')}&body=${encodeURIComponent(body)}`, '_blank');
 };
 
+// ---------- Sliders: don't change them by accident while scrolling ----------
+// A swipe that starts on a slider used to move it. Now: if the browser takes the touch for
+// scrolling (pointercancel) or the finger moves mostly up/down, the slider snaps back.
+for (const r of document.querySelectorAll('input[type=range]')) {
+  let start = null, sx = 0, sy = 0, vertical = false;
+  const restore = () => {
+    if (start !== null && r.value !== start) { r.value = start; r.dispatchEvent(new Event('input', { bubbles: true })); }
+    start = null;
+  };
+  r.addEventListener('pointerdown', (e) => { start = r.value; sx = e.clientX; sy = e.clientY; vertical = false; }, true);
+  r.addEventListener('pointermove', (e) => {
+    if (start !== null && Math.abs(e.clientY - sy) > Math.abs(e.clientX - sx) + 8) vertical = true;
+  });
+  r.addEventListener('pointercancel', restore);
+  r.addEventListener('pointerup', () => { if (vertical) restore(); else start = null; });
+}
+
 window.__editor = S; // handy for debugging in the console
 fillLangSelects();
 for (const k of Object.keys(FONTS)) document.fonts.load(fontCss(k, 40)).catch(() => {});

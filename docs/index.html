@@ -69,7 +69,7 @@ section { background: var(--panel); border-radius: 18px; padding: 16px; margin-t
 .stack { display: grid; gap: 4px; margin-top: 12px; }
 .stack .head { display: flex; justify-content: space-between; font-size: 15px; }
 .stack .head output { color: var(--muted); font-variant-numeric: tabular-nums; }
-input[type=range] { width: 100%; accent-color: var(--amber); }
+input[type=range] { width: 100%; accent-color: var(--amber); touch-action: pan-y; padding: 6px 0; }
 select { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; max-width: 58%; }
 .switch { appearance: none; width: 50px; height: 30px; border-radius: 15px; background: var(--line); position: relative; flex: none; cursor: pointer; transition: background .15s; }
 .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; transition: transform .15s; }
