@@ -10,6 +10,14 @@ const MODELS = {
 env.allowLocalModels = false;
 env.backends.onnx.wasm.wasmPaths = new URL('./lib/', import.meta.url).href;
 self.addEventListener('unhandledrejection', (e) => postMessage({ type: 'error', message: e.reason?.message || String(e.reason) }));
+// Forward the engine's own warnings and errors to the page's diagnostics log.
+for (const level of ['error', 'warn']) {
+  const orig = console[level].bind(console);
+  console[level] = (...args) => {
+    try { postMessage({ type: 'log', level, message: args.map(a => a?.message || String(a)).join(' ').slice(0, 500) }); } catch {}
+    orig(...args);
+  };
+}
 if (self.crossOriginIsolated) env.backends.onnx.wasm.numThreads = Math.min(4, navigator.hardwareConcurrency || 2);
 
 const loaded = {};   // "small|webgpu" -> Promise<pipeline>
@@ -43,7 +51,7 @@ function load(kind, device, f16, label) {
 }
 
 async function run(data, device, f16) {
-  postMessage({ type: 'status', stage: 'model', device });
+  postMessage({ type: 'status', stage: 'model', device, threads: env.backends.onnx.wasm.numThreads });
   // accuracy: "normal" = small model; "second" = big model only for second-language words;
   // "all" = big model for everything (slowest, best).
   const all = data.accuracy === 'all';

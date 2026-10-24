@@ -6,6 +6,9 @@ import {
 import { LANGS, SR, buildCaptions, toSRT } from './core.js';
 import { blocksAt, drawCaptions, drawHook, drawSafeZones, FONTS, fontCss } from './render.js';
 import { saveFile, saveProject, listProjects, loadProject, deleteProject } from './store.js';
+import * as L from './log.js';
+
+L.install();
 
 const $ = (id) => document.getElementById(id);
 
@@ -180,6 +183,7 @@ async function openVideo(file, project = null) {
     S.width = await vTrack.getDisplayWidth();
     S.height = await vTrack.getDisplayHeight();
     S.duration = await input.computeDuration();
+    L.info(project ? 'Opening project' : 'Opening video', { type: file.type, sizeMB: +(file.size / 1e6).toFixed(1), w: S.width, h: S.height, secs: +S.duration.toFixed(1) });
     st.textContent = 'Reading the sound…';
     S.audio16k = await decodeAudio16k(file, input);
     S.levels = computeLevels(S.audio16k);
@@ -222,7 +226,8 @@ async function openVideo(file, project = null) {
     scrollTo(0, 0);
   } catch (e) {
     st.className = 'status error';
-    st.textContent = `Couldn't open this video: ${e.message}`;
+    st.textContent = `Couldn't open this video: ${String(e.message).replace(/\.$/, '')}. (Tap ? → Copy log)`;
+    L.error('Open video failed: ' + e.message, { type: file?.type });
   }
 }
 $('fileInput').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) openVideo(f); });
@@ -586,11 +591,17 @@ $('genBtn').onclick = () => {
   const second = S.secondary && S.secondary !== S.primary ? S.secondary : '';
   const started = Date.now();
   let note = '';
+  L.info('Subtitles started', { primary: S.primary, secondary: second, accuracy: S.accuracy, gpu: S.gpu, script: !!S.script.trim(), glossary: !!S.glossary.trim(), audioSecs: +(S.audio16k.length / 16000).toFixed(1) });
+  let lastDl = -10;
   worker.onmessage = ({ data }) => {
+    if (data.type === 'log') { L.log(data.level, 'engine: ' + data.message); return; }
+    if (data.type === 'download' && data.progress - lastDl >= 25) { lastDl = data.progress; L.info(`Downloading ${data.label} ${Math.round(data.progress)}%`); }
+    if (data.type === 'status' && data.stage !== 'detect') L.info('Subtitles: ' + data.stage, { device: data.device, threads: data.threads });
     if (data.type === 'download') {
       st.textContent = `Downloading the ${data.label} (one time)… ${Math.round(data.progress)}%`;
       setBar('genBar', data.progress / 100);
     } else if (data.type === 'gpuFailed') {
+      L.warn('Graphics chip failed, using normal mode: ' + data.message);
       S.gpu = false; persist(); syncSubs();
       note = " The graphics chip didn't work here, so it used normal mode (now remembered).";
     } else if (data.type === 'status') {
@@ -604,17 +615,20 @@ $('genBtn').onclick = () => {
       S.words = data.words; rebuildCaptions();
       btn.disabled = false; btn.textContent = 'Make subtitles again'; setBar('genBar', null);
       const secs = Math.round((Date.now() - started) / 1000);
+      L.info('Subtitles done', { secs, words: S.words.length, lines: S.captions.length });
       st.textContent = (S.words.length ? `${S.captions.length} subtitle lines in ${secs} s. Check them below.` : 'No speech found in this video.') + note;
     } else if (data.type === 'error') {
       btn.disabled = false; setBar('genBar', null);
       st.className = 'status error';
-      st.textContent = `Subtitles failed: ${data.message}. Check the connection for the first download and try again.`;
+      st.textContent = `Subtitles failed: ${String(data.message).replace(/\.$/, '')}. Check the connection for the first download and try again. (Tap ? → Copy log)`;
+      L.error('Subtitles failed: ' + data.message);
     }
   };
   worker.onerror = (e) => {
     btn.disabled = false; setBar('genBar', null);
     st.className = 'status error';
-    st.textContent = `The speech engine couldn't start${e.message ? `: ${e.message}` : ''}. Reload the page and try again.`;
+    st.textContent = `The speech engine couldn't start${e.message ? `: ${e.message}` : ''}. Reload the page and try again. (Tap ? → Copy log)`;
+    L.error('Speech engine could not start: ' + (e.message || 'no message'), { file: (e.filename || '').split('/').pop(), line: e.lineno });
     worker = null;
   };
   worker.postMessage({
@@ -641,6 +655,8 @@ async function exportVideo() {
     if (!vCodec) throw new Error('This browser cannot encode video');
     const aCodec = aTrack ? await getFirstEncodableAudioCodec(['aac', 'opus']) : null;
     const fps = Math.round((await vTrack.computePacketStats(120)).averagePacketRate) || 30;
+    L.info('Export started', { W, H, vCodec, aCodec, fps, burn: S.burn, layout: S.layout, secs: +kept().reduce((a, r) => a + r.end - r.start, 0).toFixed(1) });
+    const exportStart = Date.now();
 
     const canvas = new OffscreenCanvas(W, H);
     const ctx = canvas.getContext('2d');
@@ -730,19 +746,41 @@ async function exportVideo() {
       if (navigator.canShare?.({ files: [new File([S.srtBlob], 'subtitles.srt', { type: 'text/plain' })] })) $('shareSrt').classList.remove('hidden');
     }
     st.textContent = `Done — ${fmt(total)} long. Share it to save it to Photos.`;
+    L.info('Export done', { secs: Math.round((Date.now() - exportStart) / 1000), sizeMB: +(S.videoBlob.size / 1e6).toFixed(1) });
   } catch (e) {
     st.className = 'status error';
-    st.textContent = `Export failed: ${e.message}`;
+    st.textContent = `Export failed: ${String(e.message).replace(/\.$/, '')}. (Tap ? → Copy log)`;
+    L.error('Export failed: ' + e.message);
   } finally {
     btn.disabled = false; setBar('expBar', null);
   }
 }
 $('exportBtn').onclick = exportVideo;
 const share = async (blob, name, type) => {
-  try { await navigator.share({ files: [new File([blob], name, { type })] }); } catch (e) { if (e.name !== 'AbortError') $('expStatus').textContent = `Sharing failed: ${e.message}`; }
+  try { await navigator.share({ files: [new File([blob], name, { type })] }); } catch (e) { if (e.name !== 'AbortError') { $('expStatus').textContent = `Sharing failed: ${e.message}`; L.error('Share failed: ' + e.message); } }
 };
 $('shareVideo').onclick = () => share(S.videoBlob, `${(S.name || 'short').replace(/\.[^.]+$/, '')}-edited.mp4`, 'video/mp4');
 $('shareSrt').onclick = () => share(S.srtBlob, 'subtitles.srt', 'text/plain');
+
+// ---------- Help & diagnostics ----------
+async function openHelp() {
+  const t = await L.text();
+  $('logView').textContent = t;
+  const n = L.errorCount();
+  $('logSummary').textContent = n ? `${n} error${n > 1 ? 's' : ''} recorded.` : 'No errors recorded.';
+  $('helpDlg').showModal();
+  $('logView').scrollTop = $('logView').scrollHeight;
+}
+$('helpBtn').onclick = openHelp;
+$('closeHelp').onclick = () => $('helpDlg').close();
+$('copyLog').onclick = async () => copy(await L.text(), $('copyLog'));
+$('clearLog').onclick = async () => { L.clear(); L.info('Log cleared'); openHelp(); };
+$('reportLog').onclick = async () => {
+  const t = await L.text();
+  // Keep the link short enough for browsers: the end of the log matters most.
+  const body = 'What happened:\n\n\n```\n' + (t.length > 5500 ? t.slice(0, 900) + '\n…\n' + t.slice(-4500) : t) + '\n```';
+  open(`https://github.com/boyukbas/YT/issues/new?title=${encodeURIComponent('Problem in Shorts Editor')}&body=${encodeURIComponent(body)}`, '_blank');
+};
 
 window.__editor = S; // handy for debugging in the console
 fillLangSelects();

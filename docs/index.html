@@ -131,6 +131,10 @@ summary .hint { color: var(--muted); font-weight: 400; font-size: 14px; margin-l
 .proj .name { flex: 1; min-width: 0; }
 .proj .name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .saved { font-size: 13px; color: var(--muted); }
+dialog#helpDlg { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 18px; width: min(560px, calc(100vw - 24px)); padding: 16px; }
+dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
+#logView { background: var(--bg); border-radius: 10px; padding: 10px; font-size: 11px; line-height: 1.35; max-height: 45svh; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 10px 0; }
+#helpBtn { padding: 10px 14px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -138,7 +142,10 @@ summary .hint { color: var(--muted); font-weight: 400; font-size: 14px; margin-l
 <main>
   <header>
     <h1><span class="bar" aria-hidden="true"></span>Shorts Editor</h1>
-    <button class="btn hidden" id="newBtn">Projects</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn" id="helpBtn" aria-label="Help and diagnostics">?</button>
+      <button class="btn hidden" id="newBtn">Projects</button>
+    </div>
   </header>
 
   <div class="hero" id="empty">
@@ -277,6 +284,21 @@ summary .hint { color: var(--muted); font-weight: 400; font-size: 14px; margin-l
     </section>
   </div>
 </main>
+<dialog id="helpDlg">
+  <h2>Help &amp; diagnostics</h2>
+  <p class="muted">The app keeps a small log of what happened (no video, no subtitle text) on this device only. If something goes wrong, copy it and paste it to Claude, or report it on GitHub.</p>
+  <p class="muted" id="logSummary" style="margin-top:8px"></p>
+  <pre id="logView"></pre>
+  <div class="pair">
+    <button class="btn primary" id="copyLog">Copy log</button>
+    <button class="btn" id="reportLog">Report on GitHub</button>
+  </div>
+  <div class="pair">
+    <button class="btn" id="clearLog">Clear log</button>
+    <button class="btn" id="closeHelp">Close</button>
+  </div>
+  <p class="muted" style="margin-top:8px">GitHub reports are public; the log contains only technical details.</p>
+</dialog>
 <script type="module" src="app.js"></script>
 </body>
 </html>
