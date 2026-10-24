@@ -66,14 +66,14 @@ export async function fixTranscript({ key, model, primary, secondary, names, glo
   // Long transcripts go in parts, so an answer can never be cut off halfway.
   const lines = transcript.split('\n').filter(l => l.trim());
   const parts = [];
-  for (let i = 0; i < lines.length; i += 30) parts.push(lines.slice(i, i + 30));
+  for (let i = 0; i < lines.length; i += 20) parts.push(lines.slice(i, i + 20));
   const out = [];
   const usage = { input_tokens: 0, output_tokens: 0 };
-  for (let k = 0; k < parts.length; k++) {
-    onPart(k + 1, parts.length);
-    const chunk = parts[k].join('\n');
+  // One part; if the answer gets cut off anyway, split the part in half and try each half.
+  const doPart = async (partLines, prevLines, label) => {
+    const chunk = partLines.join('\n');
     const user =
-      `The video is spoken in ${langs}. Below is ${parts.length > 1 ? `part ${k + 1} of ${parts.length} of ` : ''}the automatic transcript, one line per line. ` +
+      `The video is spoken in ${langs}. Below is ${label}the automatic transcript, one line per line. ` +
       `Speech recognition often misheard words, especially when the language switches mid-sentence ` +
       `(it may have written ${secondary ? names.secondary : 'some'} words as gibberish in the other language). ` +
       `Use the context to restore what was actually said.\n\n` +
@@ -83,15 +83,24 @@ export async function fixTranscript({ key, model, primary, secondary, names, glo
       `- Start every line with its language tag: ${secondary ? `[${primary}] or [${secondary}]` : `[${primary}]`}.\n` +
       `- If a word is repeated many times in a row by mistake, keep it once.\n` +
       `- Reply with only the corrected lines, nothing else.` +
-      (k > 0 ? `\n\nFor context, the previous part ended with:\n${parts[k - 1].slice(-3).join('\n')}` : '') +
+      (prevLines.length ? `\n\nFor context, the previous part ended with:\n${prevLines.slice(-3).join('\n')}` : '') +
       (glossary?.trim() ? `\n\nWords taught in this video:\n${glossary.trim()}` : '') +
       `\n\nTranscript:\n${chunk}`;
-    const maxTokens = Math.min(8000, chunk.length * 2 + 1000);
-    const r = await call(key, model, system, user, maxTokens);
-    if (r.stop === 'max_tokens') throw new Error("Claude's answer was cut off — nothing was changed");
+    // Generous limit: you only pay for what Claude actually writes.
+    const r = await call(key, model, system, user, 16000);
     usage.input_tokens += r.usage.input_tokens || 0;
     usage.output_tokens += r.usage.output_tokens || 0;
-    out.push(r.text.replace(/^```[a-z]*\n?|```$/gim, '').trim());
+    if (r.stop === 'max_tokens') {
+      if (partLines.length < 2) throw new Error("Claude's answer was cut off — nothing was changed");
+      const half = Math.ceil(partLines.length / 2);
+      return (await doPart(partLines.slice(0, half), prevLines, label)) + '\n' +
+        (await doPart(partLines.slice(half), partLines.slice(0, half), label));
+    }
+    return r.text.replace(/^```[a-z]*\n?|```$/gim, '').trim();
+  };
+  for (let k = 0; k < parts.length; k++) {
+    onPart(k + 1, parts.length);
+    out.push(await doPart(parts[k], k > 0 ? parts[k - 1] : [], parts.length > 1 ? `part ${k + 1} of ${parts.length} of ` : ''));
   }
   return { text: out.join('\n'), usage, parts: parts.length };
 }

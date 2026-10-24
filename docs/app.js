@@ -701,6 +701,14 @@ $('genBtn').onclick = () => {
 // ---------- Export ----------
 async function exportVideo() {
   const btn = $('exportBtn'), st = $('expStatus');
+  // Guard against exporting almost nothing by accident (trim, cuts or pause settings).
+  const L0 = outLength();
+  if (S.duration > 10 && L0 < S.duration * 0.2) {
+    const why = [S.trimStart > 0.5 || S.trimEnd < S.duration - 0.5 ? `trim ${fmt(S.trimStart)}–${fmt(S.trimEnd)}` : '',
+      S.cuts.length ? `${S.cuts.length} cut(s)` : '', S.removePauses ? `pause removal (${S.silences.length} pauses)` : ''].filter(Boolean).join(', ');
+    L.warn('Export would be very short', { secs: +L0.toFixed(1), duration: +S.duration.toFixed(1), why });
+    if (!confirm(`The edited video would be only ${fmt(L0)} of ${fmt(S.duration)}. Check: ${why || 'your edits'}. Export anyway?`)) return;
+  }
   btn.disabled = true; st.className = 'status'; st.textContent = 'Preparing…'; setBar('expBar', 0);
   video.pause();
   for (const id of ['shareVideo', 'dlVideo', 'shareSrt', 'dlSrt', 'srtNote']) $(id).classList.add('hidden');
@@ -716,7 +724,8 @@ async function exportVideo() {
     if (!vCodec) throw new Error('This browser cannot encode video');
     const aCodec = aTrack ? await getFirstEncodableAudioCodec(['aac', 'opus']) : null;
     const fps = Math.round((await vTrack.computePacketStats(120)).averagePacketRate) || 30;
-    L.info('Export started', { W, H, vCodec, aCodec, fps, burn: S.burn, layout: S.layout, secs: +kept().reduce((a, r) => a + r.end - r.start, 0).toFixed(1) });
+    L.info('Export started', { W, H, vCodec, aCodec, fps, burn: S.burn, layout: S.layout, secs: +kept().reduce((a, r) => a + r.end - r.start, 0).toFixed(1),
+      trim: [+S.trimStart.toFixed(1), +S.trimEnd.toFixed(1)], cuts: S.cuts.length, removePauses: S.removePauses, pauses: S.silences.length, threshold: S.threshold, duration: +S.duration.toFixed(1) });
     const exportStart = Date.now();
 
     const canvas = new OffscreenCanvas(W, H);
