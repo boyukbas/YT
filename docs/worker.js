@@ -2,6 +2,7 @@
 // Served from this site (not a CDN): Safari refuses cross-site scripts inside an isolated worker.
 import { pipeline, Tensor, env } from './lib/transformers.min.js';
 import { transcribeMixed, alignScript } from './core.js';
+import { ensureModel } from './download.js';
 
 const MODELS = {
   small: 'onnx-community/whisper-small_timestamped',
@@ -39,16 +40,33 @@ function dtypeFor(kind, device, f16) {
     : { encoder_model: 'q4', decoder_model_merged: 'q4' };
 }
 
+const SUFFIX = { q8: '_quantized', q4: '_q4', fp16: '_fp16', fp32: '' };
+
 function load(kind, device, f16, label) {
   const key = `${kind}|${device}`;
-  loaded[key] ??= pipeline('automatic-speech-recognition', MODELS[kind], {
-    device, dtype: dtypeFor(kind, device, f16),
-    progress_callback: (p) => {
-      if (p.status === 'progress_total') postMessage({ type: 'download', label, progress: p.progress });
-    },
-  }).catch((e) => { delete loaded[key]; throw e; });
+  loaded[key] ??= (async () => {
+    const dtype = dtypeFor(kind, device, f16);
+    // Big files first, resumably (a dropped connection continues where it stopped).
+    const files = Object.entries(dtype).map(([name, d]) => `onnx/${name}${SUFFIX[d]}.onnx`);
+    let last = -1;
+    await ensureModel(MODELS[kind], files, (pct) => {
+      if (Math.floor(pct) !== last) { last = Math.floor(pct); postMessage({ type: 'download', label, progress: pct }); }
+    });
+    postMessage({ type: 'status', stage: 'loading', label });
+    return pipeline('automatic-speech-recognition', MODELS[kind], { device, dtype });
+  })().catch((e) => { delete loaded[key]; throw e; });
   return loaded[key];
 }
+
+/** Frees the models' memory once a job is over (they reload quickly from the device). */
+async function unloadAll() {
+  for (const [key, p] of Object.entries(loaded)) {
+    delete loaded[key];
+    try { await (await p).dispose(); } catch {}
+  }
+}
+
+let checkpoint = null;
 
 async function run(data, device, f16) {
   postMessage({ type: 'status', stage: 'model', device, threads: env.backends.onnx.wasm.numThreads });
@@ -61,6 +79,8 @@ async function run(data, device, f16) {
     asr, asrSecondary, Tensor, audio: data.audio, primary: data.primary, secondary: data.secondary,
     glossary: data.script ? '' : data.glossary,
     onStatus: (stage, i, n) => postMessage({ type: 'status', stage, i, n }),
+    resume: checkpoint,
+    onCheckpoint: (state) => { checkpoint = state; postMessage({ type: 'checkpoint', state }); },
   });
   if (data.script?.trim()) words = alignScript(data.script, words, data.primary, data.secondary);
   return words;
@@ -68,6 +88,7 @@ async function run(data, device, f16) {
 
 self.onmessage = async ({ data }) => {
   if (data.type !== 'transcribe') return;
+  checkpoint = data.resume || null;
   try {
     const gpu = data.gpu ? await gpuInfo() : { ok: false };
     let words;
@@ -85,5 +106,7 @@ self.onmessage = async ({ data }) => {
     postMessage({ type: 'done', words });
   } catch (e) {
     postMessage({ type: 'error', message: e?.message || String(e) });
+  } finally {
+    await unloadAll();
   }
 };

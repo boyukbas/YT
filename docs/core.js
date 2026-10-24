@@ -212,18 +212,34 @@ export async function applyGlossary(asr, ctx, Tensor, lang, words, terms, allowW
 export async function transcribeMixed({
   asr, asrSecondary = null, Tensor, audio, primary, secondary, glossary = '',
   prefilter = 0.1, sure = 0.97, margin = 0.3, onStatus = () => {},
+  resume = null, onCheckpoint = () => {},
 }) {
   const terms = parseGlossary(glossary);
-  onStatus('main');
-  const words = await transcribeWords(asr, audio, primary);
+  const duration = audio.length / SR;
+
+  // 1) Main language, in ~30 s pieces cut at quiet moments. Saved after every piece.
+  const cuts = splitPoints(audio);
+  let words = resume?.words ? [...resume.words] : [];
+  let mainDone = resume?.mainDone || 0;
+  for (let k = mainDone; k < cuts.length - 1; k++) {
+    onStatus('main', k + 1, cuts.length - 1);
+    const s = cuts[k], e = cuts[k + 1];
+    const part = await transcribeWords(asr, audio.subarray(Math.floor(s * SR), Math.floor(e * SR)), primary, s);
+    words.push(...part);
+    mainDone = k + 1;
+    onCheckpoint({ stage: 'main', mainDone, mainTotal: cuts.length - 1, words });
+  }
   if (!words.length) return words;
+
+  // 2) Per phrase: which language, and fixes. Saved every few phrases.
   const two = secondary && secondary !== primary;
   const groups = phrases(words);
-  const duration = audio.length / SR;
-  const result = [];
   const fixer = asrSecondary || asr;
+  const result = resume?.result ? [...resume.result] : [];
+  const start = resume?.detectDone || 0;
+  let lastSave = Date.now();
 
-  for (let i = 0; i < groups.length; i++) {
+  for (let i = start; i < groups.length; i++) {
     onStatus('detect', i + 1, groups.length);
     const g = groups[i];
     const prevEnd = i > 0 ? groups[i - 1].at(-1).end : 0;
@@ -252,16 +268,39 @@ export async function transcribeMixed({
         }
       }
     }
-    // Word list fixes only for the second language (or the only language): Whisper's main
-    // language is usually right, and swapping there does more harm than good.
+    // Word list fixes only for the second language (or the only language).
     const list = two ? (lang === secondary ? terms.secondary : []) : terms.primary.concat(terms.secondary);
     if (list.length) {
       const fctx = lang === secondary && asrSecondary ? await encodeClip(fixer, Tensor, clip) : (ctx || await encodeClip(asr, Tensor, clip));
       chosen = await applyGlossary(lang === secondary ? fixer : asr, fctx, Tensor, lang, chosen, list, two);
     }
     result.push(...chosen);
+    if (Date.now() - lastSave > 4000 || i === groups.length - 1) {
+      lastSave = Date.now();
+      onCheckpoint({ stage: 'detect', mainDone, mainTotal: cuts.length - 1, words, detectDone: i + 1, detectTotal: groups.length, result });
+    }
   }
   return result.sort((x, y) => x.start - y.start);
+}
+
+/** Cut points (seconds) about every 25-30 s, placed at the quietest moment nearby. */
+export function splitPoints(audio, target = 28, window = 6) {
+  const duration = audio.length / SR;
+  const cuts = [0];
+  const hop = Math.round(SR * 0.02);
+  while (duration - cuts.at(-1) > target + 2) {
+    const from = cuts.at(-1) + target - window, to = cuts.at(-1) + target;
+    let best = to, bestE = Infinity;
+    for (let t = from; t < to; t += 0.02) {
+      const i = Math.floor(t * SR);
+      let e = 0;
+      for (let j = i; j < i + hop && j < audio.length; j++) e += audio[j] * audio[j];
+      if (e < bestE) { bestE = e; best = t; }
+    }
+    cuts.push(best);
+  }
+  cuts.push(duration);
+  return cuts;
 }
 
 // ---------- Script mode ----------

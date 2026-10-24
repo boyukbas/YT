@@ -1,5 +1,5 @@
 import {
-  Input, Output, BlobSource, BufferTarget, Mp4OutputFormat, ALL_FORMATS,
+  Input, Output, BlobSource, BufferTarget, StreamTarget, Mp4OutputFormat, ALL_FORMATS,
   CanvasSink, AudioBufferSink, CanvasSource, AudioBufferSource, QUALITY_HIGH,
   getFirstEncodableVideoCodec, getFirstEncodableAudioCodec,
 } from './lib/mediabunny.min.mjs';
@@ -25,7 +25,7 @@ const S = {
   // per project
   id: null, name: '', file: null, url: null, duration: 0, width: 0, height: 0,
   audio16k: null, levels: [], threshold: -38, silences: [], cuts: [], cutFrom: null,
-  trimStart: 0, trimEnd: 0, words: [], captions: [], script: '', glossary: '', hook: '', dragMode: false,
+  trimStart: 0, trimEnd: 0, words: [], captions: [], script: '', glossary: '', hook: '', dragMode: false, job: null,
   videoBlob: null, srtBlob: null,
 };
 function persist() {
@@ -53,7 +53,7 @@ const fmt = (t) => {
 
 // ---------- Autosave ----------
 let saveTimer = null;
-function dirty() {
+function dirty(now = false) {
   if (!S.id) return;
   $('saved').textContent = '';
   clearTimeout(saveTimer);
@@ -62,11 +62,11 @@ function dirty() {
       await saveProject({
         id: S.id, name: S.name, updatedAt: Date.now(), duration: S.duration, width: S.width, height: S.height,
         trimStart: S.trimStart, trimEnd: S.trimEnd, cuts: S.cuts, threshold: S.threshold,
-        words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook,
+        words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job,
       });
       $('saved').textContent = 'Saved';
     } catch { $('saved').textContent = 'Not saved'; }
-  }, 700);
+  }, now ? 0 : 700);
 }
 
 // ---------- Timeline: which parts of the original are kept ----------
@@ -197,12 +197,12 @@ async function openVideo(file, project = null) {
       Object.assign(S, {
         id: project.id, name: project.name, trimStart: project.trimStart, trimEnd: project.trimEnd,
         cuts: project.cuts || [], threshold: project.threshold ?? suggestThreshold(S.levels), words: project.words || [],
-        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '',
+        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '', job: project.job || null,
       });
     } else {
       Object.assign(S, {
         id: crypto.randomUUID(), name: file.name || 'Video', trimStart: 0, trimEnd: S.duration, cuts: [],
-        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '',
+        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '', job: null,
       });
       try {
         await saveFile(S.id, file);
@@ -218,6 +218,13 @@ async function openVideo(file, project = null) {
     $('newBtn').classList.remove('hidden');
     $('genStatus').className = 'status';
     $('genStatus').textContent = S.captions.length ? `${S.captions.length} subtitle lines.` : 'First run downloads the speech model (about 250 MB) — use Wi‑Fi. It stays on the device afterwards.';
+    if (crashed && crashed.id === S.id) {
+      $('genStatus').className = 'status error';
+      $('genStatus').textContent = S.job
+        ? 'Last time the page stopped while making subtitles — the device most likely ran out of memory. Your progress is saved: tap Continue. If it stops again, choose “Fast” accuracy and close other apps.'
+        : 'Last time the page stopped before subtitles got going. Downloaded parts are kept, so it continues where it stopped. If it stops again, choose “Fast” accuracy and close other apps.';
+      crashed = null;
+    }
     $('expStatus').textContent = '';
     for (const id of ['shareVideo', 'dlVideo', 'shareSrt', 'dlSrt', 'srtNote']) $(id).classList.add('hidden');
     st.textContent = '';
@@ -231,6 +238,20 @@ async function openVideo(file, project = null) {
   }
 }
 $('fileInput').addEventListener('change', e => { const f = e.target.files[0]; e.target.value = ''; if (f) openVideo(f); });
+
+// If the page died during a subtitle job (usually memory), remember it to explain and resume.
+let crashed = null;
+try {
+  const r = JSON.parse(localStorage.getItem('jobRunning') || 'null');
+  if (r) { crashed = r; localStorage.removeItem('jobRunning'); L.warn('Previous subtitle job did not finish (page closed or ran out of memory)', r); }
+} catch {}
+let wakeLock = null;
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock) wakeLock = await navigator.wakeLock?.request('screen');
+    if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch {}
+}
 
 async function showProjects() {
   video.pause();
@@ -370,6 +391,7 @@ function syncHook() {
   $('hookSecs').value = S.hookSecs; $('hookSecsOut').textContent = `${S.hookSecs} s`;
 }
 function syncSubs() {
+  queueMicrotask(syncGenButton);
   $('primary').value = S.primary; $('secondary').value = S.secondary;
   $('script').value = S.script; $('glossary').value = S.glossary;
   $('scriptHint').textContent = S.script.trim() ? 'added' : 'optional';
@@ -481,8 +503,8 @@ $('pauseToggle').onchange = e => { S.removePauses = e.target.checked; persist();
 $('thresh').oninput = e => { S.threshold = +e.target.value; findSilences(); syncPauses(); syncLength(); dirty(); };
 $('minPause').oninput = e => { S.minPause = +e.target.value; persist(); findSilences(); syncPauses(); syncLength(); };
 $('autoLevel').onclick = () => { S.threshold = suggestThreshold(S.levels); findSilences(); syncPauses(); syncLength(); dirty(); };
-$('primary').onchange = e => { S.primary = e.target.value; persist(); syncStyle(); };
-$('secondary').onchange = e => { S.secondary = e.target.value; persist(); syncStyle(); };
+$('primary').onchange = e => { S.primary = e.target.value; persist(); syncStyle(); syncGenButton(); };
+$('secondary').onchange = e => { S.secondary = e.target.value; persist(); syncStyle(); syncGenButton(); };
 $('script').oninput = e => { S.script = e.target.value; $('scriptHint').textContent = S.script.trim() ? 'added' : 'optional'; dirty(); };
 $('glossary').oninput = e => { S.glossary = e.target.value; dirty(); syncSubs(); };
 for (const b of $('accSeg').children) b.onclick = () => { S.accuracy = b.dataset.v; persist(); syncSubs(); };
@@ -582,8 +604,28 @@ function setBar(id, frac) {
   bar.classList.toggle('hidden', frac == null);
   bar.firstElementChild.style.width = `${Math.round((frac || 0) * 100)}%`;
 }
+const secondLang = () => (S.secondary && S.secondary !== S.primary ? S.secondary : '');
+const jobKey = () => JSON.stringify({ p: S.primary, s: secondLang(), a: S.accuracy, g: S.glossary.trim(), n: S.audio16k?.length || 0 });
+const jobPct = (st) => !st ? 0 : st.stage === 'main'
+  ? Math.round(30 * st.mainDone / st.mainTotal)
+  : Math.round(30 + 70 * (st.detectDone || 0) / (st.detectTotal || 1));
+function syncGenButton() {
+  const btn = $('genBtn');
+  if (btn.disabled) return;
+  const resumable = S.job && S.job.key === jobKey();
+  btn.textContent = resumable ? `Continue subtitles (${jobPct(S.job.state)}% done)` : S.captions.length ? 'Make subtitles again' : 'Make subtitles';
+  $('genRestart').classList.toggle('hidden', !resumable);
+}
+$('genRestart').onclick = () => { S.job = null; dirty(); syncGenButton(); };
+
 $('genBtn').onclick = () => {
   if (!S.audio16k?.length) { $('genStatus').textContent = 'This video has no sound to transcribe.'; return; }
+  const resume = S.job && S.job.key === jobKey() ? S.job.state : null;
+  if (!resume) S.job = null;
+  $('genRestart').classList.add('hidden');
+  try { localStorage.setItem('jobRunning', JSON.stringify({ id: S.id, at: new Date().toISOString(), accuracy: S.accuracy, gpu: S.gpu })); } catch {}
+  keepAwake(true);
+  if (resume) L.info('Resuming subtitles', { pct: jobPct(resume) });
   worker ??= new Worker('worker.js', { type: 'module' });
   const btn = $('genBtn'), st = $('genStatus');
   btn.disabled = true; st.className = 'status'; st.textContent = 'Starting…'; setBar('genBar', 0);
@@ -595,6 +637,7 @@ $('genBtn').onclick = () => {
   let lastDl = -10;
   worker.onmessage = ({ data }) => {
     if (data.type === 'log') { L.log(data.level, 'engine: ' + data.message); return; }
+    if (data.type === 'checkpoint') { S.job = { key: jobKey(), state: data.state }; dirty(true); return; }
     if (data.type === 'download' && data.progress - lastDl >= 25) { lastDl = data.progress; L.info(`Downloading ${data.label} ${Math.round(data.progress)}%`); }
     if (data.type === 'status' && data.stage !== 'detect') L.info('Subtitles: ' + data.stage, { device: data.device, threads: data.threads });
     if (data.type === 'download') {
@@ -606,26 +649,34 @@ $('genBtn').onclick = () => {
       note = " The graphics chip didn't work here, so it used normal mode (now remembered).";
     } else if (data.type === 'status') {
       if (data.stage === 'model') st.textContent = `Loading the speech model${data.device === 'webgpu' ? ' on the graphics chip' : ''}…`;
-      if (data.stage === 'main') { st.textContent = `Listening in ${langName(S.primary)}…`; setBar('genBar', 0.15); }
+      if (data.stage === 'loading') st.textContent = `Loading the ${data.label}…`;
+      if (data.stage === 'main') {
+        st.textContent = `Listening in ${langName(S.primary)}… ${data.n > 1 ? `part ${data.i}/${data.n}` : ''}`;
+        setBar('genBar', 0.3 * (data.i - 1) / (data.n || 1));
+      }
       if (data.stage === 'detect' && data.n) {
         st.textContent = second ? `Checking for ${langName(second)} words… ${data.i}/${data.n}` : `Checking words… ${data.i}/${data.n}`;
         setBar('genBar', 0.3 + 0.7 * data.i / data.n);
       }
     } else if (data.type === 'done') {
+      localStorage.removeItem('jobRunning'); keepAwake(false);
+      S.job = null;
       S.words = data.words; rebuildCaptions();
-      btn.disabled = false; btn.textContent = 'Make subtitles again'; setBar('genBar', null);
+      btn.disabled = false; syncGenButton(); setBar('genBar', null);
       const secs = Math.round((Date.now() - started) / 1000);
       L.info('Subtitles done', { secs, words: S.words.length, lines: S.captions.length });
       st.textContent = (S.words.length ? `${S.captions.length} subtitle lines in ${secs} s. Check them below.` : 'No speech found in this video.') + note;
     } else if (data.type === 'error') {
-      btn.disabled = false; setBar('genBar', null);
+      localStorage.removeItem('jobRunning'); keepAwake(false);
+      btn.disabled = false; syncGenButton(); setBar('genBar', null);
       st.className = 'status error';
-      st.textContent = `Subtitles failed: ${String(data.message).replace(/\.$/, '')}. Check the connection for the first download and try again. (Tap ? → Copy log)`;
+      st.textContent = `Subtitles failed: ${String(data.message).replace(/\.$/, '')}. Your progress is saved — tap the button to continue. (Tap ? → Copy log)`;
       L.error('Subtitles failed: ' + data.message);
     }
   };
   worker.onerror = (e) => {
-    btn.disabled = false; setBar('genBar', null);
+    localStorage.removeItem('jobRunning'); keepAwake(false);
+    btn.disabled = false; syncGenButton(); setBar('genBar', null);
     st.className = 'status error';
     st.textContent = `The speech engine couldn't start${e.message ? `: ${e.message}` : ''}. Reload the page and try again. (Tap ? → Copy log)`;
     L.error('Speech engine could not start: ' + (e.message || 'no message'), { file: (e.filename || '').split('/').pop(), line: e.lineno });
@@ -633,7 +684,7 @@ $('genBtn').onclick = () => {
   };
   worker.postMessage({
     type: 'transcribe', audio: S.audio16k, primary: S.primary, secondary: second,
-    script: S.script, glossary: S.glossary, accuracy: S.accuracy, gpu: S.gpu,
+    script: S.script, glossary: S.glossary, accuracy: S.accuracy, gpu: S.gpu, resume,
   });
 };
 
@@ -660,7 +711,18 @@ async function exportVideo() {
 
     const canvas = new OffscreenCanvas(W, H);
     const ctx = canvas.getContext('2d');
-    const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() });
+    // Write the video straight to the device's storage when possible, so a long export
+    // doesn't have to fit in memory. Falls back to memory on browsers without it.
+    let fileHandle = null, target;
+    try {
+      const root = await navigator.storage.getDirectory();
+      try { await root.removeEntry('export.mp4'); } catch {}
+      fileHandle = await root.getFileHandle('export.mp4', { create: true });
+      target = new StreamTarget(await fileHandle.createWritable(), { chunked: true });
+    } catch { fileHandle = null; target = new BufferTarget(); }
+    L.info('Export target: ' + (fileHandle ? 'device storage' : 'memory'));
+    keepAwake(true);
+    const output = new Output({ format: new Mp4OutputFormat({ fastStart: fileHandle ? false : 'in-memory' }), target });
     const vSource = new CanvasSource(canvas, { codec: vCodec, bitrate: QUALITY_HIGH });
     output.addVideoTrack(vSource, { frameRate: fps });
     let aSource = null;
@@ -728,7 +790,7 @@ async function exportVideo() {
     st.textContent = 'Finishing…';
     await output.finalize();
 
-    S.videoBlob = new Blob([output.target.buffer], { type: 'video/mp4' });
+    S.videoBlob = fileHandle ? await fileHandle.getFile() : new Blob([output.target.buffer], { type: 'video/mp4' });
     const srtCaps = outputCaptions();
     S.srtBlob = srtCaps.length ? new Blob([toSRT(srtCaps)], { type: 'text/plain' }) : null;
     const base = (S.name || 'short').replace(/\.[^.]+$/, '');
@@ -752,6 +814,7 @@ async function exportVideo() {
     st.textContent = `Export failed: ${String(e.message).replace(/\.$/, '')}. (Tap ? → Copy log)`;
     L.error('Export failed: ' + e.message);
   } finally {
+    keepAwake(false);
     btn.disabled = false; setBar('expBar', null);
   }
 }
