@@ -56,20 +56,26 @@ const fmt = (t) => {
 
 // ---------- Autosave ----------
 let saveTimer = null;
+let savePending = false;
+async function saveNow() {
+  clearTimeout(saveTimer);
+  if (!S.id) return;
+  savePending = false;
+  try {
+    await saveProject({
+      id: S.id, name: S.name, updatedAt: Date.now(), duration: S.duration, width: S.width, height: S.height,
+      trimStart: S.trimStart, trimEnd: S.trimEnd, cuts: S.cuts, threshold: S.threshold,
+      words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job,
+    });
+    $('saved').textContent = 'Saved';
+  } catch { $('saved').textContent = 'Not saved'; }
+}
 function dirty(now = false) {
   if (!S.id) return;
   $('saved').textContent = '';
+  savePending = true;
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    try {
-      await saveProject({
-        id: S.id, name: S.name, updatedAt: Date.now(), duration: S.duration, width: S.width, height: S.height,
-        trimStart: S.trimStart, trimEnd: S.trimEnd, cuts: S.cuts, threshold: S.threshold,
-        words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job,
-      });
-      $('saved').textContent = 'Saved';
-    } catch { $('saved').textContent = 'Not saved'; }
-  }, now ? 0 : 700);
+  saveTimer = setTimeout(saveNow, now ? 0 : 700);
 }
 
 // ---------- Timeline: which parts of the original are kept ----------
@@ -234,6 +240,7 @@ async function openVideo(file, project = null) {
     syncAll();
     layoutStage();
     scrollTo(0, 0);
+    if (history.state?.view !== 'editor') history.pushState({ view: 'editor' }, '');
   } catch (e) {
     st.className = 'status error';
     st.textContent = `Couldn't open this video: ${String(e.message).replace(/\.$/, '')}. (Tap ? → Copy log)`;
@@ -288,7 +295,34 @@ async function showProjects() {
     box.appendChild(row);
   }
 }
-$('newBtn').onclick = showProjects;
+// ---------- Back button: go back to the projects screen instead of closing the app ----------
+let busy = null;   // 'subtitles' | 'cloud' | 'claude' | 'export' while a job runs
+function leaveEditor() {
+  if (busy && busy !== 'subtitles') {
+    // Cloud and export jobs can't be paused safely; stay until they finish.
+    $(busy === 'export' ? 'expStatus' : 'genStatus').textContent += ' — please wait for this to finish before leaving.';
+    return false;
+  }
+  if (busy === 'subtitles' && worker) {
+    // Stop on-device subtitles; their progress is saved and can be continued later.
+    worker.terminate(); worker = null; busy = null;
+    localStorage.removeItem('jobRunning'); keepAwake(false);
+    $('genBtn').disabled = false; setBar('genBar', null);
+    L.info('Subtitles paused (left the project); progress saved');
+  }
+  // Save any pending edits first, so the projects list is up to date.
+  (savePending ? saveNow() : Promise.resolve()).then(showProjects);
+  return true;
+}
+$('newBtn').onclick = () => { if (history.state?.view === 'editor') history.back(); else leaveEditor(); };
+let ignorePop = false;
+addEventListener('popstate', () => {
+  if (ignorePop) { ignorePop = false; return; }
+  if ($('helpDlg').open) { $('helpDlg').close(); return; }
+  if (!$('editor').classList.contains('hidden')) {
+    if (!leaveEditor()) history.pushState({ view: 'editor' }, '');   // stay
+  }
+});
 
 // ---------- Preview ----------
 const video = $('video');
@@ -634,6 +668,7 @@ $('genBtn').onclick = () => {
   worker ??= new Worker('worker.js', { type: 'module' });
   const btn = $('genBtn'), st = $('genStatus');
   btn.disabled = true; st.className = 'status'; st.textContent = 'Starting…'; setBar('genBar', 0);
+  busy = 'subtitles';
   video.pause();
   const second = S.secondary && S.secondary !== S.primary ? S.secondary : '';
   const started = Date.now();
@@ -668,6 +703,7 @@ $('genBtn').onclick = () => {
         setBar('genBar', 0.3 + 0.7 * data.i / data.n);
       }
     } else if (data.type === 'done') {
+      busy = null;
       localStorage.removeItem('jobRunning'); keepAwake(false);
       S.job = null;
       S.words = data.words; rebuildCaptions();
@@ -677,6 +713,7 @@ $('genBtn').onclick = () => {
       st.textContent = (S.words.length ? `${S.captions.length} subtitle lines in ${secs} s. Check them below.` : 'No speech found in this video.') + note;
       if (S.words.length && C.getKey() && (S.claudeAuto || claudeHandlesLangs())) runClaudeFix();
     } else if (data.type === 'error') {
+      busy = null;
       localStorage.removeItem('jobRunning'); keepAwake(false);
       btn.disabled = false; syncGenButton(); setBar('genBar', null);
       st.className = 'status error';
@@ -685,6 +722,7 @@ $('genBtn').onclick = () => {
     }
   };
   worker.onerror = (e) => {
+    busy = null;
     localStorage.removeItem('jobRunning'); keepAwake(false);
     btn.disabled = false; syncGenButton(); setBar('genBar', null);
     st.className = 'status error';
@@ -710,6 +748,7 @@ async function exportVideo() {
     if (!confirm(`The edited video would be only ${fmt(L0)} of ${fmt(S.duration)}. Check: ${why || 'your edits'}. Export anyway?`)) return;
   }
   btn.disabled = true; st.className = 'status'; st.textContent = 'Preparing…'; setBar('expBar', 0);
+  busy = 'export';
   video.pause();
   for (const id of ['shareVideo', 'dlVideo', 'shareSrt', 'dlSrt', 'srtNote']) $(id).classList.add('hidden');
   try {
@@ -833,7 +872,7 @@ async function exportVideo() {
     st.textContent = `Export failed: ${String(e.message).replace(/\.$/, '')}. (Tap ? → Copy log)`;
     L.error('Export failed: ' + e.message);
   } finally {
-    keepAwake(false);
+    busy = null; keepAwake(false);
     btn.disabled = false; setBar('expBar', null);
   }
 }
@@ -878,6 +917,7 @@ async function runCloud() {
   const btn = $('genBtn'), st = $('genStatus');
   if (!O.getKey()) { st.className = 'status error'; st.textContent = 'Add your OpenAI key first (Speech recognition → OpenAI).'; return; }
   btn.disabled = true; st.className = 'status'; st.textContent = 'Sending the sound to OpenAI…'; setBar('genBar', 0.1);
+  busy = 'cloud';
   video.pause(); keepAwake(true);
   const second = secondLang();
   const t0 = Date.now();
@@ -901,7 +941,7 @@ async function runCloud() {
     st.textContent = `Subtitles failed: ${String(e.message).replace(/\.$/, '')}. (Tap ? → Copy log)`;
     L.error('OpenAI transcription failed: ' + e.message);
   } finally {
-    keepAwake(false); btn.disabled = false; syncGenButton(); setBar('genBar', null);
+    busy = null; keepAwake(false); btn.disabled = false; syncGenButton(); setBar('genBar', null);
   }
 }
 syncEngine();
@@ -944,7 +984,7 @@ $('claudeTest').onclick = async () => {
 let fixing = false;
 async function runClaudeFix() {
   if (fixing || !S.captions.length) return;
-  fixing = true;
+  fixing = true; const prevBusy = busy; busy = 'claude';
   const st = $('genStatus'), btn = $('fixClaude');
   btn.disabled = true;
   const before = st.textContent;
@@ -976,7 +1016,7 @@ async function runClaudeFix() {
     st.textContent = `Claude fix failed: ${String(e.message).replace(/\.$/, '')}. Your subtitles are unchanged. (Tap ? → Copy log)`;
     L.error('Claude fix failed: ' + e.message);
   } finally {
-    fixing = false; btn.disabled = false;
+    fixing = false; btn.disabled = false; busy = prevBusy === 'claude' ? null : prevBusy;
   }
 }
 $('fixClaude').onclick = runClaudeFix;
@@ -998,10 +1038,12 @@ async function openHelp() {
   const n = L.errorCount();
   $('logSummary').textContent = n ? `${n} error${n > 1 ? 's' : ''} recorded.` : 'No errors recorded.';
   $('helpDlg').showModal();
+  history.pushState({ view: 'help' }, '');
   $('logView').scrollTop = $('logView').scrollHeight;
 }
 $('helpBtn').onclick = openHelp;
 $('closeHelp').onclick = () => $('helpDlg').close();
+$('helpDlg').addEventListener('close', () => { if (history.state?.view === 'help') { ignorePop = true; history.back(); } });
 $('copyLog').onclick = async () => copy(await L.text(), $('copyLog'));
 $('clearLog').onclick = async () => { L.clear(); L.info('Log cleared'); openHelp(); };
 $('reportLog').onclick = async () => {
