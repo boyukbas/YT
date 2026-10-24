@@ -644,6 +644,7 @@ $('genBtn').onclick = () => {
     if (data.type === 'log') { L.log(data.level, 'engine: ' + data.message); return; }
     if (data.type === 'checkpoint') { S.job = { key: jobKey(), state: data.state }; dirty(true); return; }
     if (data.type === 'download' && data.progress - lastDl >= 25) { lastDl = data.progress; L.info(`Downloading ${data.label} ${Math.round(data.progress)}%`); }
+    if (data.type === 'status' && data.stage === 'retry') { L.warn(`Subtitles: part ${data.i}/${data.n} re-read in short slices`, data.info); return; }
     if (data.type === 'status' && data.stage !== 'detect') L.info('Subtitles: ' + data.stage, { device: data.device, threads: data.threads, part: data.n ? `${data.i}/${data.n}` : undefined });
     if (data.type === 'status' && data.stage === 'detect' && data.n && (data.i % 10 === 0 || data.i === data.n)) {
       L.info(`Subtitles: checked ${data.i}/${data.n} phrases`, { secs: Math.round((Date.now() - started) / 1000) });

@@ -75,7 +75,9 @@ export async function transcribeWords(asr, audio, lang, offset = 0) {
     if (e == null) e = s + 0.3;
     words.push({ text, start: offset + s, end: offset + e, lang });
   }
-  return dropRepeats(words);
+  const kept = dropRepeats(words);
+  kept.looped = words.length - kept.length;   // how many words a repetition loop produced
+  return kept;
 }
 
 /**
@@ -275,7 +277,21 @@ export async function transcribeMixed({
   for (let k = mainDone; k < cuts.length - 1; k++) {
     onStatus('main', k + 1, cuts.length - 1);
     const s = cuts[k], e = cuts[k + 1];
-    const part = await transcribeWords(asr, audio.subarray(Math.floor(s * SR), Math.floor(e * SR)), primary, s);
+    const sub = audio.subarray(Math.floor(s * SR), Math.floor(e * SR));
+    let part = await transcribeWords(asr, sub, primary, s);
+    // Whisper sometimes loops or skips a stretch. If it looped, or produced far fewer words
+    // than speech normally has, read the piece again in short ~9 s slices.
+    const perSec = part.length / Math.max(1, e - s);
+    if (part.looped >= 6 || (perSec < 1.3 && hasSpeech(sub)) || skippedSpeech(sub, part, s)) {
+      const inner = splitPoints(sub, 9, 3);
+      const retry = [];
+      for (let q = 0; q < inner.length - 1; q++) {
+        const a = inner[q], b = inner[q + 1];
+        retry.push(...await transcribeWords(asr, sub.subarray(Math.floor(a * SR), Math.floor(b * SR)), primary, s + a));
+      }
+      onStatus('retry', k + 1, cuts.length - 1, { before: part.length, after: retry.length, looped: part.looped });
+      if (retry.length > part.length) part = retry;
+    }
     words.push(...part);
     mainDone = k + 1;
     onCheckpoint({ stage: 'main', mainDone, mainTotal: cuts.length - 1, words });
@@ -337,6 +353,30 @@ export async function transcribeMixed({
     }
   }
   return result.sort((x, y) => x.start - y.start);
+}
+
+/** Rough check that a piece of audio contains speech (not just silence or quiet noise). */
+function hasSpeech(audio) {
+  const hop = Math.round(SR * 0.05);
+  let loud = 0, n = 0;
+  for (let i = 0; i + hop <= audio.length; i += hop) {
+    let e = 0;
+    for (let j = i; j < i + hop; j++) e += audio[j] * audio[j];
+    if (Math.sqrt(e / hop) > 0.02) loud++;
+    n++;
+  }
+  return n > 0 && loud / n > 0.25;
+}
+
+/** True if Whisper left a gap of 4 s or more with no words where there is clearly speech. */
+function skippedSpeech(sub, part, offset) {
+  const len = sub.length / SR;
+  const edges = [0, ...part.flatMap(w => [w.start - offset, w.end - offset]), len];
+  for (let i = 0; i + 1 < edges.length; i += 2) {
+    const a = Math.max(0, edges[i]), b = Math.min(len, edges[i + 1]);
+    if (b - a >= 4 && hasSpeech(sub.subarray(Math.floor(a * SR), Math.floor(b * SR)))) return true;
+  }
+  return false;
 }
 
 /** Cut points (seconds) about every 25-30 s, placed at the quietest moment nearby. */

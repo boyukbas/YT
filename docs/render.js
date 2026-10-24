@@ -21,15 +21,37 @@ const POP = 0.14;     // seconds for the pop-in animation
 export function blocksAt(t, caps, layout, primary) {
   const i = caps.findIndex(c => t >= c.start && t < c.end && c.text.trim());
   if (layout !== 'pair') return i >= 0 ? [caps[i]] : [];
-  const isPair = (p, n) => p && n && p.lang === primary && n.lang !== primary && n.start - p.end <= PAIR_GAP;
+  const partner = pairsOf(caps);
   if (i >= 0) {
-    const c = caps[i];
-    if (c.lang !== primary && isPair(caps[i - 1], c)) return [caps[i - 1], c];
-    return [c];
+    const p = partner.get(i);
+    if (p !== undefined && p < i) return [caps[p], caps[i]];   // translation: show both, in spoken order
+    return [caps[i]];
   }
+  // In the short gap between a line and its translation, keep the first line up.
   const prev = caps.findLastIndex(c => c.end <= t);
-  if (prev >= 0 && isPair(caps[prev], caps[prev + 1]) && t < caps[prev + 1].start) return [caps[prev]];
+  const p = partner.get(prev);
+  if (prev >= 0 && p !== undefined && p > prev && t < caps[p].start) return [caps[prev]];
   return [];
+}
+
+/**
+ * Pairs each line with the next one when it's in the other language and follows closely —
+ * whichever language comes first. Each line belongs to at most one pair.
+ */
+const pairCache = new WeakMap();
+function pairsOf(caps) {
+  const key = caps.map(c => `${c.lang}${c.start}${c.end}`).join('|');
+  const hit = pairCache.get(caps);
+  if (hit && hit.key === key) return hit.map;
+  const map = new Map();
+  for (let i = 0; i + 1 < caps.length;) {
+    const a = caps[i], b = caps[i + 1];
+    if (a.lang !== b.lang && b.start - a.end <= PAIR_GAP && a.text.trim() && b.text.trim()) {
+      map.set(i, i + 1); map.set(i + 1, i); i += 2;
+    } else i++;
+  }
+  pairCache.set(caps, { key, map });
+  return map;
 }
 
 function layoutWords(ctx, words, maxW, space) {
