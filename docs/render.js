@@ -18,8 +18,15 @@ const POP = 0.14;     // seconds for the pop-in animation
  * layout "single": one line at a time. layout "pair": a main-language line stays up and
  * its second-language translation appears under it.
  */
+const HOLD = 1.2; // keep a line up through short pauses, so speech never runs without a subtitle
+
 export function blocksAt(t, caps, layout, primary) {
-  const i = caps.findIndex(c => t >= c.start && t < c.end && c.text.trim());
+  let i = caps.findIndex(c => t >= c.start && t < c.end && c.text.trim());
+  if (i < 0) {
+    // In a short gap between two lines, keep showing the previous one.
+    const prev = caps.findLastIndex(c => c.end <= t && c.text.trim());
+    if (prev >= 0 && prev + 1 < caps.length && caps[prev + 1].start - caps[prev].end <= HOLD && t < caps[prev + 1].start) i = prev;
+  }
   if (layout !== 'pair') return i >= 0 ? [caps[i]] : [];
   const partner = pairsOf(caps);
   if (i >= 0) {
