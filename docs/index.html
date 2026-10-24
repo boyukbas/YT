@@ -212,12 +212,24 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
         <p class="muted" style="margin-bottom:8px">The words you teach in this video, one pair per line. Misheard second-language words are corrected to these.</p>
         <textarea class="area" id="glossary" placeholder="der Wald – orman&#10;im Wald – ormanda&#10;die Freizeit – boş zaman"></textarea>
       </details>
+      <div class="stack" style="margin-top:12px"><div class="head"><span>Speech recognition</span></div>
+        <div class="seg" id="engineSeg" role="group" aria-label="Speech recognition">
+          <button data-v="device">On this device</button><button data-v="openai">OpenAI (cloud)</button>
+        </div></div>
+      <div id="openaiBox" class="hidden" style="margin-top:10px">
+        <p class="muted">The video's sound is sent to OpenAI and comes back as text in seconds, however slow this device is. About $0.006 per minute of video. Needs your own OpenAI API key (sk-proj-…), stored only on this device. OpenAI doesn't mark languages — with a Claude key added below, Claude does that automatically.</p>
+        <input type="password" class="area" id="openaiKey" placeholder="sk-proj-…" autocomplete="off" spellcheck="false" style="min-height:auto;margin-top:8px">
+        <div class="pair"><button class="btn" id="openaiTest">Test key</button><button class="btn" id="openaiRemove">Remove key</button></div>
+        <p class="status" id="openaiStatus"></p>
+      </div>
+      <div id="deviceOpts">
       <div class="stack" style="margin-top:12px"><div class="head"><span>Accuracy</span></div>
         <div class="seg" id="accSeg" role="group" aria-label="Accuracy">
           <button data-v="normal">Fast</button><button data-v="second">Better 2nd language</button><button data-v="all">Best</button>
         </div>
         <p class="muted" id="accHint" style="margin-top:6px"></p></div>
       <div class="row"><label for="gpuToggle">Use the graphics chip<br><span class="muted">Faster on recent iPads, iPhones and Android phones</span></label><input type="checkbox" class="switch" id="gpuToggle"></div>
+      </div>
       <details id="claudeBox">
         <summary>Claude <span class="hint" id="claudeHint">not set up</span></summary>
         <p class="muted" style="margin-bottom:8px">Optional: with your own Claude API key, Claude fixes the transcript using the context and marks each line's language. Claude can't hear audio, so the speech recognition still runs on this device. The key is stored only on this device and is never logged — set a spending limit in the Claude Console.</p>

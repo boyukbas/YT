@@ -5,6 +5,7 @@ import {
 } from './lib/mediabunny.min.mjs';
 import { LANGS, SR, buildCaptions, toSRT, alignScript } from './core.js';
 import * as C from './claude.js';
+import * as O from './openai.js';
 import { blocksAt, drawCaptions, drawHook, drawSafeZones, FONTS, fontCss } from './render.js';
 import { saveFile, saveProject, listProjects, loadProject, deleteProject } from './store.js';
 import * as L from './log.js';
@@ -17,12 +18,12 @@ const $ = (id) => document.getElementById(id);
 // ---------- Settings (remembered between visits) ----------
 const COLORS = { white: '#ffffff', yellow: '#ffd21a', cyan: '#4de6ff', green: '#73ff73', pink: '#ff80cc', orange: '#ff9e33' };
 const SETTINGS = ['primary', 'secondary', 'color1', 'color2', 'caps', 'wordsPer', 'pos', 'burn', 'removePauses',
-  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs', 'accuracy', 'claudeModel', 'claudeFast', 'claudeAuto'];
+  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs', 'accuracy', 'claudeModel', 'claudeFast', 'claudeAuto', 'engine'];
 const saved = (() => { try { return JSON.parse(localStorage.getItem('settings') || '{}'); } catch { return {}; } })();
 const S = {
   primary: 'de', secondary: 'tr', color1: 'white', color2: 'yellow', caps: true, wordsPer: 3, pos: 0.35, burn: true,
   removePauses: true, minPause: 0.4, layout: 'single', size: 0.075, box: false, highlight: false, accurate: false, gpu: true,
-  posX: 0.5, font: 'modern', anim: false, hookSecs: 3, claudeModel: 'claude-sonnet-5-5', claudeFast: false, claudeAuto: true, accuracy: saved.accurate ? 'second' : 'normal',
+  posX: 0.5, font: 'modern', anim: false, hookSecs: 3, claudeModel: 'claude-sonnet-5-5', claudeFast: false, claudeAuto: true, engine: 'device', accuracy: saved.accurate ? 'second' : 'normal',
   ...saved,
   // per project
   id: null, name: '', file: null, url: null, duration: 0, width: 0, height: 0,
@@ -623,6 +624,7 @@ $('genRestart').onclick = () => { S.job = null; dirty(); syncGenButton(); };
 
 $('genBtn').onclick = () => {
   if (!S.audio16k?.length) { $('genStatus').textContent = 'This video has no sound to transcribe.'; return; }
+  if (S.engine === 'openai') { runCloud(); return; }
   const resume = S.job && S.job.key === jobKey() ? S.job.state : null;
   if (!resume) S.job = null;
   $('genRestart').classList.add('hidden');
@@ -831,6 +833,68 @@ const share = async (blob, name, type) => {
 };
 $('shareVideo').onclick = () => share(S.videoBlob, `${(S.name || 'short').replace(/\.[^.]+$/, '')}-edited.mp4`, 'video/mp4');
 $('shareSrt').onclick = () => share(S.srtBlob, 'subtitles.srt', 'text/plain');
+
+// ---------- OpenAI cloud speech recognition (optional, own API key) ----------
+function syncEngine() {
+  for (const b of $('engineSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === S.engine));
+  $('openaiBox').classList.toggle('hidden', S.engine !== 'openai');
+  $('deviceOpts').classList.toggle('hidden', S.engine === 'openai');
+  const k = O.getKey();
+  $('openaiKey').value = k ? '••••••••••••' + k.slice(-4) : '';
+}
+for (const b of $('engineSeg').children) b.onclick = () => { S.engine = b.dataset.v; persist(); syncEngine(); };
+$('openaiKey').onfocus = (e) => { if (e.target.value.startsWith('••')) e.target.value = ''; };
+$('openaiKey').onchange = (e) => {
+  const v = e.target.value.trim();
+  if (v && !v.startsWith('••')) {
+    const shape = O.keyShape(v);
+    O.setKey(v); L.info('OpenAI key saved', shape);
+    $('openaiStatus').textContent = shape.looksLikeClaudeKey
+      ? 'This is a Claude key (sk-ant-…) — it goes in the Claude settings below. OpenAI keys start with sk-proj-.'
+      : shape.looksLikeOpenAIKey ? 'Key saved. Tap “Test key”.' : 'This doesn’t look like an OpenAI key (they start with sk-). Check that you copied all of it.';
+  }
+  syncEngine();
+};
+$('openaiRemove').onclick = () => { O.setKey(''); L.info('OpenAI key removed'); $('openaiStatus').textContent = 'Key removed from this device.'; syncEngine(); };
+$('openaiTest').onclick = async () => {
+  const st = $('openaiStatus');
+  if (!O.getKey()) { st.textContent = 'Paste your OpenAI key first.'; return; }
+  st.className = 'status'; st.textContent = 'Testing…';
+  try { await O.testKey(O.getKey()); st.textContent = 'The key works ✓'; L.info('OpenAI key test ok'); }
+  catch (e) { st.className = 'status error'; st.textContent = e.message; L.error('OpenAI key test failed: ' + e.message); }
+};
+
+async function runCloud() {
+  const btn = $('genBtn'), st = $('genStatus');
+  if (!O.getKey()) { st.className = 'status error'; st.textContent = 'Add your OpenAI key first (Speech recognition → OpenAI).'; return; }
+  btn.disabled = true; st.className = 'status'; st.textContent = 'Sending the sound to OpenAI…'; setBar('genBar', 0.1);
+  video.pause(); keepAwake(true);
+  const second = secondLang();
+  const t0 = Date.now();
+  L.info('Subtitles started (OpenAI)', { primary: S.primary, secondary: second, script: !!S.script.trim(), glossary: !!S.glossary.trim(), audioSecs: +(S.audio16k.length / 16000).toFixed(1) });
+  try {
+    let words = await O.transcribe({
+      key: O.getKey(), audio: S.audio16k, primary: S.primary, secondary: second,
+      names: { primary: langName(S.primary), secondary: second ? langName(second) : '' }, glossary: S.glossary,
+      onStatus: (i, n) => { st.textContent = `OpenAI is transcribing… ${n > 1 ? `part ${i}/${n}` : ''}`; setBar('genBar', 0.1 + 0.8 * (i - 1) / n); },
+    });
+    if (S.script.trim()) words = alignScript(S.script, words, S.primary, second);
+    S.words = words; S.job = null; rebuildCaptions();
+    const secs = Math.round((Date.now() - t0) / 1000);
+    L.info('Subtitles done (OpenAI)', { secs, words: words.length, lines: S.captions.length });
+    const needLangs = second && !S.script.trim();
+    st.textContent = `${S.captions.length} subtitle lines in ${secs} s.` + (needLangs && !C.getKey()
+      ? ` All lines are marked as ${langName(S.primary)} — add a Claude key to label languages automatically, or tap the tags below.` : '');
+    if (words.length && C.getKey() && (needLangs || S.claudeAuto)) { btn.disabled = false; await runClaudeFix(); }
+  } catch (e) {
+    st.className = 'status error';
+    st.textContent = `Subtitles failed: ${String(e.message).replace(/\.$/, '')}. (Tap ? → Copy log)`;
+    L.error('OpenAI transcription failed: ' + e.message);
+  } finally {
+    keepAwake(false); btn.disabled = false; syncGenButton(); setBar('genBar', null);
+  }
+}
+syncEngine();
 
 // ---------- Claude (optional, own API key) ----------
 function syncClaude() {
