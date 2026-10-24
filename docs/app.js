@@ -844,7 +844,13 @@ function syncClaude() {
 $('claudeModel').innerHTML = Object.entries(C.CLAUDE_MODELS).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
 $('claudeKey').onchange = (e) => {
   const v = e.target.value.trim();
-  if (v && !v.startsWith('••')) { C.setKey(v); L.info('Claude key saved'); }
+  if (v && !v.startsWith('••')) {
+    const shape = C.keyShape(v);
+    C.setKey(v); L.info('Claude key saved', shape);
+    if (shape.looksLikeAdminKey) $('claudeStatus').textContent = 'This looks like an Admin key — use a normal API key (starts with sk-ant-api).';
+    else if (!shape.looksLikeApiKey) $('claudeStatus').textContent = 'This doesn’t look like a Claude API key (they start with sk-ant-api). Check that you copied all of it.';
+    else $('claudeStatus').textContent = 'Key saved. Tap “Test key”.';
+  }
   syncClaude(); syncGenButton();
 };
 $('claudeKey').onfocus = (e) => { if (e.target.value.startsWith('••')) e.target.value = ''; };

@@ -7,7 +7,20 @@ export const CLAUDE_MODELS = {
 };
 const KEY = 'claudeApiKey';
 export const getKey = () => { try { return localStorage.getItem(KEY) || ''; } catch { return ''; } };
-export const setKey = (k) => { try { k ? localStorage.setItem(KEY, k.trim()) : localStorage.removeItem(KEY); } catch {} };
+// Pasted keys sometimes carry spaces, line breaks or quotes; keep only the key itself.
+export const cleanKey = (k) => (k || '').replace(/[\s"'“”‘’]/g, '');
+export const setKey = (k) => { try { k ? localStorage.setItem(KEY, cleanKey(k)) : localStorage.removeItem(KEY); } catch {} };
+/** Non-secret facts about a key's shape, for the diagnostics log. */
+export function keyShape(raw) {
+  const k = cleanKey(raw);
+  return {
+    length: k.length,
+    start: k.slice(0, 10),               // e.g. "sk-ant-api" — not secret
+    hadSpacesOrQuotes: (raw || '').length !== k.length,
+    looksLikeApiKey: /^sk-ant-api\d\d-/.test(k),
+    looksLikeAdminKey: k.startsWith('sk-ant-admin'),
+  };
+}
 
 async function call(key, model, system, user, maxTokens) {
   let res;
@@ -28,7 +41,7 @@ async function call(key, model, system, user, maxTokens) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const msg = data?.error?.message || `HTTP ${res.status}`;
-    if (res.status === 401) throw new Error('The API key was rejected — check it in the Claude settings');
+    if (res.status === 401) throw new Error(`The API key was rejected (${msg}) — check it in the Claude settings`);
     if (res.status === 429) throw new Error('Too many requests or credit limit reached: ' + msg);
     throw new Error(`Claude error: ${msg}`);
   }
