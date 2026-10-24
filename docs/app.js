@@ -847,7 +847,8 @@ $('claudeKey').onchange = (e) => {
   if (v && !v.startsWith('••')) {
     const shape = C.keyShape(v);
     C.setKey(v); L.info('Claude key saved', shape);
-    if (shape.looksLikeAdminKey) $('claudeStatus').textContent = 'This looks like an Admin key — use a normal API key (starts with sk-ant-api).';
+    if (shape.looksLikeOpenAIKey) $('claudeStatus').textContent = 'This is an OpenAI key (sk-proj-…), not a Claude key. Create a key at console.anthropic.com — it starts with sk-ant-api.';
+    else if (shape.looksLikeAdminKey) $('claudeStatus').textContent = 'This looks like an Admin key — use a normal API key (starts with sk-ant-api).';
     else if (!shape.looksLikeApiKey) $('claudeStatus').textContent = 'This doesn’t look like a Claude API key (they start with sk-ant-api). Check that you copied all of it.';
     else $('claudeStatus').textContent = 'Key saved. Tap “Test key”.';
   }

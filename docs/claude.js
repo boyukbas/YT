@@ -19,6 +19,7 @@ export function keyShape(raw) {
     hadSpacesOrQuotes: (raw || '').length !== k.length,
     looksLikeApiKey: /^sk-ant-api\d\d-/.test(k),
     looksLikeAdminKey: k.startsWith('sk-ant-admin'),
+    looksLikeOpenAIKey: /^sk-(proj-|svcacct-|[A-Za-z0-9]{20,}$)/.test(k) && !k.startsWith('sk-ant'),
   };
 }
 
