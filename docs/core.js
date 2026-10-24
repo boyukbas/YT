@@ -112,6 +112,37 @@ export async function scoreText(asr, ctx, Tensor, lang, text) {
   return total / n;
 }
 
+/**
+ * Writes out a short clip in `lang`, reusing an already computed encoder pass (much cheaper
+ * than running the full pipeline again). Greedy decoding, text tokens only.
+ */
+export async function greedyText(asr, ctx, Tensor, lang, maxTokens = 48) {
+  const tok = asr.tokenizer;
+  const seq = tok.convert_tokens_to_ids(['<|startoftranscript|>', `<|${lang}|>`, '<|transcribe|>', '<|notimestamps|>']);
+  const start = seq.length;
+  const eot = tok.convert_tokens_to_ids(['<|endoftext|>'])[0];
+  for (let n = 0; n < maxTokens; n++) {
+    const logits = await decode(asr, ctx, Tensor, seq);
+    const V = logits.dims.at(-1), base = logits.data.length - V;
+    let best = eot, bestV = -Infinity;
+    for (let v = 0; v <= eot; v++) { const x = Number(logits.data[base + v]); if (x > bestV) { bestV = x; best = v; } }
+    if (best === eot) break;
+    seq.push(best);
+    // Stop if it starts repeating itself.
+    const k = seq.length;
+    if (k - start >= 8 && seq.slice(k - 4).join() === seq.slice(k - 8, k - 4).join()) { seq.length -= 4; break; }
+  }
+  // Drop sound notes Whisper sometimes adds, like "(Müzik)" or "[Music]".
+  return tok.decode(seq.slice(start), { skip_special_tokens: true }).replace(/[([][^)\]]*[)\]]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/** Spreads words of a text evenly over a time span. */
+function spread(text, start, end, lang) {
+  const parts = text.split(/\s+/).filter(Boolean);
+  const step = (end - start) / Math.max(1, parts.length);
+  return parts.map((t, i) => ({ text: t, start: start + i * step, end: start + (i + 1) * step, lang }));
+}
+
 /** Splits words into short phrases at punctuation and pauses. */
 export function phrases(words) {
   const res = [];
@@ -211,7 +242,7 @@ export async function applyGlossary(asr, ctx, Tensor, lang, words, terms, allowW
  */
 export async function transcribeMixed({
   asr, asrSecondary = null, Tensor, audio, primary, secondary, glossary = '',
-  prefilter = 0.1, sure = 0.97, margin = 0.3, onStatus = () => {},
+  prefilter = 0.2, sure = 0.97, margin = 0.3, onStatus = () => {},
   resume = null, onCheckpoint = () => {},
 }) {
   const terms = parseGlossary(glossary);
@@ -255,8 +286,11 @@ export async function transcribeMixed({
       ctx = await encodeClip(asr, Tensor, clip);
       const odds = await languageOdds(asr, ctx, Tensor, [primary, secondary]);
       if (odds[secondary] >= prefilter) {
-        const redo = (await transcribeWords(fixer, clip, secondary, s)).map(clamp);
-        const redoText = redo.map(w => w.text).join(' ');
+        // Re-read the phrase in the second language from the same encoder pass (fast path),
+        // or with the bigger model when one is in use.
+        const fctx = asrSecondary ? await encodeClip(fixer, Tensor, clip) : ctx;
+        const redoText = await greedyText(fixer, fctx, Tensor, secondary);
+        const redo = spread(redoText, g[0].start, g.at(-1).end, secondary).map(clamp);
         if (redoText.trim()) {
           let switchIt = odds[secondary] >= sure;
           if (!switchIt) {
