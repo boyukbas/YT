@@ -41,6 +41,26 @@ const capitalize = (s, lang) => s.charAt(0).toLocaleUpperCase(lang) + s.slice(1)
 
 // ---------- Whisper helpers ----------
 
+/**
+ * Whisper sometimes gets stuck repeating itself ("başkalarımızın başkalarımızın …").
+ * Keeps at most two copies of any repeated run of 1–4 words.
+ */
+export function dropRepeats(words) {
+  const out = [];
+  const key = (w) => fold(w.text);
+  for (const w of words) {
+    out.push(w);
+    for (let n = 1; n <= 4; n++) {
+      if (out.length < n * 3) continue;
+      const a = out.slice(-n).map(key).join(' ');
+      const b = out.slice(-2 * n, -n).map(key).join(' ');
+      const c = out.slice(-3 * n, -2 * n).map(key).join(' ');
+      if (a && a === b && b === c) { out.length -= n; break; }
+    }
+  }
+  return out;
+}
+
 /** Transcribe audio in one language. Returns words with times in seconds (offset added). */
 export async function transcribeWords(asr, audio, lang, offset = 0) {
   const out = await asr(audio, {
@@ -55,7 +75,7 @@ export async function transcribeWords(asr, audio, lang, offset = 0) {
     if (e == null) e = s + 0.3;
     words.push({ text, start: offset + s, end: offset + e, lang });
   }
-  return words;
+  return dropRepeats(words);
 }
 
 /**
