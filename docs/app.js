@@ -9,6 +9,7 @@ import { saveFile, saveProject, listProjects, loadProject, deleteProject } from 
 import * as L from './log.js';
 
 L.install();
+document.getElementById('appVersion').textContent = `Version ${L.APP_VERSION}`;
 
 const $ = (id) => document.getElementById(id);
 

@@ -2,7 +2,7 @@
 // 1. Adds the headers that let Whisper use several CPU cores (GitHub Pages can't send them).
 // 2. Keeps the app on the device so it opens and works offline (the speech model itself is
 //    cached separately by the speech library after its first download).
-const CACHE = 'shorts-editor-v4';
+const CACHE = 'shorts-editor-v5';
 const SHELL = ['./', 'index.html', 'app.js', 'core.js', 'render.js', 'store.js', 'worker.js', 'coi.js',
   'log.js', 'download.js', 'manifest.webmanifest', 'icon.svg', 'icon-180.png', 'icon-192.png', 'icon-512.png',
   'lib/transformers.min.js', 'lib/mediabunny.min.mjs'];
@@ -27,7 +27,8 @@ if (typeof window === 'undefined') {
   const cacheFirst = async (req) => (await caches.match(req, { ignoreSearch: true })) || put(req, await fetch(req));
   const networkFirst = async (req) => {
     try {
-      return await put(req, await fetch(req));
+      // Always check with the server (not the browser's 10-minute cache) so updates show up at once.
+      return await put(req, await fetch(req, { cache: 'no-cache' }));
     } catch (e) {
       const hit = await caches.match(req, { ignoreSearch: true })
         || (req.mode === 'navigate' ? await caches.match('./') : null);
@@ -61,7 +62,16 @@ if (typeof window === 'undefined') {
     // the speech library stores the model itself.
   });
 } else if (window.isSecureContext && 'serviceWorker' in navigator) {
-  navigator.serviceWorker.register(document.currentScript.src).then((reg) => {
+  // When a new version of the app takes over, reload once to show it (unless subtitles are running).
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController && !localStorage.getItem('jobRunning') && !sessionStorage.getItem('updated')) {
+      sessionStorage.setItem('updated', '1');
+      location.reload();
+    }
+  });
+  navigator.serviceWorker.register(document.currentScript.src, { updateViaCache: 'none' }).then((reg) => {
+    reg.update().catch(() => {});
     if (window.crossOriginIsolated) return;
     const reloaded = sessionStorage.getItem('coiReloaded');
     if (reg.active && !navigator.serviceWorker.controller && !reloaded) {
