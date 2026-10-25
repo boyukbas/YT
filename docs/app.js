@@ -66,7 +66,7 @@ async function saveNow() {
     await saveProject({
       id: S.id, name: S.name, updatedAt: Date.now(), duration: S.duration, width: S.width, height: S.height,
       trimStart: S.trimStart, trimEnd: S.trimEnd, cuts: S.cuts, threshold: S.threshold,
-      words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job, pub: S.pub,
+      words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job, pub: S.pub, thumb: S.thumb,
     });
     $('saved').textContent = 'Saved';
   } catch { $('saved').textContent = 'Not saved'; }
@@ -207,12 +207,12 @@ async function openVideo(file, project = null) {
       Object.assign(S, {
         id: project.id, name: project.name, trimStart: project.trimStart, trimEnd: project.trimEnd,
         cuts: project.cuts || [], threshold: project.threshold ?? suggestThreshold(S.levels), words: project.words || [],
-        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '', job: project.job || null, pub: { ...newPub(), ...(project.pub || {}) },
+        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '', job: project.job || null, pub: { ...newPub(), ...(project.pub || {}) }, thumb: project.thumb || null,
       });
     } else {
       Object.assign(S, {
         id: crypto.randomUUID(), name: file.name || 'Video', trimStart: 0, trimEnd: S.duration, cuts: [],
-        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '', job: null, pub: newPub(),
+        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '', job: null, pub: newPub(), thumb: null,
       });
       try {
         await saveFile(S.id, file);
@@ -223,6 +223,8 @@ async function openVideo(file, project = null) {
     }
     findSilences();
     $('video').src = S.url;
+    if (!S.thumb) captureProjectThumb();
+    setTab(S.captions.length ? 'subs' : 'video');
     $('empty').classList.add('hidden');
     $('editor').classList.remove('hidden');
     $('newBtn').classList.remove('hidden');
@@ -277,6 +279,7 @@ async function showProjects() {
   for (const p of list) {
     const row = document.createElement('div');
     row.className = 'proj';
+    if (p.thumb) { const img = document.createElement('img'); img.src = p.thumb; img.alt = ''; row.appendChild(img); }
     const name = document.createElement('div');
     name.className = 'name';
     const b = document.createElement('b'); b.textContent = p.name;
@@ -320,6 +323,7 @@ let ignorePop = false;
 addEventListener('popstate', () => {
   if (ignorePop) { ignorePop = false; return; }
   if ($('helpDlg').open) { $('helpDlg').close(); return; }
+  if ($('settingsDlg').open) { $('settingsDlg').close(); return; }
   if (!$('editor').classList.contains('hidden')) {
     if (!leaveEditor()) history.pushState({ view: 'editor' }, '');   // stay
   }
@@ -331,8 +335,8 @@ const overlay = $('overlay');
 function layoutStage() {
   if (!S.width) return;
   const ar = S.width / S.height;
-  const maxW = $('editor').clientWidth, maxH = window.innerHeight * 0.55;
-  const h = Math.min(maxH, maxW / ar), w = h * ar;
+  const maxW = $('editor').clientWidth, maxH = window.innerHeight * 0.36;
+  const h = Math.min(maxH, maxW / ar), w = h * ar;  // compact: the preview stays on screen above the tabs
   const stage = $('stage');
   stage.style.width = `${w}px`; stage.style.height = `${h}px`;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -445,6 +449,7 @@ function syncSubs() {
 }
 function syncStyle() {
   const two = activeLangs().length > 1, has = S.captions.length > 0;
+  $('lookHint').classList.toggle('hidden', has);
   $('styleBox').classList.toggle('hidden', !has);
   $('linesBox').classList.toggle('hidden', !has);
   for (const b of $('layoutSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === S.layout));
@@ -1236,6 +1241,44 @@ $('reportLog').onclick = async () => {
   const body = 'What happened:\n\n\n```\n' + (t.length > 5500 ? t.slice(0, 900) + '\n…\n' + t.slice(-4500) : t) + '\n```';
   open(`https://github.com/boyukbas/YT/issues/new?title=${encodeURIComponent('Problem in Shorts Editor')}&body=${encodeURIComponent(body)}`, '_blank');
 };
+
+// ---------- Tabs, settings, project thumbnails ----------
+function setTab(name) {
+  for (const b of $('tabs').children) b.setAttribute('aria-selected', String(b.dataset.tab === name));
+  for (const p of document.querySelectorAll('.panel')) p.classList.toggle('active', p.dataset.panel === name);
+  if (name === 'share') drawFormatPreview(true);
+}
+for (const b of $('tabs').children) b.onclick = () => { setTab(b.dataset.tab); scrollTo({ top: 0 }); };
+
+function syncEngineNote() {
+  const eng = S.engine === 'openai' ? 'OpenAI (cloud)' : `on this device (${{ normal: 'Fast', second: 'Better 2nd language', all: 'Best' }[S.accuracy]})`;
+  $('engineNote').textContent = `Speech recognition: ${eng}. Claude: ${C.getKey() ? 'on' : 'off'}. Change these in ⚙︎ Settings.`;
+}
+$('settingsBtn').onclick = () => { $('settingsDlg').showModal(); history.pushState({ view: 'settings' }, ''); };
+$('closeSettings').onclick = () => $('settingsDlg').close();
+$('settingsDlg').addEventListener('close', () => {
+  syncEngineNote(); syncGenButton(); syncPub(); syncClaude();
+  if (history.state?.view === 'settings') { ignorePop = true; history.back(); }
+});
+syncEngineNote();
+
+/** A small square picture of the video for the projects list. */
+function captureProjectThumb() {
+  const v = $('video');
+  const grab = () => {
+    try {
+      const c = document.createElement('canvas'); c.width = c.height = 128;
+      const s = Math.min(v.videoWidth, v.videoHeight);
+      c.getContext('2d').drawImage(v, (v.videoWidth - s) / 2, (v.videoHeight - s) / 2, s, s, 0, 0, 128, 128);
+      S.thumb = c.toDataURL('image/jpeg', 0.7); dirty();
+    } catch {}
+    v.currentTime = S.trimStart || 0;
+  };
+  v.addEventListener('loadeddata', () => {
+    v.addEventListener('seeked', grab, { once: true });
+    v.currentTime = Math.min(1, (v.duration || 2) / 4);
+  }, { once: true });
+}
 
 // ---------- Sliders: don't change them by accident while scrolling ----------
 // A swipe that starts on a slider used to move it. Now: if the browser takes the touch for

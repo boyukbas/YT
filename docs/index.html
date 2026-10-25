@@ -36,7 +36,8 @@ body { font: 400 16px/1.45 var(--font); -webkit-font-smoothing: antialiased; }
 button, select, input, textarea { font: inherit; color: inherit; }
 main { max-width: 560px; margin: 0 auto; padding: 12px 16px 48px; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 12px; }
-h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; margin: 0; }
+h1 { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; margin: 0; white-space: nowrap; }
+header .btn { padding: 9px 12px; }
 h1 .bar { display: inline-block; width: 22px; height: 6px; border-radius: 3px; background: var(--text); vertical-align: 4px; margin-right: 6px; box-shadow: 0 9px 0 var(--amber); }
 h2 { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; margin: 0 0 12px; }
 p { margin: 0; }
@@ -140,6 +141,16 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
 .frames canvas[aria-pressed="true"] { border-color: var(--amber); }
 .titleopt { text-align: left; }
 .titleopt[aria-pressed="true"] { border-color: var(--amber); }
+/* Projects + tabs layout */
+.topbar { position: sticky; top: 0; z-index: 5; background: var(--bg); padding-top: 4px; }
+.tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 8px; background: var(--panel); border-radius: 14px; padding: 4px; }
+.tabs button { border: 0; background: none; color: var(--muted); font-weight: 600; padding: 10px 4px; border-radius: 10px; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--bg); color: var(--text); }
+.panel { display: none; }
+.panel.active { display: block; }
+dialog#settingsDlg { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 18px; width: min(560px, calc(100vw - 24px)); max-height: 90svh; padding: 16px; }
+dialog#settingsDlg::backdrop { background: rgba(0,0,0,.6); }
+.proj img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; background: #000; flex: none; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -149,6 +160,7 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
     <h1><span class="bar" aria-hidden="true"></span>Shorts Editor</h1>
     <div style="display:flex;gap:8px">
       <button class="btn" id="helpBtn" aria-label="Help and diagnostics">?</button>
+      <button class="btn" id="settingsBtn" aria-label="Settings">⚙︎</button>
       <button class="btn hidden" id="newBtn">Projects</button>
     </div>
   </header>
@@ -162,14 +174,21 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
     <p class="muted" id="appVersion" style="font-size:12px"></p>
   </div>
 
+
   <div id="editor" class="hidden">
+    <div class="topbar" id="topbar">
     <div class="stage" id="stage">
       <video id="video" playsinline controls preload="metadata"></video>
       <canvas id="overlay"></canvas>
       <button class="btn primary hidden" id="dragDone" style="position:absolute;top:10px;left:50%;transform:translateX(-50%);padding:8px 16px">Done placing</button>
     </div>
     <div class="timebar"><span id="tNow">0:00.0</span><span id="saved" class="saved"></span><span id="tLen"></span></div>
+      <nav class="tabs" id="tabs" role="tablist">
+        <button role="tab" data-tab="video">Video</button><button role="tab" data-tab="subs">Subtitles</button><button role="tab" data-tab="look">Look</button><button role="tab" data-tab="share">Share</button>
+      </nav>
+    </div>
 
+    <div class="panel" data-panel="video">
     <section>
       <h2>Trim and cut</h2>
       <div class="stack"><div class="head"><span>Start</span><output id="trimStartOut"></output></div>
@@ -191,14 +210,19 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
     <section>
       <div class="row"><h2 style="margin:0">Remove pauses</h2><input type="checkbox" class="switch" id="pauseToggle" aria-label="Remove pauses"></div>
       <div id="pauseOpts">
+        <p class="muted" style="margin-top:6px">Cuts out the quiet moments between sentences. The defaults work for most videos.</p>
+        <div class="row"><span class="muted" id="pauseCount"></span><button class="btn" id="autoLevel">Auto level</button></div>
+        <details><summary>Advanced</summary>
         <div class="stack"><div class="head"><span>Silence level</span><output id="threshOut"></output></div>
           <input type="range" id="thresh" min="-60" max="-20" step="1"></div>
         <div class="stack"><div class="head"><span>Shortest pause to cut</span><output id="minPauseOut"></output></div>
           <input type="range" id="minPause" min="0.2" max="1.5" step="0.05"></div>
-        <div class="row"><span class="muted" id="pauseCount"></span><button class="btn" id="autoLevel">Auto level</button></div>
+        </details>
       </div>
     </section>
+    </div>
 
+    <div class="panel" data-panel="subs">
     <section>
       <h2>Subtitles</h2>
       <div class="langs">
@@ -217,40 +241,29 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
         <p class="muted" style="margin-bottom:8px">The words you teach in this video, one pair per line. Misheard second-language words are corrected to these.</p>
         <textarea class="area" id="glossary" placeholder="der Wald – orman&#10;im Wald – ormanda&#10;die Freizeit – boş zaman"></textarea>
       </details>
-      <div class="stack" style="margin-top:12px"><div class="head"><span>Speech recognition</span></div>
-        <div class="seg" id="engineSeg" role="group" aria-label="Speech recognition">
-          <button data-v="device">On this device</button><button data-v="openai">OpenAI (cloud)</button>
-        </div></div>
-      <div id="openaiBox" class="hidden" style="margin-top:10px">
-        <p class="muted">The video's sound is sent to OpenAI and comes back as text in seconds, however slow this device is. About $0.006 per minute of video. Needs your own OpenAI API key (sk-proj-…), stored only on this device. OpenAI doesn't mark languages — with a Claude key added below, Claude does that automatically.</p>
-        <input type="password" class="area" id="openaiKey" placeholder="sk-proj-…" autocomplete="off" spellcheck="false" style="min-height:auto;margin-top:8px">
-        <div class="pair"><button class="btn" id="openaiTest">Test key</button><button class="btn" id="openaiRemove">Remove key</button></div>
-        <p class="status" id="openaiStatus"></p>
-      </div>
-      <div id="deviceOpts">
-      <div class="stack" style="margin-top:12px"><div class="head"><span>Accuracy</span></div>
-        <div class="seg" id="accSeg" role="group" aria-label="Accuracy">
-          <button data-v="normal">Fast</button><button data-v="second">Better 2nd language</button><button data-v="all">Best</button>
-        </div>
-        <p class="muted" id="accHint" style="margin-top:6px"></p></div>
-      <div class="row"><label for="gpuToggle">Use the graphics chip<br><span class="muted">Faster on recent iPads, iPhones and Android phones</span></label><input type="checkbox" class="switch" id="gpuToggle"></div>
-      </div>
-      <details id="claudeBox">
-        <summary>Claude <span class="hint" id="claudeHint">not set up</span></summary>
-        <p class="muted" style="margin-bottom:8px">Optional: with your own Claude API key, Claude fixes the transcript using the context and marks each line's language. Claude can't hear audio, so the speech recognition still runs on this device. The key is stored only on this device and is never logged — set a spending limit in the Claude Console.</p>
-        <input type="password" class="area" id="claudeKey" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" style="min-height:auto">
-        <div class="row" style="margin-top:10px"><span>Model</span><select id="claudeModel"></select></div>
-        <div class="row"><label for="claudeFast">Let Claude handle the second language<br><span class="muted">Skips the slow on-device language check; much faster on phones</span></label><input type="checkbox" class="switch" id="claudeFast"></div>
-        <div class="row"><label for="claudeAuto">Fix with Claude right after subtitles</label><input type="checkbox" class="switch" id="claudeAuto"></div>
-        <div class="pair"><button class="btn" id="claudeTest">Test key</button><button class="btn" id="claudeRemove">Remove key</button></div>
-        <p class="status" id="claudeStatus"></p>
-      </details>
+      <p class="muted" id="engineNote" style="margin-top:12px"></p>
       <button class="btn primary big" id="genBtn" style="margin-top:14px">Make subtitles</button>
       <button class="btn hidden" id="genRestart" style="margin-top:8px;width:100%">Start over instead</button>
       <div class="progress hidden" id="genBar"><div></div></div>
       <p class="status" id="genStatus">First run downloads the speech model (about 250 MB) — use Wi‑Fi. It stays on the device afterwards.</p>
     </section>
 
+    <section id="linesBox" class="hidden">
+      <h2>Lines</h2>
+      <p class="muted">Tap a line to fix the text. The tag switches language and color. Start/End move a line earlier or later by 0.1 s. Changing words per line rebuilds the lines and drops text fixes.</p>
+      <div class="pair" style="margin-top:12px">
+        <button class="btn" id="copyText">Copy text</button>
+        <button class="btn" id="copyClaude">Copy for Claude</button>
+      </div>
+      <button class="btn primary hidden" id="fixClaude" style="width:100%;margin-top:8px">Fix with Claude</button>
+      <button class="btn hidden" id="undoClaude" style="width:100%;margin-top:8px">Undo Claude’s changes</button>
+      <p class="muted" id="copyHint" style="margin-top:6px">“Copy for Claude” adds instructions. Paste it into Claude, then paste Claude’s answer into “My script” and make the subtitles again — they keep Claude’s words with the right timing.</p>
+      <div class="caps" id="capList"></div>
+    </section>
+    </div>
+
+    <div class="panel" data-panel="look">
+      <p class="muted" id="lookHint" style="margin-top:14px">Make the subtitles first (Subtitles tab) — then you can style them here.</p>
     <section id="styleBox" class="hidden">
       <h2>Look</h2>
       <div class="seg" id="layoutSeg" role="group" aria-label="Layout">
@@ -284,20 +297,9 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
       <div class="stack"><div class="head"><span>Show for</span><output id="hookSecsOut"></output></div>
         <input type="range" id="hookSecs" min="1" max="8" step="0.5"></div>
     </section>
+    </div>
 
-    <section id="linesBox" class="hidden">
-      <h2>Lines</h2>
-      <p class="muted">Tap a line to fix the text. The tag switches language and color. Start/End move a line earlier or later by 0.1 s. Changing words per line rebuilds the lines and drops text fixes.</p>
-      <div class="pair" style="margin-top:12px">
-        <button class="btn" id="copyText">Copy text</button>
-        <button class="btn" id="copyClaude">Copy for Claude</button>
-      </div>
-      <button class="btn primary hidden" id="fixClaude" style="width:100%;margin-top:8px">Fix with Claude</button>
-      <button class="btn hidden" id="undoClaude" style="width:100%;margin-top:8px">Undo Claude’s changes</button>
-      <p class="muted" id="copyHint" style="margin-top:6px">“Copy for Claude” adds instructions. Paste it into Claude, then paste Claude’s answer into “My script” and make the subtitles again — they keep Claude’s words with the right timing.</p>
-      <div class="caps" id="capList"></div>
-    </section>
-
+    <div class="panel" data-panel="share">
     <section>
       <h2>Export</h2>
       <div class="row"><label for="burnToggle">Burn subtitles into the video</label><input type="checkbox" class="switch" id="burnToggle"></div>
@@ -346,8 +348,42 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
       </div>
       <p class="muted" style="margin-top:10px">Uploading straight from this app needs Google to review and approve the app first. Until then, upload in the YouTube app or <a href="https://studio.youtube.com" target="_blank" rel="noopener" style="color:inherit">YouTube Studio</a>.</p>
     </section>
+    </div>
   </div>
 </main>
+<dialog id="settingsDlg">
+  <h2>Settings</h2>
+  <p class="muted">Set these once; they apply to all projects on this device.</p>
+      <div class="stack" style="margin-top:12px"><div class="head"><span>Speech recognition</span></div>
+        <div class="seg" id="engineSeg" role="group" aria-label="Speech recognition">
+          <button data-v="device">On this device</button><button data-v="openai">OpenAI (cloud)</button>
+        </div></div>
+      <div id="openaiBox" class="hidden" style="margin-top:10px">
+        <p class="muted">The video's sound is sent to OpenAI and comes back as text in seconds, however slow this device is. About $0.006 per minute of video. Needs your own OpenAI API key (sk-proj-…), stored only on this device. OpenAI doesn't mark languages — with a Claude key added below, Claude does that automatically.</p>
+        <input type="password" class="area" id="openaiKey" placeholder="sk-proj-…" autocomplete="off" spellcheck="false" style="min-height:auto;margin-top:8px">
+        <div class="pair"><button class="btn" id="openaiTest">Test key</button><button class="btn" id="openaiRemove">Remove key</button></div>
+        <p class="status" id="openaiStatus"></p>
+      </div>
+      <div id="deviceOpts">
+      <div class="stack" style="margin-top:12px"><div class="head"><span>Accuracy</span></div>
+        <div class="seg" id="accSeg" role="group" aria-label="Accuracy">
+          <button data-v="normal">Fast</button><button data-v="second">Better 2nd language</button><button data-v="all">Best</button>
+        </div>
+        <p class="muted" id="accHint" style="margin-top:6px"></p></div>
+      <div class="row"><label for="gpuToggle">Use the graphics chip<br><span class="muted">Faster on recent iPads, iPhones and Android phones</span></label><input type="checkbox" class="switch" id="gpuToggle"></div>
+      </div>
+      <details id="claudeBox">
+        <summary>Claude <span class="hint" id="claudeHint">not set up</span></summary>
+        <p class="muted" style="margin-bottom:8px">Optional: with your own Claude API key, Claude fixes the transcript using the context and marks each line's language. Claude can't hear audio, so the speech recognition still runs on this device. The key is stored only on this device and is never logged — set a spending limit in the Claude Console.</p>
+        <input type="password" class="area" id="claudeKey" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" style="min-height:auto">
+        <div class="row" style="margin-top:10px"><span>Model</span><select id="claudeModel"></select></div>
+        <div class="row"><label for="claudeFast">Let Claude handle the second language<br><span class="muted">Skips the slow on-device language check; much faster on phones</span></label><input type="checkbox" class="switch" id="claudeFast"></div>
+        <div class="row"><label for="claudeAuto">Fix with Claude right after subtitles</label><input type="checkbox" class="switch" id="claudeAuto"></div>
+        <div class="pair"><button class="btn" id="claudeTest">Test key</button><button class="btn" id="claudeRemove">Remove key</button></div>
+        <p class="status" id="claudeStatus"></p>
+      </details>
+  <button class="btn primary" id="closeSettings" style="width:100%;margin-top:14px">Done</button>
+</dialog>
 <dialog id="helpDlg">
   <h2>Help &amp; diagnostics</h2>
   <p class="muted">The app keeps a small log of what happened (no video, no subtitle text) on this device only. If something goes wrong, copy it and paste it to Claude, or report it on GitHub.</p>
