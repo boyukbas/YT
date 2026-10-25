@@ -151,6 +151,13 @@ dialog#helpDlg::backdrop { background: rgba(0,0,0,.6); }
 dialog#settingsDlg { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 18px; width: min(560px, calc(100vw - 24px)); max-height: 90svh; padding: 16px; }
 dialog#settingsDlg::backdrop { background: rgba(0,0,0,.6); }
 .proj img { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; background: #000; flex: none; }
+dialog#mergeDlg { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 18px; width: min(560px, calc(100vw - 24px)); max-height: 90svh; padding: 16px; }
+dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
+.clip { display: flex; align-items: center; gap: 10px; background: var(--bg); border-radius: 12px; padding: 8px; }
+.clip canvas { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; background: #000; flex: none; }
+.clip .name { flex: 1; min-width: 0; }
+.clip .name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.clip button { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 9px; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -169,6 +176,7 @@ dialog#settingsDlg::backdrop { background: rgba(0,0,0,.6); }
     <div class="demo" aria-hidden="true"><span>Im Wald</span><span class="tr">ormanda</span></div>
     <p class="muted">Pick a video. Subtitles are made on this device, in two languages and two colors.</p>
     <label class="btn primary big">Choose video<input type="file" accept="video/*" class="hidden" id="fileInput"></label>
+    <label class="btn big">Combine several videos<input type="file" accept="video/*" multiple class="hidden" id="mergeInput"></label>
     <p class="status" id="loadStatus"></p>
     <div class="projects hidden" id="projects"><h3>Recent projects</h3><div id="projList"></div></div>
     <p class="muted" id="appVersion" style="font-size:12px"></p>
@@ -383,6 +391,16 @@ dialog#settingsDlg::backdrop { background: rgba(0,0,0,.6); }
         <p class="status" id="claudeStatus"></p>
       </details>
   <button class="btn primary" id="closeSettings" style="width:100%;margin-top:14px">Done</button>
+</dialog>
+<dialog id="mergeDlg">
+  <h2>Combine videos</h2>
+  <p class="muted">Put them in order. They're joined into one video, which you then edit like any other: subtitles, cuts, Short, YouTube.</p>
+  <div id="clipList" class="cutlist" style="margin-top:10px"></div>
+  <label class="btn" style="display:block;text-align:center;margin-top:10px">Add more<input type="file" accept="video/*" multiple class="hidden" id="mergeMore"></label>
+  <p class="muted" id="mergeInfo" style="margin-top:10px"></p>
+  <div class="progress hidden" id="mergeBar"><div></div></div>
+  <p class="status" id="mergeStatus"></p>
+  <div class="pair"><button class="btn" id="mergeCancel">Cancel</button><button class="btn primary" id="mergeGo">Combine</button></div>
 </dialog>
 <dialog id="helpDlg">
   <h2>Help &amp; diagnostics</h2>

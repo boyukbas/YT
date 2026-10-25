@@ -7,6 +7,7 @@ import { LANGS, SR, buildCaptions, toSRT, alignScript } from './core.js';
 import * as C from './claude.js';
 import * as O from './openai.js';
 import * as P from './publish.js';
+import * as M from './merge.js';
 import { blocksAt, drawCaptions, drawHook, drawSafeZones, FONTS, fontCss } from './render.js';
 import { saveFile, saveProject, listProjects, loadProject, deleteProject } from './store.js';
 import * as L from './log.js';
@@ -324,6 +325,7 @@ addEventListener('popstate', () => {
   if (ignorePop) { ignorePop = false; return; }
   if ($('helpDlg').open) { $('helpDlg').close(); return; }
   if ($('settingsDlg').open) { $('settingsDlg').close(); return; }
+  if ($('mergeDlg').open) { if (!merging) $('mergeDlg').close(); else history.pushState({ view: 'merge' }, ''); return; }
   if (!$('editor').classList.contains('hidden')) {
     if (!leaveEditor()) history.pushState({ view: 'editor' }, '');   // stay
   }
@@ -894,7 +896,7 @@ $('exportBoth').onclick = async () => {
 };
 
 /** Draws one source frame into the output: as is, cropped to 9:16, or fitted on a blurred 9:16 background. */
-const blurCanvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(54, 96) : document.createElement('canvas');
+const blurCanvas = new OffscreenCanvas(54, 96), blurMid = new OffscreenCanvas(216, 384);
 function composeFrame(ctx, src, sw, sh, W, H, format) {
   if (format === 'original') { ctx.drawImage(src, 0, 0, W, H); return; }
   const coverScale = Math.max(W / sw, H / sh);
@@ -903,8 +905,10 @@ function composeFrame(ctx, src, sw, sh, W, H, format) {
   // Blurred background: draw tiny, then stretch (a cheap blur that works in every browser).
   const bc = blurCanvas.getContext('2d');
   bc.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, 0, 0, 54, 96);
+  const mc = blurMid.getContext('2d'); mc.imageSmoothingEnabled = true; mc.imageSmoothingQuality = 'high';
+  mc.drawImage(blurCanvas, 0, 0, 54, 96, 0, 0, 216, 384);
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(blurCanvas, 0, 0, 54, 96, 0, 0, W, H);
+  ctx.drawImage(blurMid, 0, 0, 216, 384, 0, 0, W, H);
   ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(0, 0, W, H);
   const fit = Math.min(W / sw, H / sh), fw = sw * fit, fh = sh * fit;
   ctx.drawImage(src, (W - fw) / 2, (H - fh) / 2, fw, fh);
@@ -1279,6 +1283,69 @@ function captureProjectThumb() {
     v.currentTime = Math.min(1, (v.duration || 2) / 4);
   }, { once: true });
 }
+
+// ---------- Combine several videos ----------
+let clips = [], merging = false;
+function renderClips() {
+  const list = $('clipList'); list.innerHTML = '';
+  clips.forEach((c, i) => {
+    const row = document.createElement('div'); row.className = 'clip';
+    if (c.thumb) { c.thumb.style.width = '56px'; c.thumb.style.height = '56px'; c.thumb.style.objectFit = 'cover'; row.appendChild(c.thumb); }
+    const name = document.createElement('div'); name.className = 'name';
+    const b = document.createElement('b'); b.textContent = `${i + 1}. ${c.name}`;
+    const m = document.createElement('span'); m.className = 'muted'; m.textContent = `${fmt(c.duration)} · ${c.width}×${c.height}${c.hasAudio ? '' : ' · no sound'}`;
+    name.append(b, m); row.appendChild(name);
+    const btn = (txt, label, fn, off) => { const x = document.createElement('button'); x.textContent = txt; x.setAttribute('aria-label', label); x.disabled = off || merging; x.onclick = fn; row.appendChild(x); };
+    btn('↑', 'Move up', () => { [clips[i - 1], clips[i]] = [clips[i], clips[i - 1]]; renderClips(); }, i === 0);
+    btn('↓', 'Move down', () => { [clips[i + 1], clips[i]] = [clips[i], clips[i + 1]]; renderClips(); }, i === clips.length - 1);
+    btn('×', 'Remove', () => { clips.splice(i, 1); renderClips(); });
+    list.appendChild(row);
+  });
+  const total = clips.reduce((a, c) => a + c.duration, 0);
+  const shapes = new Set(clips.map(c => (c.width / c.height).toFixed(2)));
+  $('mergeInfo').textContent = clips.length
+    ? `${clips.length} videos · ${fmt(total)} in total.` + (shapes.size > 1 ? ' Different shapes: they will match the first video, with a blurred background where needed.' : '')
+    : 'Add at least two videos.';
+  $('mergeGo').disabled = merging || clips.length < 2;
+}
+async function addClips(files) {
+  $('mergeStatus').className = 'status'; $('mergeStatus').textContent = 'Reading the videos…';
+  for (const f of files) {
+    try { clips.push(await M.probe(f)); renderClips(); }
+    catch (e) { $('mergeStatus').className = 'status error'; $('mergeStatus').textContent = e.message; L.error('Combine: ' + e.message); }
+  }
+  if ($('mergeStatus').className === 'status') $('mergeStatus').textContent = '';
+}
+$('mergeInput').addEventListener('change', async (e) => {
+  const files = [...e.target.files]; e.target.value = '';
+  if (!files.length) return;
+  clips = []; renderClips();
+  $('mergeDlg').showModal(); history.pushState({ view: 'merge' }, '');
+  await addClips(files);
+});
+$('mergeMore').addEventListener('change', async (e) => { const files = [...e.target.files]; e.target.value = ''; await addClips(files); });
+$('mergeCancel').onclick = () => { if (!merging) $('mergeDlg').close(); };
+$('mergeDlg').addEventListener('cancel', (e) => { if (merging) e.preventDefault(); });
+$('mergeDlg').addEventListener('close', () => { if (history.state?.view === 'merge') { ignorePop = true; history.back(); } });
+$('mergeGo').onclick = async () => {
+  if (clips.length < 2) return;
+  merging = true; renderClips(); keepAwake(true);
+  const st = $('mergeStatus'), t0 = Date.now();
+  st.className = 'status'; st.textContent = 'Combining…'; setBar('mergeBar', 0);
+  try {
+    const file = await M.mergeClips(clips, {
+      onProgress: (f) => { st.textContent = `Combining… ${Math.round(f * 100)}%`; setBar('mergeBar', f); },
+      log: (d) => L.info('Combine started', d),
+    });
+    L.info('Combine done', { secs: Math.round((Date.now() - t0) / 1000), sizeMB: +(file.size / 1e6).toFixed(1) });
+    merging = false; $('mergeDlg').close(); setBar('mergeBar', null); st.textContent = '';
+    await openVideo(file);
+    S.name = `Combined ${clips.length} videos · ${new Date().toLocaleDateString()}`; dirty();
+  } catch (e) {
+    st.className = 'status error'; st.textContent = `Combining failed: ${String(e.message).replace(/\.$/, '')}. (Tap ? → Copy log)`;
+    L.error('Combine failed: ' + e.message);
+  } finally { merging = false; keepAwake(false); setBar('mergeBar', null); renderClips(); }
+};
 
 // ---------- Sliders: don't change them by accident while scrolling ----------
 // A swipe that starts on a slider used to move it. Now: if the browser takes the touch for
