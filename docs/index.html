@@ -198,7 +198,28 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
 
     <div class="panel" data-panel="video">
     <section>
-      <h2>Trim and cut</h2>
+      <div class="row"><h2 style="margin:0">Timeline</h2><span class="muted" id="tlRange" style="font-size:13px"></span></div>
+      <canvas id="timeline" style="width:100%;height:76px;border-radius:10px;margin-top:10px;touch-action:pan-y;display:block"></canvas>
+      <div class="seg" id="zoomSeg" role="group" aria-label="Zoom" style="margin-top:8px">
+        <button data-v="1" aria-pressed="true">Whole</button><button data-v="4">4×</button><button data-v="12">12×</button><button data-v="40">40×</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:8px">
+        <button class="btn" data-step="-1" aria-label="Back 1 second">−1s</button>
+        <button class="btn" data-step="-0.1" aria-label="Back 0.1 second">−0.1</button>
+        <button class="btn" id="playPause" aria-label="Play or pause">▶︎❚❚</button>
+        <button class="btn" data-step="0.1" aria-label="Forward 0.1 second">+0.1</button>
+        <button class="btn" data-step="1" aria-label="Forward 1 second">+1s</button>
+      </div>
+      <p class="muted" style="margin-top:8px">Drag the strip to move through the video; zoom in for precise spots. Red = cut out, grey = pauses removed. Tip: in the Subtitles tab, ✂ next to a line cuts exactly that sentence.</p>
+      <p class="muted" style="margin-top:14px">Cut out a part: move to where it starts and tap “Cut from here”, then to where it ends and tap “Cut to here”. Cut edges snap to the nearest quiet moment.</p>
+      <div class="pair">
+        <button class="btn" id="cutIn">Cut from here</button>
+        <button class="btn" id="cutOut" disabled>Cut to here</button>
+      </div>
+      <div class="cutlist" id="cutList"></div>
+    </section>
+    <section>
+      <h2>Trim start and end</h2>
       <div class="stack"><div class="head"><span>Start</span><output id="trimStartOut"></output></div>
         <input type="range" id="trimStart" min="0" step="0.05"></div>
       <div class="stack"><div class="head"><span>End</span><output id="trimEndOut"></output></div>
@@ -207,12 +228,7 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
         <button class="btn" id="startHere">Start at playhead</button>
         <button class="btn" id="endHere">End at playhead</button>
       </div>
-      <p class="muted" style="margin-top:14px">Cut out a part: play to where it starts, tap “Cut from here”, then to where it ends and tap “Cut to here”.</p>
-      <div class="pair">
-        <button class="btn" id="cutIn">Cut from here</button>
-        <button class="btn" id="cutOut" disabled>Cut to here</button>
-      </div>
-      <div class="cutlist" id="cutList"></div>
+
     </section>
 
     <section>

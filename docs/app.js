@@ -371,6 +371,7 @@ function tick() {
     if (S.hook.trim() && outT < S.hookSecs) drawHook(ctx, W, H, S.hook, outT, style());
     $('tNow').textContent = fmt(toOutput(t));
     if (S.format !== 'original') drawFormatPreview();
+    drawTimeline();
   }
   requestAnimationFrame(tick);
 }
@@ -392,12 +393,21 @@ function syncTrim() {
   const list = $('cutList');
   list.innerHTML = '';
   S.cuts.forEach((c, i) => {
-    const row = document.createElement('div'); row.className = 'item';
-    const label = document.createElement('span'); label.textContent = `Cut ${fmt(c.start)} – ${fmt(c.end)}`;
-    const del = document.createElement('button'); del.className = 'del'; del.textContent = '×';
-    del.setAttribute('aria-label', 'Remove this cut');
-    del.onclick = () => { S.cuts.splice(i, 1); syncTrim(); syncLength(); dirty(); };
-    row.append(label, del); list.appendChild(row);
+    const row = document.createElement('div'); row.className = 'item'; row.style.flexWrap = 'wrap'; row.style.gap = '6px';
+    const label = document.createElement('span'); label.style.flex = '1 1 100%';
+    label.textContent = `${c.capId ? 'Line cut' : 'Cut'} ${fmt(c.start)} – ${fmt(c.end)} (${(c.end - c.start).toFixed(1)} s)`;
+    const b = (txt, aria, fn) => { const x = document.createElement('button'); x.className = 'btn'; x.style.padding = '6px 10px'; x.textContent = txt; x.setAttribute('aria-label', aria); x.onclick = fn; return x; };
+    const move = (edge, d) => () => {
+      if (edge === 'start') c.start = Math.max(0, Math.min(c.end - 0.1, c.start + d)); else c.end = Math.min(S.duration, Math.max(c.start + 0.1, c.end + d));
+      video.pause(); video.currentTime = edge === 'start' ? c.start : c.end;
+      syncTrim(); syncLength(); dirty();
+    };
+    row.append(label,
+      b('Start −', 'Cut starts earlier', move('start', -0.1)), b('Start +', 'Cut starts later', move('start', 0.1)),
+      b('End −', 'Cut ends earlier', move('end', -0.1)), b('End +', 'Cut ends later', move('end', 0.1)),
+      b('▶ Check', 'Play around this cut', () => { video.currentTime = Math.max(0, c.start - 2); video.play(); }),
+      b('×', 'Remove this cut', () => { S.cuts.splice(i, 1); syncTrim(); syncLength(); dirty(); renderCapList(); }));
+    list.appendChild(row);
   });
 }
 function syncPauses() {
@@ -504,9 +514,17 @@ function renderCapList() {
       chip.style.background = colorFor(c.lang);
       top.appendChild(chip);
     }
-    top.append(play, mk('button', 'del', '×', 'Delete this line', () => { S.captions.splice(i, 1); renderCapList(); dirty(); }));
+    const cutIdx = S.cuts.findIndex(x => x.capId === c.id);
+    const scissors = mk('button', 'del', '✂', cutIdx >= 0 ? 'Keep this part of the video' : 'Cut this part out of the video', () => {
+      if (cutIdx >= 0) S.cuts.splice(cutIdx, 1);
+      else { S.cuts.push({ start: snapToQuiet(Math.max(0, c.start - 0.05)), end: snapToQuiet(Math.min(S.duration, c.end + 0.05)), capId: c.id }); S.cuts.sort((x, y) => x.start - y.start); }
+      renderCapList(); syncTrim(); syncLength(); dirty();
+    });
+    if (cutIdx >= 0) scissors.style.color = 'var(--danger)';
+    top.append(scissors, play, mk('button', 'del', '×', 'Delete this subtitle line (the video stays)', () => { S.captions.splice(i, 1); renderCapList(); dirty(); }));
 
     const ta = mk('textarea'); ta.rows = 1; ta.value = c.text; ta.style.color = colorFor(c.lang);
+    if (cutIdx >= 0) { ta.style.textDecoration = 'line-through'; ta.style.opacity = '0.5'; }
     ta.setAttribute('aria-label', `Subtitle at ${fmt(c.start)}`);
     ta.oninput = () => { c.text = ta.value; dirty(); };
     ta.onfocus = () => { video.pause(); video.currentTime = c.start + 0.01; };
@@ -543,10 +561,21 @@ $('trimEnd').addEventListener('input', e => {
 });
 $('startHere').onclick = () => { S.trimStart = Math.min(nowT(), S.trimEnd - 0.5); syncTrim(); syncLength(); dirty(); };
 $('endHere').onclick = () => { S.trimEnd = Math.max(nowT(), S.trimStart + 0.5); syncTrim(); syncLength(); dirty(); };
+/** Moves a cut edge to the nearest quiet moment within 0.25 s, so cuts don't clip words. */
+function snapToQuiet(t) {
+  if (!S.levels.length) return t;
+  const i0 = Math.round(t / HOP), r = Math.round(0.25 / HOP);
+  let best = i0, bestDb = Infinity;
+  for (let i = Math.max(0, i0 - r); i <= Math.min(S.levels.length - 1, i0 + r); i++) {
+    const db = S.levels[i] + Math.abs(i - i0) * 0.4;   // prefer quiet, then close
+    if (db < bestDb) { bestDb = db; best = i; }
+  }
+  return Math.max(0, Math.min(S.duration, best * HOP));
+}
 $('cutIn').onclick = () => { S.cutFrom = nowT(); syncTrim(); };
 $('cutOut').onclick = () => {
   const a = Math.min(S.cutFrom, nowT()), b = Math.max(S.cutFrom, nowT());
-  if (b - a >= 0.1) { S.cuts.push({ start: a, end: b }); S.cuts.sort((x, y) => x.start - y.start); }
+  if (b - a >= 0.1) { S.cuts.push({ start: snapToQuiet(a), end: snapToQuiet(b) }); S.cuts.sort((x, y) => x.start - y.start); }
   S.cutFrom = null; syncTrim(); syncLength(); dirty();
 };
 $('pauseToggle').onchange = e => { S.removePauses = e.target.checked; persist(); syncPauses(); syncLength(); };
@@ -1283,6 +1312,57 @@ function captureProjectThumb() {
     v.currentTime = Math.min(1, (v.duration || 2) / 4);
   }, { once: true });
 }
+
+// ---------- Timeline: waveform, cuts and playhead; drag to scrub, zoom for precision ----------
+let zoom = 1;
+const tl = () => $('timeline');
+function tlWindow() {
+  const span = S.duration / zoom;
+  let v0 = Math.max(0, Math.min(S.duration - span, video.currentTime - span / 2));
+  return [v0, v0 + span];
+}
+function drawTimeline() {
+  const cv = tl(); if (!cv || !S.duration || cv.offsetParent === null) return;
+  const dpr = Math.min(2, devicePixelRatio || 1), W = Math.round(cv.clientWidth * dpr), H = Math.round(cv.clientHeight * dpr);
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const ctx = cv.getContext('2d'), [v0, v1] = tlWindow(), x = (t) => (t - v0) / (v1 - v0) * W;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0f131c'; ctx.fillRect(0, 0, W, H);
+  // Waveform from the loudness levels.
+  ctx.fillStyle = '#5b6680';
+  for (let px = 0; px < W; px += 2 * dpr) {
+    const a = Math.floor((v0 + px / W * (v1 - v0)) / HOP), b = Math.max(a + 1, Math.floor((v0 + (px + 2 * dpr) / W * (v1 - v0)) / HOP));
+    let m = -90; for (let i = a; i < b && i < S.levels.length; i++) m = Math.max(m, S.levels[i]);
+    const h = Math.max(1, (m + 60) / 60) * H * 0.8;
+    ctx.fillRect(px, (H - h) / 2, dpr, h);
+  }
+  const shade = (s, e, col) => { if (e <= v0 || s >= v1) return; ctx.fillStyle = col; ctx.fillRect(x(Math.max(s, v0)), 0, x(Math.min(e, v1)) - x(Math.max(s, v0)), H); };
+  shade(0, S.trimStart, 'rgba(0,0,0,0.65)'); shade(S.trimEnd, S.duration, 'rgba(0,0,0,0.65)');
+  if (S.removePauses) for (const p of S.silences) shade(p.start, p.end, 'rgba(160,170,190,0.18)');
+  for (const c of S.cuts) shade(c.start, c.end, 'rgba(255,90,90,0.45)');
+  if (S.cutFrom != null) { ctx.fillStyle = '#ff7a6b'; ctx.fillRect(x(S.cutFrom) - dpr, 0, 2 * dpr, H); }
+  ctx.fillStyle = '#ffd21a'; ctx.fillRect(x(video.currentTime) - dpr, 0, 2 * dpr, H);
+  $('tlRange').textContent = `${fmt(v0)} – ${fmt(v1)}`;
+}
+{
+  let down = null;
+  const seekAt = (e) => { const r = tl().getBoundingClientRect(), [v0, v1] = tlWindow(); video.currentTime = Math.max(0, Math.min(S.duration, v0 + (e.clientX - r.left) / r.width * (v1 - v0))); };
+  tl().addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: video.currentTime, moved: false }; video.pause(); });
+  tl().addEventListener('pointermove', (e) => {
+    if (!down) return;
+    const dx = e.clientX - down.x;
+    if (!down.moved && Math.abs(dx) < 6) return;
+    down.moved = true;
+    // Dragging moves the film under the playhead (like phone video editors), scaled by zoom.
+    const r = tl().getBoundingClientRect(), [v0, v1] = [0, S.duration / zoom];
+    video.currentTime = Math.max(0, Math.min(S.duration, down.t - dx / r.width * (v1 - v0)));
+  });
+  const up = (e) => { if (down && !down.moved && e.type === 'pointerup') seekAt(e); down = null; };
+  tl().addEventListener('pointerup', up); tl().addEventListener('pointercancel', up);
+}
+for (const b of $('zoomSeg').children) b.onclick = () => { zoom = +b.dataset.v; for (const x of $('zoomSeg').children) x.setAttribute('aria-pressed', String(x === b)); };
+for (const b of document.querySelectorAll('[data-step]')) b.onclick = () => { video.pause(); video.currentTime = Math.max(0, Math.min(S.duration, video.currentTime + +b.dataset.step)); };
+$('playPause').onclick = () => { if (video.paused) video.play(); else video.pause(); };
 
 // ---------- Combine several videos ----------
 let clips = [], merging = false;
