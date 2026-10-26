@@ -352,17 +352,27 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
       <h2>YouTube</h2>
       <p class="muted">Thumbnail, title, description and hashtags. Upload the exported video in the YouTube app or YouTube Studio and paste these in.</p>
       <div class="row"><span>Description language</span><select id="descLang"></select></div>
-      <button class="btn" id="findFrames" style="width:100%;margin-top:10px">Find good thumbnail frames</button>
+      <h3 style="margin:14px 0 4px">Cover picture</h3>
+      <p class="muted">Pick a frame (or use the current one, or upload a photo), cut yourself out, choose a background and a title. Everything runs on this device.</p>
+      <button class="btn" id="findFrames" style="width:100%;margin-top:10px">Find good frames</button>
       <div id="frameGrid" class="frames"></div>
       <button class="btn primary hidden" id="prepClaude" style="width:100%;margin-top:8px">Prepare with Claude: best frame, titles, description, hashtags</button>
       <p class="status" id="ytStatus"></p>
       <div id="thumbBox" class="hidden">
         <div class="seg" id="thumbFmt" role="group" aria-label="Thumbnail format"><button data-v="wide">Video 16:9</button><button data-v="tall">Short 9:16</button></div>
+        <div class="pair"><button class="btn" id="useCurrent">Use current frame</button><label class="btn" style="text-align:center">Upload photo<input type="file" accept="image/*" class="hidden" id="coverUpload"></label></div>
         <canvas id="thumbCanvas" style="width:100%;border-radius:12px;margin-top:10px;background:#000"></canvas>
+        <div class="row"><label for="cutToggle">Remove background<br><span class="muted">Cuts you out of the picture, on this device, free</span></label><input type="checkbox" class="switch" id="cutToggle"></div>
+        <div id="cutOpts" class="hidden">
+          <div class="seg" id="bgSeg" role="group" aria-label="Background" style="margin-top:8px;grid-template-columns:repeat(3,1fr);grid-auto-flow:row"></div>
+          <div class="stack"><div class="head"><span>Person size</span></div><input type="range" id="coverScale" min="0.6" max="1.15" step="0.05"></div>
+        </div>
+        <div class="stack"><div class="head"><span>Text position</span></div>
+          <div class="seg" id="layoutCover" role="group" aria-label="Text position"><button data-v="bottom">Bottom</button><button data-v="top">Top</button><button data-v="left">Left</button><button data-v="right">Right</button></div></div>
         <input class="area" id="thumbL1" placeholder="Line 1, e.g. ANMELDUNG" style="min-height:auto;margin-top:8px">
         <input class="area" id="thumbL2" placeholder="Line 2, e.g. ikamet kaydı" style="min-height:auto;margin-top:8px">
         <div id="thumbIdeas" class="cutlist"></div>
-        <div class="row"><label for="thumbTop">Text at the top</label><input type="checkbox" class="switch" id="thumbTop"></div>
+        <input type="checkbox" class="hidden" id="thumbTop">
         <div class="pair"><button class="btn" id="thumbShare">Share or save</button><a class="btn" id="thumbDl" download="thumbnail.png" style="text-align:center;text-decoration:none">Download</a></div>
       </div>
       <div id="textBox" class="hidden">

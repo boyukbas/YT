@@ -122,3 +122,134 @@ export async function prepareWithClaude(callClaude, { frames, transcript, langs,
   if (!m) throw new Error('Claude did not return the expected format');
   return JSON.parse(m[0]);
 }
+
+// ---------- Cover maker (all on this device, free) ----------
+let segmenter = null;
+/** Cuts the person out of a picture (MODNet, ~7 MB, downloaded once). Returns a canvas with transparency. */
+export async function removeBackground(canvas, onStatus = () => {}) {
+  if (!segmenter) {
+    onStatus('Loading the background remover (about 7 MB, one time)…');
+    const { pipeline, env } = await import('./lib/transformers.min.js');
+    env.allowLocalModels = false;
+    env.backends.onnx.wasm.wasmPaths = new URL('./lib/', import.meta.url).href;
+    segmenter = await pipeline('background-removal', 'Xenova/modnet', { dtype: 'q8' });
+  }
+  onStatus('Removing the background…');
+  const { RawImage } = await import('./lib/transformers.min.js');
+  const ctx = canvas.getContext('2d');
+  const img = new RawImage(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height, 4);
+  const out = await segmenter(img);
+  const r = Array.isArray(out) ? out[0] : out;
+  const c = document.createElement('canvas'); c.width = r.width; c.height = r.height;
+  c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(r.rgba ? r.rgba().data : r.data), r.width, r.height), 0, 0);
+  return c;
+}
+
+/** Bounding box of the visible (non-transparent) part of a cut-out. */
+function bbox(canvas) {
+  const { width: w, height: h } = canvas, d = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = 0, y1 = 0;
+  for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) if (d[(y * w + x) * 4 + 3] > 128) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return x1 > x0 ? { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } : { x: 0, y: 0, w, h };
+}
+
+export const BACKGROUNDS = {
+  photo: 'Original', blur: 'Blurred', sunset: 'Sunset', ocean: 'Ocean', night: 'Night', lang: 'Your colors',
+};
+const GRADS = { sunset: ['#ff6a3d', '#ffd21a'], ocean: ['#0b3d91', '#38c6f4'], night: ['#141a26', '#3a2d6b'] };
+
+function cover(ctx, img, W, H) {
+  const s = Math.max(W / img.width, H / img.height), cw = W / s, ch = H / s;
+  ctx.drawImage(img, (img.width - cw) / 2, (img.height - ch) / 2, cw, ch, 0, 0, W, H);
+}
+
+/**
+ * Draws a cover. layout: where the text goes ('left' | 'right' | 'top' | 'bottom');
+ * with a cut-out the person stands on the other side, with a soft white outline.
+ */
+export function drawCover(ctx, W, H, o) {
+  const { photo, cutout, bg = 'blur', layout = 'bottom', scale = 0.95, lines = [], font = 'bold', colorA = '#ffd21a', colorB = '#ffffff' } = o;
+  // Background
+  if (bg === 'photo' || !cutout) cover(ctx, photo, W, H);
+  else if (bg === 'blur') {
+    const sm = document.createElement('canvas'); sm.width = 64; sm.height = Math.round(64 * H / W);
+    cover(sm.getContext('2d'), photo, sm.width, sm.height);
+    const md = document.createElement('canvas'); md.width = sm.width * 4; md.height = sm.height * 4;
+    const mc = md.getContext('2d'); mc.imageSmoothingQuality = 'high'; mc.drawImage(sm, 0, 0, md.width, md.height);
+    ctx.imageSmoothingQuality = 'high'; ctx.drawImage(md, 0, 0, W, H);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(0, 0, W, H);
+  } else {
+    const [a, b] = bg === 'lang' ? [o.langA || '#ffd21a', o.langB || '#4de6ff'] : GRADS[bg];
+    const g = ctx.createLinearGradient(0, 0, W, H); g.addColorStop(0, a); g.addColorStop(1, b);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fillRect(0, 0, W, H);
+  }
+  // Person
+  const side = layout === 'left' || layout === 'right';
+  if (cutout && bg !== 'photo') {
+    const bb = bbox(cutout);
+    const targetH = H * scale * (side ? 1 : 0.85);
+    const k = Math.min(targetH / bb.h, (side ? W * 0.55 : W * 0.9) / bb.w);
+    const pw = bb.w * k, ph = bb.h * k;
+    const cx = layout === 'left' ? W * 0.72 : layout === 'right' ? W * 0.28 : W / 2;
+    const px = cx - pw / 2, py = H - ph;
+    ctx.save();
+    ctx.shadowColor = 'rgba(255,255,255,0.95)'; ctx.shadowBlur = Math.min(W, H) * 0.02;
+    for (let i = 0; i < 2; i++) ctx.drawImage(cutout, bb.x, bb.y, bb.w, bb.h, px, py, pw, ph);
+    ctx.restore();
+    ctx.drawImage(cutout, bb.x, bb.y, bb.w, bb.h, px, py, pw, ph);
+  } else if (!side) {
+    // Plain photo: darken behind the text for legibility.
+    const top = layout === 'top';
+    const g = ctx.createLinearGradient(0, top ? 0 : H, 0, top ? H * 0.55 : H * 0.45);
+    g.addColorStop(0, 'rgba(0,0,0,0.75)'); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  // Text: up to 2 lines, each wrapped and shrunk to fit its area.
+  const lines2 = lines.filter(l => l.text.trim());
+  if (!lines2.length) return;
+  const area = layout === 'left' ? { x: W * 0.04, w: W * 0.5 } : layout === 'right' ? { x: W * 0.46, w: W * 0.5 } : { x: W * 0.05, w: W * 0.9 };
+  let px = Math.round(Math.min(W, H) * (side ? 0.16 : (W > H ? 0.15 : 0.1)));
+  const wrap = (text) => {
+    const words = text.split(/\s+/), out = []; let cur = '';
+    for (const w of words) { const t = cur ? `${cur} ${w}` : w; if (cur && ctx.measureText(t).width > area.w) { out.push(cur); cur = w; } else cur = t; }
+    if (cur) out.push(cur); return out;
+  };
+  let laid;
+  for (;;) {
+    ctx.font = fontCss(font, px);
+    laid = lines2.flatMap((l, i) => wrap(l.text).map(t => ({ t, color: i === 0 ? colorA : colorB })));
+    const fits = laid.every(l => ctx.measureText(l.t).width <= area.w) && laid.length * px * 1.08 <= H * (side ? 0.85 : 0.42);
+    if (fits || px <= 24) break;
+    px -= 4;
+  }
+  const lh = px * 1.08, blockH = laid.length * lh;
+  let y = side ? (H - blockH) / 2 + lh / 2 : layout === 'top' ? H * 0.06 + lh / 2 : H - H * 0.06 - blockH + lh / 2;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  for (const l of laid) {
+    const x = area.x + area.w / 2;
+    ctx.lineWidth = px * 0.16; ctx.strokeStyle = '#000';
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = px * 0.25; ctx.strokeText(l.t, x, y);
+    ctx.shadowBlur = 0; ctx.fillStyle = l.color; ctx.fillText(l.t, x, y);
+    y += lh;
+  }
+}
+
+/** Free text ideas for the cover, from what's already in the project. */
+export function freeIdeas({ hook, glossary, titles, captions, primary, secondary }) {
+  const ideas = [];
+  const up = (s) => s.trim();
+  if (hook?.trim()) { const [a, ...b] = hook.trim().split(/\n|[–—:]/); ideas.push([up(a), up(b.join(' '))]); }
+  for (const line of (glossary || '').split('\n').filter(Boolean).slice(0, 3)) {
+    const [a, b] = line.split(/\s*(?:–|—|=|→|:|\t| - )\s*/); if (a) ideas.push([up(a), up(b || '')]);
+  }
+  for (const t of (titles || []).slice(0, 2)) { const w = t.split(/\s+/); ideas.push([w.slice(0, 3).join(' '), w.slice(3, 7).join(' ')]); }
+  // The most repeated second-language word is often the topic of a lesson.
+  const counts = new Map();
+  for (const c of captions || []) if (c.lang === secondary) for (const w of c.text.split(/\s+/)) {
+    const k = w.replace(/[^\p{L}-]/gu, ''); if (k.length > 5) counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 2).map(e => e[0]);
+  for (const t of top) ideas.push([t, '']);
+  const seen = new Set();
+  return ideas.filter(([a, b]) => a && !seen.has(a + b) && seen.add(a + b)).slice(0, 6);
+}

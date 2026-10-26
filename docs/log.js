@@ -1,6 +1,6 @@
 // A small diagnostics log kept on this device only (localStorage). Nothing is sent anywhere
 // unless you copy it or choose to report it. Video content and subtitle text are never logged.
-export const APP_VERSION = '2026-10-27.4';
+export const APP_VERSION = '2026-10-27.5';
 const KEY = 'shorts-log';
 const MAX = 400;
 

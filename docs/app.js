@@ -1194,7 +1194,8 @@ $('undoClaude').onclick = () => {
 syncClaude();
 
 // ---------- YouTube: thumbnail, titles, description, hashtags ----------
-const newPub = () => ({ t: null, l1: '', l2: '', top: false, fmt: 'wide', titles: [], title: '', shortTitle: '', description: '', hashtags: '', ideas: [] });
+const newPub = () => ({ t: null, l1: '', l2: '', top: false, fmt: 'wide', titles: [], title: '', shortTitle: '', description: '', hashtags: '', ideas: [], layout: 'bottom', bg: 'blur', cut: false, scale: 0.95 });
+let cutout = null, cutoutFor = null, uploaded = null;
 let frames = [], thumbFrame = null;
 function syncPub() {
   const p = S.pub;
@@ -1205,8 +1206,18 @@ function syncPub() {
   $('thumbBox').classList.toggle('hidden', p.t == null);
   $('thumbL1').value = p.l1; $('thumbL2').value = p.l2; $('thumbTop').checked = p.top;
   for (const b of $('thumbFmt').children) b.setAttribute('aria-pressed', String(b.dataset.v === p.fmt));
+  $('cutToggle').checked = !!p.cut; $('cutOpts').classList.toggle('hidden', !p.cut);
+  $('coverScale').value = p.scale ?? 0.95;
+  const bgs = $('bgSeg');
+  if (!bgs.children.length) for (const [k, l] of Object.entries(P.BACKGROUNDS)) {
+    const b = document.createElement('button'); b.dataset.v = k; b.textContent = l;
+    b.onclick = () => { S.pub.bg = k; syncPub(); renderThumb(); dirty(); }; bgs.appendChild(b);
+  }
+  for (const b of bgs.children) b.setAttribute('aria-pressed', String(b.dataset.v === (p.bg || 'blur')));
+  for (const b of $('layoutCover').children) b.setAttribute('aria-pressed', String(b.dataset.v === (p.layout || (p.top ? 'top' : 'bottom'))));
   $('thumbIdeas').innerHTML = '';
-  for (const [a, b] of p.ideas || []) {
+  const free = P.freeIdeas({ hook: S.hook, glossary: S.glossary, titles: p.titles, captions: S.captions, primary: S.primary, secondary: secondLang() });
+  for (const [a, b] of [...(p.ideas || []), ...free].filter((x, i, arr) => arr.findIndex(y => y.join() === x.join()) === i).slice(0, 8)) {
     const btn = document.createElement('button'); btn.className = 'btn titleopt'; btn.textContent = `${a} / ${b}`;
     btn.onclick = () => { p.l1 = a; p.l2 = b; syncPub(); renderThumb(); dirty(); };
     $('thumbIdeas').appendChild(btn);
@@ -1231,29 +1242,63 @@ function showFrames() {
   }
 }
 async function selectFrame(t) {
+  uploaded = null;
   S.pub.t = t; showFrames(); syncPub(); dirty();
   $('ytStatus').textContent = 'Loading the frame…';
   thumbFrame = await P.grabFrame(S.file, t).catch(() => null);
   $('ytStatus').textContent = thumbFrame ? '' : 'Could not read that frame.';
   renderThumb();
 }
-function renderThumb() {
-  if (!thumbFrame) return;
+async function ensureCutout(src) {
+  if (!S.pub.cut || !src) return null;
+  if (cutoutFor === src && cutout) return cutout;
+  const st = $('ytStatus'); st.className = 'status';
+  try {
+    cutout = await P.removeBackground(src, (m) => { st.textContent = m; });
+    cutoutFor = src; st.textContent = '';
+    L.info('Background removed', { w: src.width, h: src.height });
+  } catch (e) {
+    st.className = 'status error'; st.textContent = `Background removal failed: ${e.message}`; L.error('Background removal failed: ' + e.message);
+    cutout = null;
+  }
+  return cutout;
+}
+async function renderThumb() {
+  const src = uploaded || thumbFrame;
+  if (!src) return;
   const p = S.pub, cv = $('thumbCanvas');
   const [W, H] = p.fmt === 'tall' ? [1080, 1920] : [1280, 720];
+  const cut = await ensureCutout(src);
   cv.width = W; cv.height = H;
-  P.drawThumbnail(cv.getContext('2d'), thumbFrame, W, H, {
-    line1: p.l1, line2: p.l2, color1: COLORS[S.color2], color2: COLORS[S.color1], font: S.font, top: p.top,
-    lang1: secondLang() || S.primary, lang2: S.primary,
+  const up = (t, l) => { try { return t.toLocaleUpperCase(l); } catch { return t.toUpperCase(); } };
+  P.drawCover(cv.getContext('2d'), W, H, {
+    photo: src, cutout: p.cut ? cut : null, bg: p.bg || 'blur', layout: p.layout || (p.top ? 'top' : 'bottom'), scale: p.scale ?? 0.95,
+    // Capitals: Turkish rules (i→İ) only for lines that are clearly Turkish.
+    lines: [{ text: up(p.l1 || '', /[ğışçİĞŞÇ]/.test(p.l1 || '') ? 'tr' : 'de') }, { text: up(p.l2 || '', /[ğışçİĞŞÇ]/.test(p.l2 || '') ? 'tr' : 'de') }],
+    font: S.font, colorA: COLORS[S.color2], colorB: COLORS[S.color1], langA: COLORS[S.color2], langB: COLORS[S.color1] === '#ffffff' ? '#4de6ff' : COLORS[S.color1],
   });
+  $('thumbBox').classList.remove('hidden');
   cv.style.maxWidth = p.fmt === 'tall' ? '240px' : '100%'; cv.style.display = 'block'; cv.style.margin = '10px auto 0';
   cv.toBlob(b => {
     if (!b) return;
     const a = $('thumbDl'); if (a.href) URL.revokeObjectURL(a.href);
-    a.href = URL.createObjectURL(b); a.download = `thumbnail-${p.fmt === 'tall' ? 'short' : 'video'}.png`;
+    a.href = URL.createObjectURL(b); a.download = `cover-${p.fmt === 'tall' ? 'short' : 'video'}.png`;
     S.thumbBlob = b;
   }, 'image/png');
 }
+$('cutToggle').onchange = (e) => { S.pub.cut = e.target.checked; if (S.pub.cut && (S.pub.bg || 'blur') === 'photo') S.pub.bg = 'blur'; syncPub(); renderThumb(); dirty(); };
+$('coverScale').oninput = (e) => { S.pub.scale = +e.target.value; renderThumb(); dirty(); };
+for (const b of $('layoutCover').children) b.onclick = () => { S.pub.layout = b.dataset.v; syncPub(); renderThumb(); dirty(); };
+$('useCurrent').onclick = async () => { uploaded = null; await selectFrame(video.currentTime); };
+$('coverUpload').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const img = await createImageBitmap(f).catch(() => null);
+  if (!img) { $('ytStatus').textContent = 'Could not open that picture.'; return; }
+  const c = document.createElement('canvas'); const k = Math.min(1, 1920 / Math.max(img.width, img.height));
+  c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  uploaded = c; S.pub.t = S.pub.t ?? -1; $('thumbBox').classList.remove('hidden'); L.info('Cover photo uploaded', { w: c.width, h: c.height });
+  renderThumb();
+});
 async function loadFrames() {
   $('ytStatus').className = 'status'; $('ytStatus').textContent = 'Looking for sharp, well-lit frames…';
   $('findFrames').disabled = true;
@@ -1271,7 +1316,7 @@ async function loadFrames() {
 $('findFrames').onclick = loadFrames;
 $('thumbL1').oninput = (e) => { S.pub.l1 = e.target.value; renderThumb(); dirty(); };
 $('thumbL2').oninput = (e) => { S.pub.l2 = e.target.value; renderThumb(); dirty(); };
-$('thumbTop').onchange = (e) => { S.pub.top = e.target.checked; renderThumb(); dirty(); };
+
 for (const b of $('thumbFmt').children) b.onclick = () => { S.pub.fmt = b.dataset.v; syncPub(); renderThumb(); dirty(); };
 $('thumbShare').onclick = () => S.thumbBlob && share(S.thumbBlob, $('thumbDl').download, 'image/png');
 $('descLang').onchange = (e) => { S.pub.descLang = e.target.value; dirty(); };
