@@ -20,12 +20,12 @@ const $ = (id) => document.getElementById(id);
 // ---------- Settings (remembered between visits) ----------
 const COLORS = { white: '#ffffff', yellow: '#ffd21a', cyan: '#4de6ff', green: '#73ff73', pink: '#ff80cc', orange: '#ff9e33' };
 const SETTINGS = ['primary', 'secondary', 'color1', 'color2', 'caps', 'wordsPer', 'pos', 'burn', 'removePauses',
-  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs', 'accuracy', 'claudeModel', 'claudeFast', 'claudeAuto', 'engine', 'format'];
+  'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs', 'accuracy', 'claudeModel', 'claudeFast', 'claudeAuto', 'engine', 'format', 'pauseMode'];
 const saved = (() => { try { return JSON.parse(localStorage.getItem('settings') || '{}'); } catch { return {}; } })();
 const S = {
   primary: 'de', secondary: 'tr', color1: 'white', color2: 'yellow', caps: true, wordsPer: 3, pos: 0.35, burn: true,
   removePauses: true, minPause: 0.4, layout: 'single', size: 0.075, box: false, highlight: false, accurate: false, gpu: true,
-  posX: 0.5, font: 'modern', anim: false, hookSecs: 3, claudeModel: 'claude-sonnet-5-5', claudeFast: false, claudeAuto: true, engine: 'device', format: 'original', accuracy: saved.accurate ? 'second' : 'normal',
+  posX: 0.5, font: 'modern', anim: false, hookSecs: 3, claudeModel: 'claude-sonnet-5-5', claudeFast: false, claudeAuto: true, engine: 'device', format: 'original', pauseMode: 0, accuracy: saved.accurate ? 'second' : 'normal',
   ...saved,
   // per project
   id: null, name: '', file: null, url: null, duration: 0, width: 0, height: 0,
@@ -94,14 +94,36 @@ function subtract(base, cuts) {
   }
   return res.filter(r => r.end - r.start > 0.04);
 }
-const kept = () => subtract({ start: S.trimStart, end: S.trimEnd }, [...S.cuts, ...(S.removePauses ? S.silences : [])]);
-const outLength = () => kept().reduce((a, r) => a + r.end - r.start, 0);
+/**
+ * The parts of the original that make it into the video, each with a speed (1 = normal).
+ * Cuts and pauses are either removed or sped up, depending on their setting.
+ */
+function kept() {
+  const pauseSpeed = S.pauseMode > 1 ? S.pauseMode : 0;
+  const removed = [...S.cuts.filter(c => !(c.speed > 1)), ...(S.removePauses && !pauseSpeed ? S.silences : [])];
+  const fast = [...S.cuts.filter(c => c.speed > 1).map(c => ({ start: c.start, end: c.end, speed: c.speed })),
+    ...(S.removePauses && pauseSpeed ? S.silences.map(p => ({ ...p, speed: pauseSpeed })) : [])];
+  let ranges = subtract({ start: S.trimStart, end: S.trimEnd }, removed).map(r => ({ ...r, speed: 1 }));
+  for (const f of fast) {
+    ranges = ranges.flatMap(r => {
+      if (f.end <= r.start || f.start >= r.end) return [r];
+      const out = [];
+      if (f.start > r.start) out.push({ start: r.start, end: f.start, speed: r.speed });
+      out.push({ start: Math.max(r.start, f.start), end: Math.min(r.end, f.end), speed: Math.max(r.speed, f.speed) });
+      if (f.end < r.end) out.push({ start: f.end, end: r.end, speed: r.speed });
+      return out;
+    });
+  }
+  return ranges.filter(r => r.end - r.start > 0.02);
+}
+const outLen = (r) => (r.end - r.start) / (r.speed || 1);
+const outLength = () => kept().reduce((a, r) => a + outLen(r), 0);
 function toOutput(t, ranges = kept()) {
   let acc = 0;
   for (const r of ranges) {
     if (t < r.start) return acc;
-    if (t <= r.end) return acc + t - r.start;
-    acc += r.end - r.start;
+    if (t <= r.end) return acc + (t - r.start) / (r.speed || 1);
+    acc += outLen(r);
   }
   return acc;
 }
@@ -351,6 +373,8 @@ function tick() {
     if (!video.paused) {
       const t = video.currentTime, ranges = kept();
       const inside = ranges.find(r => t >= r.start - 0.01 && t < r.end);
+      const rate = inside?.speed || 1;
+      if (video.playbackRate !== rate) video.playbackRate = rate;
       if (!inside) {
         const next = ranges.find(r => r.start > t);
         if (next) video.currentTime = next.start; else video.pause();
@@ -395,14 +419,20 @@ function syncTrim() {
   S.cuts.forEach((c, i) => {
     const row = document.createElement('div'); row.className = 'item'; row.style.flexWrap = 'wrap'; row.style.gap = '6px';
     const label = document.createElement('span'); label.style.flex = '1 1 100%';
-    label.textContent = `${c.capId ? 'Line cut' : 'Cut'} ${fmt(c.start)} – ${fmt(c.end)} (${(c.end - c.start).toFixed(1)} s)`;
+    label.textContent = `${c.capId ? 'Line' : 'Part'} ${fmt(c.start)} – ${fmt(c.end)} (${(c.end - c.start).toFixed(1)} s): ${c.speed > 1 ? `played ${c.speed}× faster` : 'cut out'}`;
     const b = (txt, aria, fn) => { const x = document.createElement('button'); x.className = 'btn'; x.style.padding = '6px 10px'; x.textContent = txt; x.setAttribute('aria-label', aria); x.onclick = fn; return x; };
     const move = (edge, d) => () => {
       if (edge === 'start') c.start = Math.max(0, Math.min(c.end - 0.1, c.start + d)); else c.end = Math.min(S.duration, Math.max(c.start + 0.1, c.end + d));
       video.pause(); video.currentTime = edge === 'start' ? c.start : c.end;
       syncTrim(); syncLength(); dirty();
     };
-    row.append(label,
+    const modes = document.createElement('div'); modes.className = 'seg'; modes.style.flex = '1 1 100%';
+    for (const [v, l] of [[0, 'Cut'], [2, '2×'], [4, '4×'], [8, '8×']]) {
+      const m = document.createElement('button'); m.textContent = l; m.setAttribute('aria-pressed', String((c.speed || 0) === v));
+      m.onclick = () => { c.speed = v || undefined; syncTrim(); syncLength(); dirty(); renderCapList(); };
+      modes.appendChild(m);
+    }
+    row.append(label, modes,
       b('Start −', 'Cut starts earlier', move('start', -0.1)), b('Start +', 'Cut starts later', move('start', 0.1)),
       b('End −', 'Cut ends earlier', move('end', -0.1)), b('End +', 'Cut ends later', move('end', 0.1)),
       b('▶ Check', 'Play around this cut', () => { video.currentTime = Math.max(0, c.start - 2); video.play(); }),
@@ -416,6 +446,7 @@ function syncPauses() {
   $('thresh').value = S.threshold; $('threshOut').textContent = `${S.threshold} dB`;
   $('minPause').value = S.minPause; $('minPauseOut').textContent = `${S.minPause.toFixed(2)} s`;
   $('pauseCount').textContent = `${S.silences.length} pauses found`;
+  for (const b of $('pauseModeSeg').children) b.setAttribute('aria-pressed', String(+b.dataset.v === (S.pauseMode || 0)));
 }
 function syncLength() {
   const L = outLength();
@@ -579,6 +610,7 @@ $('cutOut').onclick = () => {
   S.cutFrom = null; syncTrim(); syncLength(); dirty();
 };
 $('pauseToggle').onchange = e => { S.removePauses = e.target.checked; persist(); syncPauses(); syncLength(); };
+for (const b of $('pauseModeSeg').children) b.onclick = () => { S.pauseMode = +b.dataset.v; persist(); syncPauses(); syncLength(); };
 $('thresh').oninput = e => { S.threshold = +e.target.value; findSilences(); syncPauses(); syncLength(); dirty(); };
 $('minPause').oninput = e => { S.minPause = +e.target.value; persist(); findSilences(); syncPauses(); syncLength(); };
 $('autoLevel').onclick = () => { S.threshold = suggestThreshold(S.levels); findSilences(); syncPauses(); syncLength(); dirty(); };
@@ -808,7 +840,7 @@ async function exportVideo(format = S.format) {
     if (!vCodec) throw new Error('This browser cannot encode video');
     const aCodec = aTrack ? await getFirstEncodableAudioCodec(['aac', 'opus']) : null;
     const fps = Math.round((await vTrack.computePacketStats(120)).averagePacketRate) || 30;
-    L.info('Export started', { W, H, vCodec, aCodec, fps, burn: S.burn, layout: S.layout, secs: +kept().reduce((a, r) => a + r.end - r.start, 0).toFixed(1),
+    L.info('Export started', { W, H, vCodec, aCodec, fps, burn: S.burn, layout: S.layout, secs: +outLength().toFixed(1),
       trim: [+S.trimStart.toFixed(1), +S.trimEnd.toFixed(1)], cuts: S.cuts.length, removePauses: S.removePauses, pauses: S.silences.length, threshold: S.threshold, duration: +S.duration.toFixed(1) });
     const exportStart = Date.now();
 
@@ -834,7 +866,7 @@ async function exportVideo(format = S.format) {
     await output.start();
 
     const ranges = kept();
-    const total = ranges.reduce((a, r) => a + r.end - r.start, 0);
+    const total = ranges.reduce((a, r) => a + outLen(r), 0);
     const caps = S.burn ? S.captions.filter(c => c.text.trim()) : [];
     const st0 = style();
     const hook = S.hook.trim() ? S.hook : '';
@@ -847,18 +879,20 @@ async function exportVideo(format = S.format) {
           if (f.timestamp >= r.end) break;
           if (f.timestamp + f.duration <= r.start) continue;
           const srcT = Math.max(f.timestamp, r.start);
-          const outT = acc + srcT - r.start;
-          if (outT <= lastOut) continue;
+          const sp = r.speed || 1;
+          const outT = acc + (srcT - r.start) / sp;
+          // Sped-up parts: skip frames that would come too close together.
+          if (outT <= lastOut || (sp > 1 && outT - lastOut < 0.9 / fps)) continue;
           composeFrame(ctx, f.canvas, SW, SH, W, H, vertical ? format : 'original');
           if (caps.length) drawCaptions(ctx, W, H, srcT, blocksAt(srcT, caps, S.layout, S.primary), st0);
           if (hook && outT < S.hookSecs) drawHook(ctx, W, H, hook, outT, st0);
-          const dur = Math.min(f.duration, r.end - srcT);
-          await vSource.add(outT, dur > 0 ? dur : 1 / fps);
+          const dur = Math.min(f.duration, r.end - srcT) / sp;
+          await vSource.add(outT, dur > 0 ? Math.max(dur, 1 / fps) : 1 / fps);
           lastOut = outT;
           st.textContent = `Exporting… ${Math.min(100, Math.round(outT / total * 100))}%`;
           setBar('expBar', outT / total);
         }
-        acc += r.end - r.start;
+        acc += outLen(r);
       }
       vSource.close();
     };
@@ -869,6 +903,7 @@ async function exportVideo(format = S.format) {
         for (let i = 0; i < n && from + i < data.length; i++) data[from + i] *= up ? i / n : 1 - i / n;
       };
       for (const r of ranges) {
+        if ((r.speed || 1) > 1) { await addFastAudio(sink, r); continue; }
         let first = true;
         for await (const { buffer, timestamp } of sink.buffers(r.start, r.end)) {
           const sr = buffer.sampleRate;
@@ -889,6 +924,28 @@ async function exportVideo(format = S.format) {
         }
       }
       aSource.close();
+    };
+    // A sped-up part: 2× keeps the sound (faster and higher), faster than that is silent.
+    const addFastAudio = async (sink, r) => {
+      const chunks = []; let sr = 48000, chs = 2, len = 0;
+      for await (const { buffer, timestamp } of sink.buffers(r.start, r.end)) {
+        sr = buffer.sampleRate; chs = buffer.numberOfChannels;
+        const s0 = Math.max(0, Math.round((r.start - timestamp) * sr)), s1 = Math.min(buffer.length, Math.round((r.end - timestamp) * sr));
+        if (s1 <= s0) continue;
+        chunks.push(Array.from({ length: chs }, (_, c) => buffer.getChannelData(c).slice(s0, s1))); len += s1 - s0;
+      }
+      const outFrames = Math.max(1, Math.round(len / r.speed));
+      let out;
+      if (r.speed <= 2 && len) {
+        const off = new OfflineAudioContext(chs, outFrames, sr);
+        const src = off.createBuffer(chs, len, sr);
+        let o = 0; for (const c of chunks) { c.forEach((d, ch) => src.copyToChannel(d, ch, o)); o += c[0].length; }
+        const node = off.createBufferSource(); node.buffer = src; node.playbackRate.value = r.speed; node.connect(off.destination); node.start();
+        out = await off.startRendering();
+      } else {
+        out = new AudioBuffer({ length: outFrames, numberOfChannels: chs, sampleRate: sr });
+      }
+      await aSource.add(out);
     };
     await Promise.all([doVideo(), doAudio()]);
     st.textContent = 'Finishing…';
@@ -1338,8 +1395,8 @@ function drawTimeline() {
   }
   const shade = (s, e, col) => { if (e <= v0 || s >= v1) return; ctx.fillStyle = col; ctx.fillRect(x(Math.max(s, v0)), 0, x(Math.min(e, v1)) - x(Math.max(s, v0)), H); };
   shade(0, S.trimStart, 'rgba(0,0,0,0.65)'); shade(S.trimEnd, S.duration, 'rgba(0,0,0,0.65)');
-  if (S.removePauses) for (const p of S.silences) shade(p.start, p.end, 'rgba(160,170,190,0.18)');
-  for (const c of S.cuts) shade(c.start, c.end, 'rgba(255,90,90,0.45)');
+  if (S.removePauses) for (const p of S.silences) shade(p.start, p.end, S.pauseMode > 1 ? 'rgba(77,170,255,0.22)' : 'rgba(160,170,190,0.18)');
+  for (const c of S.cuts) shade(c.start, c.end, c.speed > 1 ? 'rgba(77,170,255,0.4)' : 'rgba(255,90,90,0.45)');
   if (S.cutFrom != null) { ctx.fillStyle = '#ff7a6b'; ctx.fillRect(x(S.cutFrom) - dpr, 0, 2 * dpr, H); }
   ctx.fillStyle = '#ffd21a'; ctx.fillRect(x(video.currentTime) - dpr, 0, 2 * dpr, H);
   $('tlRange').textContent = `${fmt(v0)} – ${fmt(v1)}`;

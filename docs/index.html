@@ -210,8 +210,8 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
         <button class="btn" data-step="0.1" aria-label="Forward 0.1 second">+0.1</button>
         <button class="btn" data-step="1" aria-label="Forward 1 second">+1s</button>
       </div>
-      <p class="muted" style="margin-top:8px">Drag the strip to move through the video; zoom in for precise spots. Red = cut out, grey = pauses removed. Tip: in the Subtitles tab, ✂ next to a line cuts exactly that sentence.</p>
-      <p class="muted" style="margin-top:14px">Cut out a part: move to where it starts and tap “Cut from here”, then to where it ends and tap “Cut to here”. Cut edges snap to the nearest quiet moment.</p>
+      <p class="muted" style="margin-top:8px">Drag the strip to move through the video; zoom in for precise spots. Red = cut out, blue = played faster, grey = pauses removed. Tip: in the Subtitles tab, ✂ next to a line cuts exactly that sentence.</p>
+      <p class="muted" style="margin-top:14px">Cut out a part: move to where it starts and tap “Cut from here”, then to where it ends and tap “Cut to here”. Cut edges snap to the nearest quiet moment. Each part can be cut out or played 2×, 4× or 8× faster.</p>
       <div class="pair">
         <button class="btn" id="cutIn">Cut from here</button>
         <button class="btn" id="cutOut" disabled>Cut to here</button>
@@ -234,7 +234,10 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
     <section>
       <div class="row"><h2 style="margin:0">Remove pauses</h2><input type="checkbox" class="switch" id="pauseToggle" aria-label="Remove pauses"></div>
       <div id="pauseOpts">
-        <p class="muted" style="margin-top:6px">Cuts out the quiet moments between sentences. The defaults work for most videos.</p>
+        <p class="muted" style="margin-top:6px">The quiet moments between sentences: cut them out, or keep them but play them faster.</p>
+        <div class="seg" id="pauseModeSeg" role="group" aria-label="What to do with pauses" style="margin-top:8px">
+          <button data-v="0">Cut out</button><button data-v="2">2× faster</button><button data-v="4">4× faster</button>
+        </div>
         <div class="row"><span class="muted" id="pauseCount"></span><button class="btn" id="autoLevel">Auto level</button></div>
         <details><summary>Advanced</summary>
         <div class="stack"><div class="head"><span>Silence level</span><output id="threshOut"></output></div>
