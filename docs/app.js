@@ -8,8 +8,9 @@ import * as C from './claude.js';
 import * as O from './openai.js';
 import * as P from './publish.js';
 import * as M from './merge.js';
+import * as LY from './layers.js';
 import { blocksAt, drawCaptions, drawHook, drawSafeZones, FONTS, fontCss } from './render.js';
-import { saveFile, saveProject, listProjects, loadProject, deleteProject } from './store.js';
+import { saveFile, saveProject, listProjects, loadProject, deleteProject, loadFile } from './store.js';
 import * as L from './log.js';
 
 L.install();
@@ -67,7 +68,7 @@ async function saveNow() {
     await saveProject({
       id: S.id, name: S.name, updatedAt: Date.now(), duration: S.duration, width: S.width, height: S.height,
       trimStart: S.trimStart, trimEnd: S.trimEnd, cuts: S.cuts, threshold: S.threshold,
-      words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job, pub: S.pub, thumb: S.thumb,
+      words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job, pub: S.pub, thumb: S.thumb, layers: S.layers,
     });
     $('saved').textContent = 'Saved';
   } catch { $('saved').textContent = 'Not saved'; }
@@ -230,12 +231,12 @@ async function openVideo(file, project = null) {
       Object.assign(S, {
         id: project.id, name: project.name, trimStart: project.trimStart, trimEnd: project.trimEnd,
         cuts: project.cuts || [], threshold: project.threshold ?? suggestThreshold(S.levels), words: project.words || [],
-        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '', job: project.job || null, pub: { ...newPub(), ...(project.pub || {}) }, thumb: project.thumb || null,
+        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '', job: project.job || null, pub: { ...newPub(), ...(project.pub || {}) }, thumb: project.thumb || null, layers: { ...LY.defaultLayers(), ...(project.layers || {}) },
       });
     } else {
       Object.assign(S, {
         id: crypto.randomUUID(), name: file.name || 'Video', trimStart: 0, trimEnd: S.duration, cuts: [],
-        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '', job: null, pub: newPub(), thumb: null,
+        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '', job: null, pub: newPub(), thumb: null, layers: LY.defaultLayers(),
       });
       try {
         await saveFile(S.id, file);
@@ -247,6 +248,7 @@ async function openVideo(file, project = null) {
     findSilences();
     $('video').src = S.url;
     if (!S.thumb) captureProjectThumb();
+    S.presDrag = false; lastMask = null; loadBgForProject();
     setTab(S.captions.length ? 'subs' : 'video');
     $('empty').classList.add('hidden');
     $('editor').classList.remove('hidden');
@@ -396,6 +398,7 @@ function tick() {
     $('tNow').textContent = fmt(toOutput(t));
     if (S.format !== 'original') drawFormatPreview();
     drawTimeline();
+    drawComposite();
   }
   requestAnimationFrame(tick);
 }
@@ -688,11 +691,17 @@ for (const b of $('posSeg').children) b.onclick = () => {
 let dragging = false;
 const placeAt = (e) => {
   const r = overlay.getBoundingClientRect();
+  if (S.presDrag) {
+    S.layers.x = Math.min(0.95, Math.max(0.05, (e.clientX - r.left) / r.width));
+    S.layers.y = Math.min(0.95, Math.max(0.05, (e.clientY - r.top) / r.height));
+    if (S.layers.size >= 0.999) S.layers.size = 0.5;
+    syncLayers(); dirty(); return;
+  }
   S.posX = Math.min(0.85, Math.max(0.15, (e.clientX - r.left) / r.width));
   S.pos = Math.min(0.92, Math.max(0.08, 1 - (e.clientY - r.top) / r.height));
   $('pos').value = S.pos; syncPos();
 };
-overlay.addEventListener('pointerdown', (e) => { if (!S.dragMode) return; dragging = true; overlay.setPointerCapture(e.pointerId); placeAt(e); });
+overlay.addEventListener('pointerdown', (e) => { if (!S.dragMode && !S.presDrag) return; dragging = true; overlay.setPointerCapture(e.pointerId); placeAt(e); });
 overlay.addEventListener('pointermove', (e) => { if (dragging) placeAt(e); });
 const endDrag = () => { if (dragging) { dragging = false; persist(); } };
 overlay.addEventListener('pointerup', endDrag);
@@ -840,7 +849,7 @@ async function exportVideo(format = S.format) {
     if (!vCodec) throw new Error('This browser cannot encode video');
     const aCodec = aTrack ? await getFirstEncodableAudioCodec(['aac', 'opus']) : null;
     const fps = Math.round((await vTrack.computePacketStats(120)).averagePacketRate) || 30;
-    L.info('Export started', { W, H, vCodec, aCodec, fps, burn: S.burn, layout: S.layout, secs: +outLength().toFixed(1),
+    L.info('Export started', { layers: LY.layersActive(S.layers) ? { bg: S.layers.bg, cut: S.layers.cut, size: S.layers.size } : 'off', W, H, vCodec, aCodec, fps, burn: S.burn, layout: S.layout, secs: +outLength().toFixed(1),
       trim: [+S.trimStart.toFixed(1), +S.trimEnd.toFixed(1)], cuts: S.cuts.length, removePauses: S.removePauses, pauses: S.silences.length, threshold: S.threshold, duration: +S.duration.toFixed(1) });
     const exportStart = Date.now();
 
@@ -869,6 +878,12 @@ async function exportVideo(format = S.format) {
     const total = ranges.reduce((a, r) => a + outLen(r), 0);
     const caps = S.burn ? S.captions.filter(c => c.text.trim()) : [];
     const st0 = style();
+    // Layers for export: person detector, background picture or video.
+    const Lx = S.layers, layersOn = LY.layersActive(Lx);
+    if (layersOn && Lx.cut && !(await ensureSegmenter())) throw new Error('the person detector could not load');
+    const exMasker = layersOn && Lx.cut ? new LY.Masker() : null;
+    const exBgVideo = layersOn && Lx.bg === 'file' && bgIsVideo && S.bgFile ? await new LY.BgVideo().open(S.bgFile) : null;
+    const layerCanvas = layersOn ? new OffscreenCanvas(SW, SH) : null;
     const hook = S.hook.trim() ? S.hook : '';
 
     const doVideo = async () => {
@@ -883,7 +898,11 @@ async function exportVideo(format = S.format) {
           const outT = acc + (srcT - r.start) / sp;
           // Sped-up parts: skip frames that would come too close together.
           if (outT <= lastOut || (sp > 1 && outT - lastOut < 0.9 / fps)) continue;
-          composeFrame(ctx, f.canvas, SW, SH, W, H, vertical ? format : 'original');
+          if (layersOn) {
+            const bgFrame = Lx.bg === 'file' ? (exBgVideo ? await exBgVideo.frameAt(outT) : bgImage) : null;
+            LY.composite(layerCanvas.getContext('2d'), SW, SH, f.canvas, SW, SH, exMasker ? exMasker.mask(f.canvas) : null, bgFrame, Lx);
+            composeFrame(ctx, layerCanvas, SW, SH, W, H, vertical ? format : 'original');
+          } else composeFrame(ctx, f.canvas, SW, SH, W, H, vertical ? format : 'original');
           if (caps.length) drawCaptions(ctx, W, H, srcT, blocksAt(srcT, caps, S.layout, S.primary), st0);
           if (hook && outT < S.hookSecs) drawHook(ctx, W, H, hook, outT, st0);
           const dur = Math.min(f.duration, r.end - srcT) / sp;
@@ -1027,7 +1046,8 @@ function drawFormatPreview(force = false) {
   fmtPreviewAt = performance.now();
   const W = 270, H = 480, ctx = cv.getContext('2d');
   cv.width = W; cv.height = H;
-  composeFrame(ctx, video, video.videoWidth, video.videoHeight, W, H, S.format);
+  const srcEl = LY.layersActive(S.layers) && comp.width ? comp : video;
+  composeFrame(ctx, srcEl, srcEl === comp ? comp.width : video.videoWidth, srcEl === comp ? comp.height : video.videoHeight, W, H, S.format);
   const t = video.currentTime;
   drawCaptions(ctx, W, H, t, blocksAt(t, S.captions, S.layout, S.primary), style());
   const outT = toOutput(t);
@@ -1377,6 +1397,95 @@ $('reportLog').onclick = async () => {
   open(`https://github.com/boyukbas/YT/issues/new?title=${encodeURIComponent('Problem in Shorts Editor')}&body=${encodeURIComponent(body)}`, '_blank');
 };
 
+// ---------- Background & presenter (layers) ----------
+const comp = $('composite'), bgVideo = $('bgVideo');
+let bgImage = null, bgIsVideo = false, bgURL = null, masker = null, maskAt = 0, lastMask = null;
+const BG_COLORS = ['#1e7a46', '#f4f6f8', '#2b2f3a', '#0b3d91', '#7a1e3a', '#00b140'];
+function Lr() { return S.layers; }
+function syncLayers() {
+  const L = Lr();
+  for (const b of $('bgModeSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === L.bg));
+  $('bgColors').classList.toggle('hidden', L.bg !== 'color');
+  $('bgGrads').classList.toggle('hidden', L.bg !== 'grad');
+  $('bgFileRow').classList.toggle('hidden', L.bg !== 'file');
+  const sw = $('bgColors');
+  if (!sw.children.length) for (const c of BG_COLORS) { const b = document.createElement('button'); b.className = 'swatch'; b.style.background = c; b.dataset.v = c; b.setAttribute('aria-label', c); b.onclick = () => { S.layers.color = c; syncLayers(); dirty(); }; sw.appendChild(b); }
+  for (const b of sw.children) b.setAttribute('aria-pressed', String(b.dataset.v === L.color));
+  const gs = $('bgGrads');
+  if (!gs.children.length) for (const k of Object.keys(LY.GRADIENTS)) { const b = document.createElement('button'); b.dataset.v = k; b.textContent = k[0].toUpperCase() + k.slice(1); b.onclick = () => { S.layers.grad = k; syncLayers(); dirty(); }; gs.appendChild(b); }
+  for (const b of gs.children) b.setAttribute('aria-pressed', String(b.dataset.v === L.grad));
+  $('bgFileInfo').textContent = L.hasFile ? `Using your ${L.fileIsVideo ? 'video (it loops; its sound is not used)' : 'picture'}.` : 'No picture or video chosen yet.';
+  $('cutMe').checked = L.cut;
+  $('presOpts').classList.toggle('hidden', L.bg === 'none' && !L.cut);
+  $('presSize').value = L.size; $('presSizeOut').textContent = L.size >= 0.999 ? 'Full' : `${Math.round(L.size * 100)}%`;
+  $('presShape').classList.toggle('hidden', L.cut || L.size >= 0.999);
+  for (const b of $('presShape').children) b.setAttribute('aria-pressed', String(b.dataset.v === L.shape));
+  for (const b of $('presPos').children) b.setAttribute('aria-pressed', String(b.dataset.v === 'drag' ? !!S.presDrag : false));
+  const active = LY.layersActive(L);
+  comp.classList.toggle('hidden', !active);
+  video.controls = !active;   // the picture is drawn on top; play/pause with a tap or the timeline buttons
+  if (L.cut) ensureSegmenter();
+}
+async function ensureSegmenter() {
+  const st = $('layersStatus');
+  if (masker) return true;
+  st.className = 'status'; st.textContent = 'Loading the person detector (about 13 MB, one time)…';
+  try { await LY.loadSegmenter(S.width >= S.height); masker = new LY.Masker(); st.textContent = ''; L.info('Person detector ready'); return true; }
+  catch (e) { st.className = 'status error'; st.textContent = `Could not load the person detector: ${e.message}`; L.error('Segmenter failed: ' + e.message); return false; }
+}
+async function setBgFile(file, save = true) {
+  if (bgURL) URL.revokeObjectURL(bgURL);
+  bgImage = null; bgIsVideo = file.type.startsWith('video/');
+  bgURL = URL.createObjectURL(file);
+  if (bgIsVideo) { bgVideo.src = bgURL; bgVideo.load(); }
+  else bgImage = await createImageBitmap(file);
+  S.bgFile = file;
+  S.layers.hasFile = true; S.layers.fileIsVideo = bgIsVideo;
+  if (save) { try { await saveFile(S.id + ':bg', file); } catch {} dirty(); }
+  syncLayers();
+}
+async function loadBgForProject() {
+  bgImage = null; bgIsVideo = false; S.bgFile = null; bgVideo.removeAttribute('src');
+  if (S.layers.hasFile) { const f = await loadFile(S.id + ':bg').catch(() => null); if (f) await setBgFile(f, false); else S.layers.hasFile = false; }
+  syncLayers();
+}
+for (const b of $('bgModeSeg').children) b.onclick = () => { S.layers.bg = b.dataset.v; if (b.dataset.v === 'file' && !S.layers.hasFile) $('bgFile').click(); syncLayers(); dirty(); };
+$('bgFile').addEventListener('change', async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; await setBgFile(f); S.layers.bg = 'file'; syncLayers(); L.info('Background chosen', { type: f.type, sizeMB: +(f.size / 1e6).toFixed(1) }); });
+$('cutMe').onchange = (e) => { S.layers.cut = e.target.checked; if (S.layers.cut && S.layers.bg === 'none') S.layers.bg = 'blur'; syncLayers(); dirty(); };
+$('presSize').oninput = (e) => { S.layers.size = +e.target.value; syncLayers(); dirty(); };
+for (const b of $('presShape').children) b.onclick = () => { S.layers.shape = b.dataset.v; syncLayers(); dirty(); };
+const POS = { full: [0.5, 0.5, 1], bl: [0.2, 0.75, 0.45], br: [0.8, 0.75, 0.45], tr: [0.8, 0.25, 0.4], c: [0.5, 0.55, 0.7] };
+for (const b of $('presPos').children) b.onclick = () => {
+  if (b.dataset.v === 'drag') { S.presDrag = !S.presDrag; $('stage').classList.toggle('dragging', S.presDrag); if (S.presDrag) { video.pause(); $('stage').scrollIntoView({ block: 'start' }); } syncLayers(); return; }
+  const [x, y0, size] = POS[b.dataset.v];
+  const y = b.dataset.v === 'bl' || b.dataset.v === 'br' ? 1 - size / 2 : y0;   // stand on the bottom edge
+  Object.assign(S.layers, { x, y, size }); S.presDrag = false; $('stage').classList.remove('dragging'); syncLayers(); dirty();
+};
+$('stage').addEventListener('click', (e) => {
+  if (!LY.layersActive(S.layers) || S.presDrag || S.dragMode || e.target.closest('button')) return;
+  if (video.paused) video.play(); else video.pause();
+});
+
+/** Live preview of the layers (runs every animation frame while they're on). */
+function drawComposite() {
+  const L = S.layers;
+  if (!LY.layersActive(L) || !video.videoWidth) return;
+  const dpr = Math.min(2, devicePixelRatio || 1), W = Math.round(comp.clientWidth * dpr), H = Math.round(comp.clientHeight * dpr);
+  if (!W || !H) return;
+  if (comp.width !== W || comp.height !== H) { comp.width = W; comp.height = H; }
+  if (L.cut && masker && busy !== 'export' && performance.now() - maskAt > 45) { lastMask = masker.mask(video); maskAt = performance.now(); }
+  let bg = null;
+  if (L.bg === 'file') {
+    if (bgIsVideo && bgVideo.readyState >= 2) {
+      const target = toOutput(video.currentTime) % (bgVideo.duration || 1);
+      if (Math.abs(bgVideo.currentTime - target) > 0.35) bgVideo.currentTime = target;
+      if (!video.paused && bgVideo.paused) bgVideo.play().catch(() => {});
+      if (video.paused && !bgVideo.paused) bgVideo.pause();
+      bg = bgVideo;
+    } else bg = bgImage;
+  }
+  LY.composite(comp.getContext('2d'), W, H, video, video.videoWidth, video.videoHeight, L.cut ? lastMask : null, bg, L);
+}
 // ---------- Tabs, settings, project thumbnails ----------
 function setTab(name) {
   for (const b of $('tabs').children) b.setAttribute('aria-selected', String(b.dataset.tab === name));

@@ -117,7 +117,8 @@ details[open] summary::after { content: "−"; }
 summary .hint { color: var(--muted); font-weight: 400; font-size: 14px; margin-left: auto; margin-right: 10px; }
 .area { width: 100%; min-height: 7em; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; resize: vertical; line-height: 1.4; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; touch-action: none; }
-.stage.dragging canvas { pointer-events: auto; cursor: grab; }
+.stage.dragging canvas#overlay { pointer-events: auto; cursor: grab; }
+#composite { pointer-events: none; }
 .cap-row { grid-template-columns: 1fr; gap: 6px; }
 .cap-row .top { display: flex; align-items: center; gap: 8px; }
 .cap-row .t { padding-top: 0; width: auto; }
@@ -187,6 +188,7 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
     <div class="topbar" id="topbar">
     <div class="stage" id="stage">
       <video id="video" playsinline controls preload="metadata"></video>
+      <canvas id="composite" class="hidden"></canvas>
       <canvas id="overlay"></canvas>
       <button class="btn primary hidden" id="dragDone" style="position:absolute;top:10px;left:50%;transform:translateX(-50%);padding:8px 16px">Done placing</button>
     </div>
@@ -218,6 +220,34 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
       </div>
       <div class="cutlist" id="cutList"></div>
     </section>
+
+    <section id="layersBox">
+      <h2>Background &amp; presenter</h2>
+      <p class="muted">Put yourself on a picture, a whiteboard or another video (slides, a screen recording), with or without your own background.</p>
+      <div class="stack"><div class="head"><span>Background</span></div>
+        <div class="seg" id="bgModeSeg" role="group" aria-label="Background" style="grid-template-columns:repeat(3,1fr);grid-auto-flow:row">
+          <button data-v="none">Original</button><button data-v="blur">Blurred</button><button data-v="color">Color</button><button data-v="grad">Gradient</button><button data-v="file">Picture/video</button>
+        </div></div>
+      <div class="swatches hidden" id="bgColors" style="margin-top:10px;flex-wrap:wrap"></div>
+      <div class="seg hidden" id="bgGrads" role="group" aria-label="Gradient" style="margin-top:10px"></div>
+      <div id="bgFileRow" class="hidden" style="margin-top:10px">
+        <label class="btn" style="display:block;text-align:center">Choose picture or video<input type="file" accept="image/*,video/*" class="hidden" id="bgFile"></label>
+        <p class="muted" id="bgFileInfo" style="margin-top:6px"></p>
+      </div>
+      <div class="row" style="margin-top:12px"><label for="cutMe">Cut me out<br><span class="muted">Removes your own background, on this device</span></label><input type="checkbox" class="switch" id="cutMe"></div>
+      <div id="presOpts">
+        <div class="stack"><div class="head"><span>Presenter size</span><output id="presSizeOut"></output></div>
+          <input type="range" id="presSize" min="0.2" max="1" step="0.02"></div>
+        <div class="seg" id="presPos" role="group" aria-label="Presenter position" style="margin-top:8px;grid-template-columns:repeat(3,1fr);grid-auto-flow:row">
+          <button data-v="full">Full</button><button data-v="bl">Bottom left</button><button data-v="br">Bottom right</button><button data-v="tr">Top right</button><button data-v="c">Center</button><button data-v="drag">Drag</button>
+        </div>
+        <div class="seg hidden" id="presShape" role="group" aria-label="Presenter shape" style="margin-top:8px">
+          <button data-v="rect">Rectangle</button><button data-v="round">Rounded</button><button data-v="circle">Circle</button>
+        </div>
+      </div>
+      <p class="status" id="layersStatus"></p>
+    </section>
+
     <section>
       <h2>Trim start and end</h2>
       <div class="stack"><div class="head"><span>Start</span><output id="trimStartOut"></output></div>
@@ -421,6 +451,7 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
       </details>
   <button class="btn primary" id="closeSettings" style="width:100%;margin-top:14px">Done</button>
 </dialog>
+<video id="bgVideo" muted loop playsinline preload="auto" class="hidden"></video>
 <dialog id="mergeDlg">
   <h2>Combine videos</h2>
   <p class="muted">Put them in order. They're joined into one video, which you then edit like any other: subtitles, cuts, Short, YouTube.</p>
