@@ -76,12 +76,13 @@ export async function mergeClips(clips, { onProgress = () => {}, log = () => {} 
   const total = clips.reduce((a, c) => a + c.duration, 0);
 
   // Straight to device storage when possible (long videos don't fit in memory).
-  let handle = null, target;
+  let handle = null, target, writable = null;
   try {
     const root = await navigator.storage.getDirectory();
     for await (const name of root.keys()) if (name.startsWith('merged-')) { try { await root.removeEntry(name); } catch {} }
     handle = await root.getFileHandle(`merged-${Date.now()}.mp4`, { create: true });
-    target = new StreamTarget(await handle.createWritable(), { chunked: true });
+    writable = await handle.createWritable();
+    target = new StreamTarget(writable, { chunked: true });
   } catch { handle = null; target = new BufferTarget(); }
 
   const canvas = new OffscreenCanvas(W, H), ctx = canvas.getContext('2d');
@@ -130,6 +131,7 @@ export async function mergeClips(clips, { onProgress = () => {}, log = () => {} 
   await output.finalize();
   const name = `combined-${clips.length}-videos.mp4`;
   if (handle) {
+    if (writable) { try { await writable.close(); } catch {} }
     const f = await handle.getFile();
     return new File([f], name, { type: 'video/mp4' });
   }

@@ -229,13 +229,19 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
       <p class="muted">Put yourself on a picture, a whiteboard or another video (slides, a screen recording), with or without your own background.</p>
       <div class="stack"><div class="head"><span>Background</span></div>
         <div class="seg" id="bgModeSeg" role="group" aria-label="Background" style="grid-template-columns:repeat(3,1fr);grid-auto-flow:row">
-          <button data-v="none">Original</button><button data-v="blur">Blurred</button><button data-v="color">Color</button><button data-v="grad">Gradient</button><button data-v="file">Picture/video</button>
+          <button data-v="none">Original</button><button data-v="blur">Blurred</button><button data-v="color">Color</button><button data-v="grad">Gradient</button><button data-v="file">Picture/video</button><button data-v="slides">Slides (PDF)</button>
         </div></div>
       <div class="swatches hidden" id="bgColors" style="margin-top:10px;flex-wrap:wrap"></div>
       <div class="seg hidden" id="bgGrads" role="group" aria-label="Gradient" style="margin-top:10px"></div>
       <div id="bgFileRow" class="hidden" style="margin-top:10px">
         <label class="btn" style="display:block;text-align:center">Choose picture or video<input type="file" accept="image/*,video/*" class="hidden" id="bgFile"></label>
         <p class="muted" id="bgFileInfo" style="margin-top:6px"></p>
+      </div>
+      <div id="slidesRow" class="hidden" style="margin-top:10px">
+        <label class="btn" style="display:block;text-align:center">Choose PDF slides<input type="file" accept="application/pdf" class="hidden" id="pdfFile"></label>
+        <p class="muted" id="slidesInfo" style="margin-top:6px"></p>
+        <div class="pair"><button class="btn" id="slideHere">Next slide from here</button><button class="btn" id="slideSpread">Spread evenly</button></div>
+        <div class="cutlist" id="slideList"></div>
       </div>
       <div class="row" style="margin-top:12px"><label for="cutMe">Cut me out<br><span class="muted">Removes your own background, on this device</span></label><input type="checkbox" class="switch" id="cutMe"></div>
       <div id="presOpts">

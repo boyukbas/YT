@@ -9,6 +9,7 @@ import * as O from './openai.js';
 import * as P from './publish.js';
 import * as M from './merge.js';
 import * as LY from './layers.js';
+import * as SL from './slides.js';
 import { blocksAt, drawCaptions, drawHook, drawSafeZones, drawBrand, FONTS, fontCss } from './render.js';
 import { saveFile, saveProject, listProjects, loadProject, deleteProject, loadFile } from './store.js';
 import * as L from './log.js';
@@ -68,7 +69,7 @@ async function saveNow() {
     await saveProject({
       id: S.id, name: S.name, updatedAt: Date.now(), duration: S.duration, width: S.width, height: S.height,
       trimStart: S.trimStart, trimEnd: S.trimEnd, cuts: S.cuts, threshold: S.threshold,
-      words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job, pub: S.pub, thumb: S.thumb, layers: S.layers,
+      words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job, pub: S.pub, thumb: S.thumb, layers: S.layers, slides: S.slides,
     });
     $('saved').textContent = 'Saved';
   } catch { $('saved').textContent = 'Not saved'; }
@@ -231,12 +232,12 @@ async function openVideo(file, project = null) {
       Object.assign(S, {
         id: project.id, name: project.name, trimStart: project.trimStart, trimEnd: project.trimEnd,
         cuts: project.cuts || [], threshold: project.threshold ?? suggestThreshold(S.levels), words: project.words || [],
-        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '', job: project.job || null, pub: { ...newPub(), ...(project.pub || {}) }, thumb: project.thumb || null, layers: { ...LY.defaultLayers(), ...(project.layers || {}) },
+        captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '', job: project.job || null, pub: { ...newPub(), ...(project.pub || {}) }, thumb: project.thumb || null, layers: { ...LY.defaultLayers(), ...(project.layers || {}) }, slides: project.slides || { count: 0, times: [] },
       });
     } else {
       Object.assign(S, {
         id: crypto.randomUUID(), name: file.name || 'Video', trimStart: 0, trimEnd: S.duration, cuts: [],
-        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '', job: null, pub: newPub(), thumb: null, layers: LY.defaultLayers(),
+        threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '', job: null, pub: newPub(), thumb: null, layers: LY.defaultLayers(), slides: { count: 0, times: [] },
       });
       try {
         await saveFile(S.id, file);
@@ -858,13 +859,14 @@ async function exportVideo(format = S.format) {
     const ctx = canvas.getContext('2d');
     // Write the video straight to the device's storage when possible, so a long export
     // doesn't have to fit in memory. Falls back to memory on browsers without it.
-    let fileHandle = null, target;
+    let fileHandle = null, target, writable = null;
     try {
       const root = await navigator.storage.getDirectory();
       const fname = `export-${vertical ? 'short' : 'video'}.mp4`;
       try { await root.removeEntry(fname); } catch {}
       fileHandle = await root.getFileHandle(fname, { create: true });
-      target = new StreamTarget(await fileHandle.createWritable(), { chunked: true });
+      writable = await fileHandle.createWritable();
+      target = new StreamTarget(writable, { chunked: true });
     } catch { fileHandle = null; target = new BufferTarget(); }
     L.info('Export target: ' + (fileHandle ? 'device storage' : 'memory'));
     keepAwake(true);
@@ -900,7 +902,8 @@ async function exportVideo(format = S.format) {
           // Sped-up parts: skip frames that would come too close together.
           if (outT <= lastOut || (sp > 1 && outT - lastOut < 0.9 / fps)) continue;
           if (layersOn) {
-            const bgFrame = Lx.bg === 'file' ? (exBgVideo ? await exBgVideo.frameAt(outT) : bgImage) : null;
+            const bgFrame = Lx.bg === 'file' ? (exBgVideo ? await exBgVideo.frameAt(outT) : bgImage)
+              : Lx.bg === 'slides' ? slideImgs[SL.slideAt(S.slides?.times || [], srcT)] || null : null;
             LY.composite(layerCanvas.getContext('2d'), SW, SH, f.canvas, SW, SH, exMasker ? exMasker.mask(f.canvas) : null, bgFrame, Lx);
             composeFrame(ctx, layerCanvas, SW, SH, W, H, vertical ? format : 'original');
           } else composeFrame(ctx, f.canvas, SW, SH, W, H, vertical ? format : 'original');
@@ -972,7 +975,11 @@ async function exportVideo(format = S.format) {
     st.textContent = 'Finishing…';
     await output.finalize();
 
+    // Make sure the file on the device is fully written and closed before reading it back,
+    // otherwise the browser may refuse to read it later (NotReadableError).
+    if (writable) { try { await writable.close(); } catch {} await new Promise(r => setTimeout(r, 50)); }
     S.videoBlob = fileHandle ? await fileHandle.getFile() : new Blob([output.target.buffer], { type: 'video/mp4' });
+    if (fileHandle) { try { await S.videoBlob.slice(0, 16).arrayBuffer(); } catch { S.videoBlob = new File([await (await fileHandle.getFile()).arrayBuffer()], 'video.mp4', { type: 'video/mp4' }); } }
     const srtCaps = outputCaptions();
     S.srtBlob = srtCaps.length ? new Blob([toSRT(srtCaps)], { type: 'text/plain' }) : null;
     const base = (S.name || 'short').replace(/\.[^.]+$/, '');
@@ -1403,6 +1410,7 @@ $('reportLog').onclick = async () => {
 
 // ---------- Background & presenter (layers) ----------
 const comp = $('composite'), bgVideo = $('bgVideo');
+let slideImgs = [];
 let bgImage = null, bgIsVideo = false, bgURL = null, masker = null, maskAt = 0, lastMask = null;
 const BG_COLORS = ['#1e7a46', '#f4f6f8', '#2b2f3a', '#0b3d91', '#7a1e3a', '#00b140'];
 function Lr() { return S.layers; }
@@ -1412,6 +1420,8 @@ function syncLayers() {
   $('bgColors').classList.toggle('hidden', L.bg !== 'color');
   $('bgGrads').classList.toggle('hidden', L.bg !== 'grad');
   $('bgFileRow').classList.toggle('hidden', L.bg !== 'file');
+  $('slidesRow').classList.toggle('hidden', L.bg !== 'slides');
+  syncSlides();
   const sw = $('bgColors');
   if (!sw.children.length) for (const c of BG_COLORS) { const b = document.createElement('button'); b.className = 'swatch'; b.style.background = c; b.dataset.v = c; b.setAttribute('aria-label', c); b.onclick = () => { S.layers.color = c; syncLayers(); dirty(); }; sw.appendChild(b); }
   for (const b of sw.children) b.setAttribute('aria-pressed', String(b.dataset.v === L.color));
@@ -1448,12 +1458,66 @@ async function setBgFile(file, save = true) {
   if (save) { try { await saveFile(S.id + ':bg', file); } catch {} dirty(); }
   syncLayers();
 }
+function syncSlides() {
+  const n = slideImgs.length, times = S.slides?.times || [];
+  $('slidesInfo').textContent = n ? `${n} slides. Slide ${SL.slideAt(times, video.currentTime) + 1} is showing now. Move to where the next slide should appear and tap “Next slide from here”.` : 'No PDF chosen yet.';
+  $('slideHere').disabled = !n || times.length >= n - 1; $('slideSpread').disabled = !n;
+  const list = $('slideList'); list.innerHTML = '';
+  times.forEach((t, i) => {
+    const row = document.createElement('div'); row.className = 'item';
+    const lab = document.createElement('span'); lab.textContent = `Slide ${i + 2} from ${fmt(toOutput(t))}`;
+    const go = document.createElement('button'); go.className = 'del'; go.textContent = '▶'; go.setAttribute('aria-label', 'Go there'); go.onclick = () => { video.currentTime = t; };
+    const del = document.createElement('button'); del.className = 'del'; del.textContent = '×'; del.setAttribute('aria-label', 'Remove this slide change');
+    del.onclick = () => { S.slides.times.splice(i, 1); syncSlides(); dirty(); };
+    const box = document.createElement('span'); box.append(go, del);
+    row.append(lab, box); list.appendChild(row);
+  });
+}
+async function loadSlides(blobs) {
+  slideImgs = [];
+  for (const b of blobs || []) slideImgs.push(await createImageBitmap(b));
+}
+$('pdfFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const st = $('layersStatus'); st.className = 'status';
+  try {
+    const blobs = await SL.pdfToImages(f, (i, n) => { st.textContent = `Reading the slides… ${i}/${n}`; });
+    await loadSlides(blobs);
+    S.slides = { count: blobs.length, times: [] };
+    try { await saveFile(S.id + ':slides', blobs); } catch {}
+    S.layers.bg = 'slides'; st.textContent = '';
+    L.info('Slides loaded', { pages: blobs.length });
+    syncLayers(); dirty();
+  } catch (err) { st.className = 'status error'; st.textContent = `Could not read the PDF: ${err.message}`; L.error('PDF failed: ' + err.message); }
+});
+$('slideHere').onclick = () => {
+  const t = video.currentTime, times = S.slides.times;
+  if (times.some(x => Math.abs(x - t) < 0.5)) return;
+  times.push(t); times.sort((a, b) => a - b); times.length = Math.min(times.length, slideImgs.length - 1);
+  syncSlides(); dirty();
+};
+$('slideSpread').onclick = () => {
+  // Use the chapters if there are as many as slides; otherwise equal parts of the kept video.
+  const ranges = kept(), total = outLength(), n = slideImgs.length;
+  const toSource = (o) => { let acc = 0; for (const r of ranges) { const len = outLen(r); if (o <= acc + len) return r.start + (o - acc) * (r.speed || 1); acc += len; } return S.trimEnd; };
+  S.slides.times = Array.from({ length: n - 1 }, (_, k) => toSource(((k + 1) * total) / n));
+  syncSlides(); dirty();
+};
+
 async function loadBgForProject() {
   bgImage = null; bgIsVideo = false; S.bgFile = null; bgVideo.removeAttribute('src');
   if (S.layers.hasFile) { const f = await loadFile(S.id + ':bg').catch(() => null); if (f) await setBgFile(f, false); else S.layers.hasFile = false; }
+  slideImgs = []; S.slides ||= { count: 0, times: [] };
+  if (S.slides.count) await loadSlides(await loadFile(S.id + ':slides').catch(() => null));
   syncLayers();
 }
-for (const b of $('bgModeSeg').children) b.onclick = () => { S.layers.bg = b.dataset.v; if (b.dataset.v === 'file' && !S.layers.hasFile) $('bgFile').click(); syncLayers(); dirty(); };
+for (const b of $('bgModeSeg').children) b.onclick = () => {
+  S.layers.bg = b.dataset.v;
+  if (b.dataset.v === 'file' && !S.layers.hasFile) $('bgFile').click();
+  if (b.dataset.v === 'slides' && !slideImgs.length) $('pdfFile').click();
+  if (b.dataset.v === 'slides' && S.layers.cut === false && S.layers.size >= 0.999) Object.assign(S.layers, { x: 0.82, y: 0.78, size: 0.38 });
+  syncLayers(); dirty();
+};
 $('bgFile').addEventListener('change', async (e) => { const f = e.target.files[0]; e.target.value = ''; if (!f) return; await setBgFile(f); S.layers.bg = 'file'; syncLayers(); L.info('Background chosen', { type: f.type, sizeMB: +(f.size / 1e6).toFixed(1) }); });
 $('cutMe').onchange = (e) => { S.layers.cut = e.target.checked; if (S.layers.cut && S.layers.bg === 'none') S.layers.bg = 'blur'; syncLayers(); dirty(); };
 $('presSize').oninput = (e) => { S.layers.size = +e.target.value; syncLayers(); dirty(); };
@@ -1479,6 +1543,7 @@ function drawComposite() {
   if (comp.width !== W || comp.height !== H) { comp.width = W; comp.height = H; }
   if (L.cut && masker && busy !== 'export' && performance.now() - maskAt > 45) { lastMask = masker.mask(video); maskAt = performance.now(); }
   let bg = null;
+  if (L.bg === 'slides') bg = slideImgs[SL.slideAt(S.slides?.times || [], video.currentTime)] || null;
   if (L.bg === 'file') {
     if (bgIsVideo && bgVideo.readyState >= 2) {
       const target = toOutput(video.currentTime) % (bgVideo.duration || 1);
@@ -1618,6 +1683,7 @@ function drawTimeline() {
   if (S.removePauses) for (const p of S.silences) shade(p.start, p.end, S.pauseMode > 1 ? 'rgba(77,170,255,0.22)' : 'rgba(160,170,190,0.18)');
   for (const c of S.cuts) shade(c.start, c.end, c.speed > 1 ? 'rgba(77,170,255,0.4)' : 'rgba(255,90,90,0.45)');
   if (S.cutFrom != null) { ctx.fillStyle = '#ff7a6b'; ctx.fillRect(x(S.cutFrom) - dpr, 0, 2 * dpr, H); }
+  if (S.layers?.bg === 'slides') { ctx.fillStyle = '#ffffff'; for (const st of S.slides?.times || []) if (st >= v0 && st <= v1) ctx.fillRect(x(st) - dpr, 0, 2 * dpr, H * 0.3); }
   ctx.fillStyle = '#ffd21a'; ctx.fillRect(x(video.currentTime) - dpr, 0, 2 * dpr, H);
   $('tlRange').textContent = `${fmt(v0)} – ${fmt(v1)}`;
 }

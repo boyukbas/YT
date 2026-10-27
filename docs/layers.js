@@ -96,6 +96,11 @@ export function composite(ctx, W, H, frame, fw, fh, mask, bgImg, L) {
   else if (L.bg === 'color') { ctx.fillStyle = L.color; ctx.fillRect(0, 0, W, H); }
   else if (L.bg === 'grad') { const [a, b] = GRADIENTS[L.grad] || GRADIENTS.ocean; const g = ctx.createLinearGradient(0, 0, W, H); g.addColorStop(0, a); g.addColorStop(1, b); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
   else if (L.bg === 'file' && bgImg) cover(ctx, bgImg, bgImg.videoWidth || bgImg.width, bgImg.videoHeight || bgImg.height, W, H);
+  else if (L.bg === 'slides') {
+    // Slides are shown whole (never cropped) on a light board color.
+    ctx.fillStyle = '#eef1f5'; ctx.fillRect(0, 0, W, H);
+    if (bgImg) { const s = Math.min(W / bgImg.width, H / bgImg.height); ctx.drawImage(bgImg, (W - bgImg.width * s) / 2, (H - bgImg.height * s) / 2, bgImg.width * s, bgImg.height * s); }
+  }
   else { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
   if (L.bg === 'none' && !L.cut) return;
 

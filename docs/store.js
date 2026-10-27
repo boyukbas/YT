@@ -41,6 +41,6 @@ export async function loadProject(id) {
     return project && file ? { ...project, file } : null;
   });
 }
-export const deleteProject = (id) => tx(['projects', 'files'], 'readwrite', (p, f) => { p.delete(id); f.delete(id); f.delete(id + ':bg'); });
+export const deleteProject = (id) => tx(['projects', 'files'], 'readwrite', (p, f) => { p.delete(id); f.delete(id); f.delete(id + ':bg'); f.delete(id + ':slides'); });
 export const loadFile = async (id) => tx('files', 'readonly', s => req(s.get(id)));
 export const deleteFile = (id) => tx('files', 'readwrite', s => s.delete(id));
