@@ -9,7 +9,7 @@ import * as O from './openai.js';
 import * as P from './publish.js';
 import * as M from './merge.js';
 import * as LY from './layers.js';
-import { blocksAt, drawCaptions, drawHook, drawSafeZones, FONTS, fontCss } from './render.js';
+import { blocksAt, drawCaptions, drawHook, drawSafeZones, drawBrand, FONTS, fontCss } from './render.js';
 import { saveFile, saveProject, listProjects, loadProject, deleteProject, loadFile } from './store.js';
 import * as L from './log.js';
 
@@ -395,6 +395,7 @@ function tick() {
     drawCaptions(ctx, W, H, t, blocks, style());
     const outT = toOutput(t);
     if (S.hook.trim() && outT < S.hookSecs) drawHook(ctx, W, H, S.hook, outT, style());
+    drawBrand(ctx, W, H, outT, outLength(), BRAND, logoImg, S.font);
     $('tNow').textContent = fmt(toOutput(t));
     if (S.format !== 'original') drawFormatPreview();
     drawTimeline();
@@ -905,6 +906,7 @@ async function exportVideo(format = S.format) {
           } else composeFrame(ctx, f.canvas, SW, SH, W, H, vertical ? format : 'original');
           if (caps.length) drawCaptions(ctx, W, H, srcT, blocksAt(srcT, caps, S.layout, S.primary), st0);
           if (hook && outT < S.hookSecs) drawHook(ctx, W, H, hook, outT, st0);
+          drawBrand(ctx, W, H, outT, total, BRAND, logoImg, S.font);
           const dur = Math.min(f.duration, r.end - srcT) / sp;
           await vSource.add(outT, dur > 0 ? Math.max(dur, 1 / fps) : 1 / fps);
           lastOut = outT;
@@ -1052,6 +1054,7 @@ function drawFormatPreview(force = false) {
   drawCaptions(ctx, W, H, t, blocksAt(t, S.captions, S.layout, S.primary), style());
   const outT = toOutput(t);
   if (S.hook.trim() && outT < S.hookSecs) drawHook(ctx, W, H, S.hook, outT, style());
+  drawBrand(ctx, W, H, outT, outLength(), BRAND, logoImg, S.font);
 }
 function syncFormat() {
   for (const b of $('fmtSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === S.format));
@@ -1252,6 +1255,7 @@ function syncPub() {
     $('titleList').appendChild(btn);
   }
   $('shortTitle').value = p.shortTitle; $('desc').value = p.description; $('tags').value = p.hashtags;
+  syncChapters();
 }
 function showFrames() {
   const grid = $('frameGrid'); grid.innerHTML = '';
@@ -1344,7 +1348,7 @@ $('shortTitle').oninput = (e) => { S.pub.shortTitle = e.target.value; dirty(); }
 $('desc').oninput = (e) => { S.pub.description = e.target.value; dirty(); };
 $('tags').oninput = (e) => { S.pub.hashtags = e.target.value; dirty(); };
 $('copyTitle').onclick = () => copy(S.pub.title || S.pub.titles[0] || '', $('copyTitle'));
-$('copyDesc').onclick = () => copy(`${S.pub.description}\n\n${S.pub.hashtags}`.trim(), $('copyDesc'));
+$('copyDesc').onclick = () => copy([S.pub.description, S.pub.chapters, S.pub.hashtags].map(x => (x || '').trim()).filter(Boolean).join('\n\n'), $('copyDesc'));
 $('prepClaude').onclick = async () => {
   if (!S.captions.length) { $('ytStatus').textContent = 'Make the subtitles first — Claude writes from them.'; return; }
   const btn = $('prepClaude'), st = $('ytStatus');
@@ -1486,6 +1490,68 @@ function drawComposite() {
   }
   LY.composite(comp.getContext('2d'), W, H, video, video.videoWidth, video.videoHeight, L.cut ? lastMask : null, bg, L);
 }
+// ---------- Channel branding (logo + subscribe reminder), same for every project ----------
+const BRAND = { on: true, name: 'Almanca Dil Atölyesi', logo: 'trde', custom: '', wm: true, wmPos: 'tr', rem: true, remAt: 'end', remText: 'Abone ol',
+  ...(() => { try { return JSON.parse(localStorage.getItem('brand') || '{}'); } catch { return {}; } })() };
+const LOGOS = ['trde', 'umlaut', 'ada'];
+const logoImg = new Image();
+const saveBrand = () => { try { localStorage.setItem('brand', JSON.stringify(BRAND)); } catch {} };
+function setLogoSrc() { logoImg.src = BRAND.logo === 'custom' && BRAND.custom ? BRAND.custom : `brand/logo-${BRAND.logo}.png`; }
+function syncBrand() {
+  $('brandOn').checked = BRAND.on; $('brandOpts').classList.toggle('hidden', !BRAND.on);
+  const box = $('logoPick');
+  if (!box.children.length) {
+    for (const k of LOGOS) { const im = document.createElement('img'); im.src = `brand/logo-${k}.png`; im.alt = `Logo ${k}`; im.dataset.v = k; im.onclick = () => { BRAND.logo = k; saveBrand(); setLogoSrc(); syncBrand(); }; box.appendChild(im); }
+    const cu = document.createElement('img'); cu.dataset.v = 'custom'; cu.alt = 'Your logo'; cu.id = 'customLogo'; cu.onclick = () => { if (BRAND.custom) { BRAND.logo = 'custom'; saveBrand(); setLogoSrc(); syncBrand(); } }; box.appendChild(cu);
+    const up = document.createElement('label'); up.className = 'btn'; up.textContent = 'Upload logo';
+    const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.className = 'hidden';
+    inp.onchange = async () => {
+      const f = inp.files[0]; inp.value = ''; if (!f) return;
+      const bmp = await createImageBitmap(f).catch(() => null); if (!bmp) return;
+      const c = document.createElement('canvas'); c.width = c.height = 256;
+      const s = Math.min(bmp.width, bmp.height); c.getContext('2d').drawImage(bmp, (bmp.width - s) / 2, (bmp.height - s) / 2, s, s, 0, 0, 256, 256);
+      BRAND.custom = c.toDataURL('image/png'); BRAND.logo = 'custom'; saveBrand(); setLogoSrc(); syncBrand(); L.info('Custom logo uploaded');
+    };
+    up.appendChild(inp); box.appendChild(up);
+  }
+  const cu = $('customLogo'); cu.classList.toggle('hidden', !BRAND.custom); if (BRAND.custom) cu.src = BRAND.custom;
+  for (const im of box.querySelectorAll('img')) im.setAttribute('aria-pressed', String(im.dataset.v === BRAND.logo));
+  $('brandName').value = BRAND.name; $('wmOn').checked = BRAND.wm; $('remOn').checked = BRAND.rem; $('remText').value = BRAND.remText;
+  for (const b of $('wmPos').children) b.setAttribute('aria-pressed', String(b.dataset.v === BRAND.wmPos));
+  for (const b of $('remAt').children) b.setAttribute('aria-pressed', String(b.dataset.v === BRAND.remAt));
+  $('wmPos').classList.toggle('hidden', !BRAND.wm); $('remAt').classList.toggle('hidden', !BRAND.rem); $('remText').classList.toggle('hidden', !BRAND.rem);
+  const big = $('logoBig'); big.parentElement.classList.toggle('hidden', BRAND.logo === 'custom');
+  big.href = `brand/logo-${BRAND.logo}-900.png`; big.download = `kanal-logosu-${BRAND.logo}.png`;
+}
+$('brandOn').onchange = (e) => { BRAND.on = e.target.checked; saveBrand(); syncBrand(); };
+$('brandName').oninput = (e) => { BRAND.name = e.target.value; saveBrand(); };
+$('wmOn').onchange = (e) => { BRAND.wm = e.target.checked; saveBrand(); syncBrand(); };
+$('remOn').onchange = (e) => { BRAND.rem = e.target.checked; saveBrand(); syncBrand(); };
+$('remText').oninput = (e) => { BRAND.remText = e.target.value; saveBrand(); };
+for (const b of $('wmPos').children) b.onclick = () => { BRAND.wmPos = b.dataset.v; saveBrand(); syncBrand(); };
+for (const b of $('remAt').children) b.onclick = () => { BRAND.remAt = b.dataset.v; saveBrand(); syncBrand(); };
+setLogoSrc(); syncBrand();
+
+// ---------- Chapters ----------
+function syncChapters() { $('chapters').value = S.pub?.chapters || ''; $('chapClaude').classList.toggle('hidden', !C.getKey()); }
+$('chapters').oninput = (e) => { S.pub.chapters = e.target.value; dirty(); };
+$('chapFree').onclick = () => {
+  const lang = S.pub.descLang || S.primary;
+  const list = P.freeChapters(outputCaptions(), outLength(), { glossary: S.glossary, introTitle: lang === 'tr' ? 'Giriş' : lang === 'de' ? 'Einleitung' : 'Intro' });
+  if (!list.length) { $('ytStatus').className = 'status'; $('ytStatus').textContent = S.captions.length ? 'Too short for chapters: YouTube needs at least 3 parts of 10 seconds (and subtitles to split by).' : 'Make the subtitles first — chapters are made from them.'; return; }
+  S.pub.chapters = P.chaptersText(list); syncChapters(); dirty();
+  $('ytStatus').textContent = `${list.length} chapters. Edit the titles if you like.`;
+  L.info('Chapters made (free)', { count: list.length });
+};
+$('chapClaude').onclick = async () => {
+  const st = $('ytStatus'); st.className = 'status'; st.textContent = 'Claude is making chapters…';
+  try {
+    const list = await P.claudeChapters((content, max) => C.call(C.getKey(), S.claudeModel, '', content, max), outputCaptions(), outLength(), langName(S.pub.descLang || S.primary));
+    S.pub.chapters = P.chaptersText(list); syncChapters(); dirty(); st.textContent = `${list.length} chapters from Claude.`;
+    L.info('Chapters made (Claude)', { count: list.length });
+  } catch (e) { st.className = 'status error'; st.textContent = `Chapters failed: ${e.message}`; L.error('Claude chapters failed: ' + e.message); }
+};
+
 // ---------- Tabs, settings, project thumbnails ----------
 function setTab(name) {
   for (const b of $('tabs').children) b.setAttribute('aria-selected', String(b.dataset.tab === name));

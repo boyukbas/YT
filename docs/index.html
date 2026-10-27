@@ -159,6 +159,9 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
 .clip .name { flex: 1; min-width: 0; }
 .clip .name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .clip button { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 9px; cursor: pointer; }
+.logos { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; align-items: center; }
+.logos img { width: 56px; height: 56px; border-radius: 50%; cursor: pointer; border: 3px solid transparent; background: #fff; }
+.logos img[aria-pressed="true"] { border-color: var(--amber); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
 </head>
@@ -354,6 +357,20 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
       <div class="stack"><div class="head"><span>Show for</span><output id="hookSecsOut"></output></div>
         <input type="range" id="hookSecs" min="1" max="8" step="0.5"></div>
     </section>
+    <section id="brandBox">
+      <div class="row"><h2 style="margin:0">Channel branding</h2><input type="checkbox" class="switch" id="brandOn" aria-label="Show channel branding"></div>
+      <p class="muted" style="margin-top:6px">Your logo in a corner and a short “subscribe” reminder. Set once; used in every video.</p>
+      <div id="brandOpts">
+        <div class="logos" id="logoPick"></div>
+        <input class="area" id="brandName" placeholder="Channel name" style="min-height:auto;margin-top:8px">
+        <div class="row"><label for="wmOn">Logo in the corner</label><input type="checkbox" class="switch" id="wmOn"></div>
+        <div class="seg" id="wmPos" role="group" aria-label="Logo corner"><button data-v="tl">Top left</button><button data-v="tr">Top right</button><button data-v="bl">Bottom left</button><button data-v="br">Bottom right</button></div>
+        <div class="row"><label for="remOn">Subscribe reminder</label><input type="checkbox" class="switch" id="remOn"></div>
+        <div class="seg" id="remAt" role="group" aria-label="When"><button data-v="start">Start</button><button data-v="middle">Middle</button><button data-v="end">End</button></div>
+        <input class="area" id="remText" placeholder="Abone ol" style="min-height:auto;margin-top:8px">
+        <p class="muted" style="margin-top:10px">For your YouTube channel picture: <a id="logoBig" download style="color:inherit">download this logo (900×900)</a>.</p>
+      </div>
+    </section>
     </div>
 
     <div class="panel" data-panel="share">
@@ -411,8 +428,12 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
         <p class="muted" style="margin-top:10px">Short title</p><input class="area" id="shortTitle" style="min-height:auto">
         <p class="muted" style="margin-top:10px">Description</p><textarea class="area" id="desc" style="min-height:10em"></textarea>
         <p class="muted" style="margin-top:10px">Hashtags</p><textarea class="area" id="tags" style="min-height:3em"></textarea>
-        <div class="pair"><button class="btn" id="copyTitle">Copy title</button><button class="btn" id="copyDesc">Copy description + tags</button></div>
       </div>
+      <h3 style="margin:16px 0 6px">Chapters</h3>
+      <p class="muted">Timestamps that split a long video into parts on YouTube. Added to the copied description.</p>
+      <div class="pair"><button class="btn" id="chapFree">Make chapters</button><button class="btn hidden" id="chapClaude">With Claude</button></div>
+      <textarea class="area" id="chapters" style="min-height:6em;margin-top:8px" placeholder="0:00 Giriş&#10;0:45 Die Anmeldung&#10;1:30 Im Bürgeramt"></textarea>
+      <div class="pair" style="margin-top:8px"><button class="btn" id="copyTitle">Copy title</button><button class="btn" id="copyDesc">Copy description + chapters + tags</button></div>
       <p class="muted" style="margin-top:10px">Uploading straight from this app needs Google to review and approve the app first. Until then, upload in the YouTube app or <a href="https://studio.youtube.com" target="_blank" rel="noopener" style="color:inherit">YouTube Studio</a>.</p>
     </section>
     </div>

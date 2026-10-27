@@ -253,3 +253,65 @@ export function freeIdeas({ hook, glossary, titles, captions, primary, secondary
   const seen = new Set();
   return ideas.filter(([a, b]) => a && !seen.has(a + b) && seen.add(a + b)).slice(0, 6);
 }
+
+// ---------- Chapters ----------
+const stamp = (t) => { t = Math.max(0, Math.round(t)); const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = t % 60;
+  return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + `:${String(s).padStart(2, '0')}`; };
+
+/** Checks YouTube's chapter rules: starts at 0:00, at least 3 chapters, each at least 10 s. */
+export function validChapters(list, total) {
+  if (list.length < 3 || list[0].t !== 0) return false;
+  for (let i = 1; i < list.length; i++) if (list[i].t - list[i - 1].t < 10) return false;
+  return total - list.at(-1).t >= 10;
+}
+export const chaptersText = (list) => list.map(c => `${stamp(c.t)} ${c.title}`).join('\n');
+
+/**
+ * Free chapters: split at the longest pauses near even intervals, name each part after the
+ * first word-list term said in it (or its first words). caps: captions on the edited timeline.
+ */
+export function freeChapters(caps, total, { glossary = '', introTitle = 'Giriş' } = {}) {
+  if (total < 30 || caps.length < 4) return [];
+  const n = Math.max(3, Math.min(10, Math.round(total / 50)));
+  const starts = caps.map((c, i) => ({ t: c.start, gap: i ? c.start - caps[i - 1].end : 0, i }));
+  const chosen = [0];
+  for (let k = 1; k < n; k++) {
+    const target = (k * total) / n;
+    // Room for the chapters still to come (each needs 10 s).
+    const lo = chosen.at(-1) + 10, hi = total - 10 * (n - k);
+    const cand = starts.filter(s => s.t >= lo && s.t <= hi);
+    if (!cand.length) continue;
+    // Close to an even split, preferring a longer pause before the line.
+    const score = (s) => s.gap * 2 - Math.abs(s.t - target) / (total / n);
+    cand.sort((a, b) => score(b) - score(a));
+    chosen.push(cand[0].t);
+  }
+  const terms = glossary.split('\n').map(l => l.split(/\s*(?:–|—|=|→|:|\t| - )\s*/)[0].trim()).filter(Boolean);
+  const used = new Set();
+  const list = chosen.map((t, k) => {
+    const end = chosen[k + 1] ?? total;
+    const inPart = caps.filter(c => c.start >= t && c.start < end);
+    const text = inPart.map(c => c.text).join(' ');
+    const term = terms.find(x => !used.has(x) && text.toLowerCase().includes(x.toLowerCase()));
+    if (term) used.add(term);
+    const first = text.split(/(?<=[.!?])\s/)[0].split(/\s+/).slice(0, 6).join(' ').replace(/[.,!?;:]+$/, '');
+    return { t: Math.round(t), title: k === 0 ? (term || introTitle) : (term || first || `Bölüm ${k + 1}`) };
+  });
+  list[0].t = 0;
+  return validChapters(list, total) ? list : [];
+}
+
+/** Chapters written by Claude from a timestamped transcript. */
+export async function claudeChapters(callClaude, caps, total, descLang) {
+  const lines = caps.map(c => `${stamp(c.start)} ${c.text}`).join('\n').slice(0, 14000);
+  const r = await callClaude([{ type: 'text', text:
+    `Here is the timestamped transcript of my ${stamp(total)} long YouTube lesson.\n${lines}\n\n` +
+    `Make YouTube chapters in ${descLang}: 3 to 10 of them, the first at 0:00, each at least 10 seconds long, ` +
+    `at real topic changes, with short clear titles (max 6 words). Reply with only JSON: [{"t": <seconds>, "title": "..."}]` }], 1500);
+  const m = r.text.match(/\[[\s\S]*\]/);
+  if (!m) throw new Error('Claude did not return chapters');
+  const list = JSON.parse(m[0]).map(c => ({ t: Math.max(0, Math.round(+c.t || 0)), title: String(c.title || '').trim() })).filter(c => c.title).sort((a, b) => a.t - b.t);
+  if (list.length) list[0].t = 0;
+  if (!validChapters(list, total)) throw new Error("Claude's chapters break YouTube's rules (3+, first at 0:00, 10 s each)");
+  return list;
+}

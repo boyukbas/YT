@@ -215,3 +215,47 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
 }
+
+/**
+ * Channel branding on the video: a corner logo (watermark) and a short "subscribe" reminder.
+ * brand: { wm, wmPos ('tl'|'tr'|'bl'|'br'), rem, remAt ('start'|'middle'|'end'), remText, name }
+ */
+export function drawBrand(ctx, W, H, outT, total, brand, logo, fontKey = 'modern') {
+  if (!brand?.on) return;
+  const m = Math.min(W, H);
+  if (brand.wm && logo?.complete !== false && logo?.width) {
+    const s = m * 0.11, pad = m * 0.03;
+    const x = brand.wmPos?.includes('l') ? pad : W - pad - s;
+    const y = brand.wmPos?.includes('t') ? pad : H - pad - s;
+    ctx.save(); ctx.globalAlpha = 0.85; ctx.drawImage(logo, x, y, s, s); ctx.restore();
+  }
+  if (!brand.rem || total < 8) return;
+  const len = 4.5;
+  const at = brand.remAt === 'middle' ? total / 2 - len / 2 : brand.remAt === 'end' ? Math.max(0, total - len - 1) : Math.min(4, total * 0.1);
+  if (outT < at || outT > at + len) return;
+  const k = Math.min(1, (outT - at) / 0.35, (at + len - outT) / 0.35);   // slide/fade in and out
+  const h = m * 0.12, r = h / 2, logoS = h * 0.78;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, k);
+  ctx.font = fontCss(fontKey, Math.round(h * 0.34));
+  const name = brand.name || '';
+  const btnText = (brand.remText || 'Abone ol').toLocaleUpperCase('tr') + '  🔔';
+  const nameW = ctx.measureText(name).width;
+  ctx.font = fontCss(fontKey, Math.round(h * 0.3));
+  const btnW = ctx.measureText(btnText).width + h * 0.6;
+  const w = h * 0.2 + logoS + h * 0.25 + nameW + h * 0.35 + btnW + h * 0.15;
+  const x = (W - w) / 2, y = H * 0.9 - h / 2 + (1 - k) * h * 0.6;
+  ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = h * 0.3;
+  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); ctx.fill();
+  ctx.shadowBlur = 0;
+  let cx = x + h * 0.2;
+  if (logo?.width) { ctx.drawImage(logo, cx, y + (h - logoS) / 2, logoS, logoS); }
+  cx += logoS + h * 0.25;
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.font = fontCss(fontKey, Math.round(h * 0.34)); ctx.fillStyle = '#15171c'; ctx.fillText(name, cx, y + h / 2);
+  cx += nameW + h * 0.35;
+  const bh = h * 0.62;
+  ctx.fillStyle = '#e30a17'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(cx, y + (h - bh) / 2, btnW, bh, bh / 2) : ctx.rect(cx, y + (h - bh) / 2, btnW, bh); ctx.fill();
+  ctx.font = fontCss(fontKey, Math.round(h * 0.3)); ctx.fillStyle = '#ffffff'; ctx.fillText(btnText, cx + h * 0.3, y + h / 2);
+  ctx.restore();
+}
