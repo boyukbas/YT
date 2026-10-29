@@ -10,8 +10,9 @@ import * as P from './publish.js';
 import * as M from './merge.js';
 import * as LY from './layers.js';
 import * as SL from './slides.js';
+import * as AU from './audio.js';
 import { blocksAt, drawCaptions, drawHook, drawSafeZones, drawBrand, FONTS, fontCss } from './render.js';
-import { saveFile, saveProject, listProjects, loadProject, deleteProject, loadFile } from './store.js';
+import { saveFile, saveProject, listProjects, loadProject, deleteProject, loadFile, deleteFile } from './store.js';
 import * as L from './log.js';
 
 L.install();
@@ -33,6 +34,7 @@ const S = {
   id: null, name: '', file: null, url: null, duration: 0, width: 0, height: 0,
   audio16k: null, levels: [], threshold: -38, silences: [], cuts: [], cutFrom: null,
   trimStart: 0, trimEnd: 0, words: [], captions: [], script: '', glossary: '', hook: '', dragMode: false, job: null,
+  music: AU.defaultMusic(), denoise: 'off',
   videoBlob: null, srtBlob: null,
 };
 function persist() {
@@ -70,6 +72,7 @@ async function saveNow() {
       id: S.id, name: S.name, updatedAt: Date.now(), duration: S.duration, width: S.width, height: S.height,
       trimStart: S.trimStart, trimEnd: S.trimEnd, cuts: S.cuts, threshold: S.threshold,
       words: S.words, captions: S.captions, script: S.script, glossary: S.glossary, hook: S.hook, job: S.job, pub: S.pub, thumb: S.thumb, layers: S.layers, slides: S.slides,
+      music: S.music, denoise: S.denoise,
     });
     $('saved').textContent = 'Saved';
   } catch { $('saved').textContent = 'Not saved'; }
@@ -233,11 +236,13 @@ async function openVideo(file, project = null) {
         id: project.id, name: project.name, trimStart: project.trimStart, trimEnd: project.trimEnd,
         cuts: project.cuts || [], threshold: project.threshold ?? suggestThreshold(S.levels), words: project.words || [],
         captions: project.captions || [], script: project.script || '', glossary: project.glossary || '', hook: project.hook || '', job: project.job || null, pub: { ...newPub(), ...(project.pub || {}) }, thumb: project.thumb || null, layers: { ...LY.defaultLayers(), ...(project.layers || {}) }, slides: project.slides || { count: 0, times: [] },
+        music: { ...AU.defaultMusic(), ...(project.music || {}) }, denoise: project.denoise || 'off',
       });
     } else {
       Object.assign(S, {
         id: crypto.randomUUID(), name: file.name || 'Video', trimStart: 0, trimEnd: S.duration, cuts: [],
         threshold: suggestThreshold(S.levels), words: [], captions: [], script: '', glossary: '', hook: '', job: null, pub: newPub(), thumb: null, layers: LY.defaultLayers(), slides: { count: 0, times: [] },
+        music: { ...AU.defaultMusic(), id: lastMusic() }, denoise: 'off',
       });
       try {
         await saveFile(S.id, file);
@@ -401,6 +406,7 @@ function tick() {
     if (S.format !== 'original') drawFormatPreview();
     drawTimeline();
     drawComposite();
+    tickMusic();
   }
   requestAnimationFrame(tick);
 }
@@ -583,7 +589,7 @@ function renderCapList() {
   });
 }
 function syncAll() {
-  syncTrim(); syncPauses(); syncLength(); syncSubs(); syncStyle(); syncHook(); syncFormat(); $('exportList').innerHTML = '';
+  syncTrim(); syncPauses(); syncLength(); syncSubs(); syncStyle(); syncHook(); syncFormat(); syncMusic(); syncDenoise(); $('exportList').innerHTML = '';
   frames = []; thumbFrame = null; $('frameGrid').innerHTML = ''; $('ytStatus').textContent = ''; syncPub();
   if (S.pub.t != null) selectFrame(S.pub.t);
 }
@@ -851,7 +857,7 @@ async function exportVideo(format = S.format) {
     if (!vCodec) throw new Error('This browser cannot encode video');
     const aCodec = aTrack ? await getFirstEncodableAudioCodec(['aac', 'opus']) : null;
     const fps = Math.round((await vTrack.computePacketStats(120)).averagePacketRate) || 30;
-    L.info('Export started', { layers: LY.layersActive(S.layers) ? { bg: S.layers.bg, cut: S.layers.cut, size: S.layers.size } : 'off', W, H, vCodec, aCodec, fps, burn: S.burn, layout: S.layout, secs: +outLength().toFixed(1),
+    L.info('Export started', { layers: LY.layersActive(S.layers) ? { bg: S.layers.bg, cut: S.layers.cut, size: S.layers.size } : 'off', W, H, vCodec, aCodec, fps, burn: S.burn, layout: S.layout, secs: +outLength().toFixed(1), music: musicActive() ? { vol: S.music.vol, duck: S.music.duck } : 'off', denoise: S.denoise,
       trim: [+S.trimStart.toFixed(1), +S.trimEnd.toFixed(1)], cuts: S.cuts.length, removePauses: S.removePauses, pauses: S.silences.length, threshold: S.threshold, duration: +S.duration.toFixed(1) });
     const exportStart = Date.now();
 
@@ -888,6 +894,13 @@ async function exportVideo(format = S.format) {
     const exBgVideo = layersOn && Lx.bg === 'file' && bgIsVideo && S.bgFile ? await new LY.BgVideo().open(S.bgFile) : null;
     const layerCanvas = layersOn ? new OffscreenCanvas(SW, SH) : null;
     const hook = S.hook.trim() ? S.hook : '';
+    // Sound: noise removal and background music.
+    const dnStrength = aSource ? AU.DENOISE[S.denoise] || 0 : 0;
+    const rn = dnStrength ? await AU.loadDenoiser() : null;
+    const musicBlob = aSource && musicActive() ? await loadFile('music:' + S.music.id).catch(() => null) : null;
+    if (aSource && musicActive() && !musicBlob) throw new Error('the music file is missing — add it again');
+    const env = musicBlob ? musicEnv() : null;
+    const musicGain = (srcT, outT) => S.music.vol * AU.envAt(env, HOP, srcT) * AU.musicFade(outT, total);
 
     const doVideo = async () => {
       const sink = new CanvasSink(vTrack, { width: SW, height: SH, fit: 'fill' });
@@ -920,16 +933,20 @@ async function exportVideo(format = S.format) {
       }
       vSource.close();
     };
+    const aSink = aTrack ? new AudioBufferSink(aTrack) : null;
+    const read = (r) => rn ? AU.cleanBuffers(aSink, r.start, r.end, rn, dnStrength) : aSink.buffers(r.start, r.end);
+    let music = null, outPos = 0;   // outPos: samples of sound written so far
+    const getMusic = async (sr) => (music ??= musicBlob ? await AU.decodeMusic(musicBlob, sr) : false);
     const doAudio = async () => {
       if (!aSource) return;
-      const sink = new AudioBufferSink(aTrack);
+      const sink = aSink;
       const fade = (data, from, n, up) => {
         for (let i = 0; i < n && from + i < data.length; i++) data[from + i] *= up ? i / n : 1 - i / n;
       };
       for (const r of ranges) {
         if ((r.speed || 1) > 1) { await addFastAudio(sink, r); continue; }
         let first = true;
-        for await (const { buffer, timestamp } of sink.buffers(r.start, r.end)) {
+        for await (const { buffer, timestamp } of read(r)) {
           const sr = buffer.sampleRate;
           const s0 = Math.max(0, Math.round((r.start - timestamp) * sr));
           const s1 = Math.min(buffer.length, Math.round((r.end - timestamp) * sr));
@@ -944,6 +961,9 @@ async function exportVideo(format = S.format) {
             out.copyToChannel(d, ch);
           }
           first = false;
+          const m = await getMusic(sr);
+          if (m) AU.mixMusic(out, m, outPos, (i) => timestamp + (s0 + i) / sr, musicGain);
+          outPos += out.length;
           await aSource.add(out);
         }
       }
@@ -952,7 +972,7 @@ async function exportVideo(format = S.format) {
     // A sped-up part: 2× keeps the sound (faster and higher), faster than that is silent.
     const addFastAudio = async (sink, r) => {
       const chunks = []; let sr = 48000, chs = 2, len = 0;
-      for await (const { buffer, timestamp } of sink.buffers(r.start, r.end)) {
+      for await (const { buffer, timestamp } of read(r)) {
         sr = buffer.sampleRate; chs = buffer.numberOfChannels;
         const s0 = Math.max(0, Math.round((r.start - timestamp) * sr)), s1 = Math.min(buffer.length, Math.round((r.end - timestamp) * sr));
         if (s1 <= s0) continue;
@@ -969,6 +989,9 @@ async function exportVideo(format = S.format) {
       } else {
         out = new AudioBuffer({ length: outFrames, numberOfChannels: chs, sampleRate: sr });
       }
+      const m = await getMusic(sr);
+      if (m) AU.mixMusic(out, m, outPos, (i) => r.start + (i / out.length) * (r.end - r.start), musicGain);
+      outPos += out.length;
       await aSource.add(out);
     };
     await Promise.all([doVideo(), doAudio()]);
@@ -1596,6 +1619,154 @@ $('remText').oninput = (e) => { BRAND.remText = e.target.value; saveBrand(); };
 for (const b of $('wmPos').children) b.onclick = () => { BRAND.wmPos = b.dataset.v; saveBrand(); syncBrand(); };
 for (const b of $('remAt').children) b.onclick = () => { BRAND.remAt = b.dataset.v; saveBrand(); syncBrand(); };
 setLogoSrc(); syncBrand();
+
+// ---------- Background music ----------
+// The music files are kept in the device's database (key "music:<id>") and shared by all
+// projects; the list of names lives in localStorage.
+const musicLib = () => { try { return JSON.parse(localStorage.getItem('musicLib') || '[]'); } catch { return []; } };
+const saveMusicLib = (list) => { try { localStorage.setItem('musicLib', JSON.stringify(list)); } catch {} };
+function lastMusic() { const id = localStorage.getItem('lastMusic'); return musicLib().some(m => m.id === id) ? id : null; }
+const musicEl = new Audio();
+musicEl.loop = true; musicEl.preload = 'auto';
+let musicCtx = null, musicGainNode = null, musicUrlFor = null, musicEnvCache = { key: '', env: new Float32Array(0) };
+function musicEnv() {
+  const key = `${S.id}|${S.levels.length}|${S.threshold}|${S.music.duck}`;
+  if (musicEnvCache.key !== key) musicEnvCache = { key, env: AU.duckEnvelope(S.levels, S.threshold, HOP, AU.DUCK[S.music.duck] ?? 1) };
+  return musicEnvCache.env;
+}
+const musicActive = () => S.music.on && !!S.music.id;
+async function loadMusicForPreview() {
+  if (!musicActive()) { musicEl.pause(); return; }
+  if (musicUrlFor === S.music.id) return;
+  const blob = await loadFile('music:' + S.music.id).catch(() => null);
+  if (!blob) { $('musicStatus').textContent = 'This music file is missing — add it again.'; return; }
+  if (musicEl.src) URL.revokeObjectURL(musicEl.src);
+  musicEl.src = URL.createObjectURL(blob); musicUrlFor = S.music.id;
+}
+function musicVolumeAt(t) {
+  const outT = toOutput(t);
+  return S.music.vol * AU.envAt(musicEnv(), HOP, t) * AU.musicFade(outT, outLength());
+}
+// Called from the preview loop: keeps the music in step with the edited video and sets its volume.
+function tickMusic() {
+  if (!musicActive() || video.paused || !musicEl.src) { if (!musicEl.paused) musicEl.pause(); return; }
+  const t = video.currentTime, outT = toOutput(t);
+  if (musicEl.duration > 0) {
+    const want = outT % musicEl.duration;
+    if (Math.abs(musicEl.currentTime - want) > 0.3) musicEl.currentTime = want;
+  }
+  const g = musicVolumeAt(t);
+  if (musicGainNode) musicGainNode.gain.value = g; else musicEl.volume = Math.min(1, g);
+  if (musicEl.paused) musicEl.play().catch(() => {});
+}
+function startMusicPreview() {
+  if (!musicActive()) return;
+  // A gain node (instead of the volume setting) because iPhone and iPad ignore the volume of audio elements.
+  if (!musicCtx && window.AudioContext) {
+    try {
+      musicCtx = new AudioContext();
+      musicGainNode = musicCtx.createGain();
+      musicCtx.createMediaElementSource(musicEl).connect(musicGainNode).connect(musicCtx.destination);
+    } catch { musicCtx = null; musicGainNode = null; }
+  }
+  musicCtx?.resume().catch(() => {});
+  loadMusicForPreview().then(tickMusic);
+}
+video.addEventListener('play', startMusicPreview);
+video.addEventListener('pause', () => musicEl.pause());
+
+function syncMusic() {
+  const lib = musicLib(), m = S.music;
+  if (m.id && !lib.some(x => x.id === m.id)) m.id = null;
+  $('musicOn').checked = m.on;
+  for (const id of ['musicList', 'musicOpts']) $(id).classList.toggle('hidden', !m.on);
+  $('musicVol').value = m.vol; $('musicVolOut').textContent = `${Math.round(m.vol * 100)}%`;
+  for (const b of $('duckSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === m.duck));
+  $('musicOpts').classList.toggle('hidden', !m.on || !m.id);
+  const box = $('musicList'); box.innerHTML = '';
+  if (!lib.length) {
+    const p = document.createElement('p'); p.className = 'muted'; p.textContent = 'No music added yet.'; box.appendChild(p);
+  }
+  for (const t of lib) {
+    const row = document.createElement('div'); row.className = 'item';
+    const pick = document.createElement('button'); pick.className = 'btn'; pick.style.cssText = 'flex:1;text-align:left;padding:8px 10px';
+    pick.setAttribute('aria-pressed', String(t.id === m.id));
+    pick.textContent = `${t.id === m.id ? '✓ ' : ''}${t.name}${t.secs ? ` · ${fmt(t.secs).replace(/\.\d$/, '')}` : ''}`;
+    if (t.id === m.id) pick.style.borderColor = 'var(--amber)';
+    pick.onclick = () => { S.music.id = t.id; localStorage.setItem('lastMusic', t.id); musicUrlFor = null; loadMusicForPreview(); syncMusic(); dirty(); };
+    const del = document.createElement('button'); del.className = 'del'; del.textContent = '×'; del.setAttribute('aria-label', `Remove ${t.name}`);
+    del.onclick = async () => {
+      if (!confirm(`Remove “${t.name}” from this device?`)) return;
+      await deleteFile('music:' + t.id).catch(() => {});
+      saveMusicLib(musicLib().filter(x => x.id !== t.id));
+      if (S.music.id === t.id) { S.music.id = null; musicEl.pause(); musicUrlFor = null; dirty(); }
+      syncMusic();
+    };
+    row.append(pick, del); box.appendChild(row);
+  }
+  const len = outLength(), cur = lib.find(x => x.id === m.id);
+  $('musicStatus').className = 'status';
+  $('musicStatus').textContent = m.on && !m.id ? (lib.length ? 'Choose a track.' : '') : m.on && cur?.secs && len > cur.secs + 1 ? `The track is shorter than the video (${fmt(len)}), so it plays again from the start.` : '';
+}
+$('musicOn').onchange = (e) => { S.music.on = e.target.checked; if (S.music.on && !S.music.id) S.music.id = lastMusic(); syncMusic(); if (!video.paused) startMusicPreview(); else musicEl.pause(); dirty(); };
+$('musicVol').oninput = (e) => { S.music.vol = +e.target.value; syncMusic(); dirty(); };
+for (const b of $('duckSeg').children) b.onclick = () => { S.music.duck = b.dataset.v; syncMusic(); dirty(); };
+$('musicAdd').onclick = () => $('musicFile').click();
+$('musicFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  const st = $('musicStatus'); st.className = 'status'; st.textContent = 'Adding the music…';
+  try {
+    const secs = await new Promise((res) => {
+      const a = new Audio(); const u = URL.createObjectURL(f);
+      a.preload = 'metadata'; a.onloadedmetadata = () => { URL.revokeObjectURL(u); res(isFinite(a.duration) ? a.duration : 0); };
+      a.onerror = () => { URL.revokeObjectURL(u); res(-1); }; a.src = u;
+    });
+    if (secs < 0) throw new Error('this browser cannot play this file — try an MP3');
+    const id = crypto.randomUUID();
+    await saveFile('music:' + id, f);
+    const name = (f.name || 'Music').replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ').trim();
+    saveMusicLib([...musicLib(), { id, name, secs }]);
+    Object.assign(S.music, { id, on: true }); localStorage.setItem('lastMusic', id); musicUrlFor = null;
+    syncMusic(); loadMusicForPreview(); dirty();
+    L.info('Music added', { sizeMB: +(f.size / 1e6).toFixed(1), secs: Math.round(secs), type: f.type });
+  } catch (err) { st.className = 'status error'; st.textContent = `Couldn't add the music: ${err.message}.`; L.error('Music add failed: ' + err.message); }
+});
+
+// ---------- Noise removal ----------
+function syncDenoise() {
+  for (const b of $('denoiseSeg').children) b.setAttribute('aria-pressed', String(b.dataset.v === S.denoise));
+  $('cleanTry').classList.toggle('hidden', S.denoise === 'off');
+}
+for (const b of $('denoiseSeg').children) b.onclick = () => { S.denoise = b.dataset.v; syncDenoise(); dirty(); L.info('Noise removal: ' + S.denoise); };
+let cleanPlayer = null;
+$('cleanTry').onclick = async () => {
+  const st = $('cleanStatus'), btn = $('cleanTry');
+  if (cleanPlayer) { cleanPlayer.stop(); return; }
+  video.pause(); st.className = 'status'; st.textContent = 'Cleaning 8 seconds…'; btn.disabled = true;
+  try {
+    const rn = await AU.loadDenoiser();
+    const input = new Input({ source: new BlobSource(S.file), formats: ALL_FORMATS });
+    const track = await input.getPrimaryAudioTrack();
+    if (!track) throw new Error('this video has no sound');
+    const t0 = video.currentTime, t1 = Math.min(S.duration, t0 + 8);
+    const parts = []; let sr = 48000, chs = 1, len = 0;
+    for await (const { buffer, timestamp } of AU.cleanBuffers(new AudioBufferSink(track), t0, t1, rn, AU.DENOISE[S.denoise])) {
+      sr = buffer.sampleRate; chs = buffer.numberOfChannels;
+      const s0 = Math.max(0, Math.round((t0 - timestamp) * sr)), s1 = Math.min(buffer.length, Math.round((t1 - timestamp) * sr));
+      if (s1 <= s0) continue;
+      parts.push(Array.from({ length: chs }, (_, c) => buffer.getChannelData(c).slice(s0, s1))); len += s1 - s0;
+    }
+    if (!len) throw new Error('no sound here');
+    const ctx = new AudioContext();
+    const buf = ctx.createBuffer(chs, len, sr);
+    let o = 0; for (const p of parts) { p.forEach((d, c) => buf.copyToChannel(d, c, o)); o += p[0].length; }
+    const node = ctx.createBufferSource(); node.buffer = buf; node.connect(ctx.destination);
+    cleanPlayer = { stop: () => { try { node.stop(); } catch {} } };
+    node.onended = () => { cleanPlayer = null; ctx.close(); btn.textContent = 'Hear 8 s cleaned (from the playhead)'; st.textContent = 'Play the video to compare with the original sound.'; };
+    node.start(); btn.textContent = 'Stop'; st.textContent = `Playing the cleaned sound (${S.denoise})…`;
+  } catch (e) { st.className = 'status error'; st.textContent = `Couldn't clean the sound: ${e.message}.`; L.error('Noise removal preview failed: ' + e.message); }
+  btn.disabled = false;
+};
 
 // ---------- Chapters ----------
 function syncChapters() { $('chapters').value = S.pub?.chapters || ''; $('chapClaude').classList.toggle('hidden', !C.getKey()); }

@@ -2,9 +2,9 @@
 // 1. Adds the headers that let Whisper use several CPU cores (GitHub Pages can't send them).
 // 2. Keeps the app on the device so it opens and works offline (the speech model itself is
 //    cached separately by the speech library after its first download).
-const CACHE = 'shorts-editor-v13';
+const CACHE = 'shorts-editor-v14';
 const SHELL = ['./', 'index.html', 'app.js', 'core.js', 'render.js', 'store.js', 'worker.js', 'coi.js',
-  'log.js', 'download.js', 'claude.js', 'openai.js', 'publish.js', 'merge.js', 'layers.js', 'slides.js', 'brand/logo-trde.png', 'brand/logo-umlaut.png', 'brand/logo-ada.png', 'manifest.webmanifest', 'icon.svg', 'icon-180.png', 'icon-192.png', 'icon-512.png',
+  'log.js', 'download.js', 'claude.js', 'openai.js', 'publish.js', 'merge.js', 'layers.js', 'slides.js', 'audio.js', 'brand/logo-trde.png', 'brand/logo-umlaut.png', 'brand/logo-ada.png', 'manifest.webmanifest', 'icon.svg', 'icon-180.png', 'icon-192.png', 'icon-512.png',
   'lib/transformers.min.js', 'lib/mediabunny.min.mjs'];
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 
