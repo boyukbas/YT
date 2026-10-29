@@ -20,7 +20,7 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
 |---|---|
 | `index.html` | All markup + CSS. Tabs: Video / Subtitles / Look / Share; Settings, Help, Combine dialogs |
 | `app.js` | UI + state (`S`), timeline, export pipeline, projects, settings, everything glue |
-| `core.js` | Speech logic: Whisper chunked pass, 2-language detection per phrase, word list, script alignment, captions, SRT |
+| `core.js` | Speech logic: Whisper chunked pass, 2-language detection per phrase, word list, script alignment, captions (+ per-word colors: `wl` auto, `wm` set by hand), SRT |
 | `worker.js` | Runs Whisper (transformers.js) off the main thread; checkpoints/resume; GPU→CPU fallback |
 | `download.js` | Resumable chunked model downloads (Range requests → IndexedDB → Cache) |
 | `render.js` | Caption drawing (shared by preview + export), hook title, safe zones, branding overlay |

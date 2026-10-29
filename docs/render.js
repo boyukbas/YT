@@ -82,34 +82,41 @@ function layoutWords(ctx, words, maxW, space) {
 /**
  * style: { size (fraction of the short side), pos (0 bottom..1 top), posX (0 left..1 right),
  *          box, highlight, caps, font, anim, colorFor(lang) }
+ * Each word gets its own language's color. With two blocks (a line and its translation),
+ * the second one is smaller and in italics.
  */
+const TRANSLATION = 0.78;   // size of the translation line
 export function drawCaptions(ctx, W, H, t, blocks, style) {
   if (!blocks.length) return;
-  const px = Math.round(Math.min(W, H) * style.size);
-  const lh = px * 1.18, blockGap = px * 0.3;
+  const px0 = Math.round(Math.min(W, H) * style.size);
   const cx = W * (style.posX ?? 0.5);
   // Keep lines inside the frame even when the subtitles are moved to a side.
   const maxW = Math.max(W * 0.35, Math.min(W * 0.86, 2 * Math.min(cx, W - cx) * 0.94));
-  ctx.font = fontCss(style.font, px);
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   ctx.lineJoin = 'round';
-  const space = ctx.measureText(' ').width + px * 0.12;
 
-  const laid = blocks.map(c => {
+  const laid = blocks.map((c, b) => {
+    const small = blocks.length > 1 && b > 0;
+    const px = small ? Math.round(px0 * TRANSLATION) : px0;
+    const font = (small ? 'italic ' : '') + fontCss(style.font, px);
+    ctx.font = font;
+    const space = ctx.measureText(' ').width + px * 0.12;
     const words = captionWords(c).map(w => {
-      const text = style.caps ? safeUpper(w.text, c.lang) : w.text;
+      const text = style.caps ? safeUpper(w.text, w.lang || c.lang) : w.text;
       return { ...w, text, width: ctx.measureText(text).width };
     });
-    return { c, lines: layoutWords(ctx, words, maxW, space) };
+    return { c, px, font, space, lh: px * 1.18, lines: layoutWords(ctx, words, maxW, space) };
   });
-  const total = laid.reduce((a, b) => a + b.lines.length * lh, 0) + blockGap * (laid.length - 1);
-  let y = H * (1 - style.pos) - total / 2 + lh / 2;
+  const blockGap = px0 * 0.3;
+  const total = laid.reduce((a, b) => a + b.lines.length * b.lh, 0) + blockGap * (laid.length - 1);
+  let y = H * (1 - style.pos) - total / 2;
 
-  for (const { c, lines } of laid) {
-    const color = style.colorFor(c.lang);
+  for (const { c, px, font, space, lh, lines } of laid) {
+    y += lh / 2;
     const blockH = lines.length * lh;
     ctx.save();
+    ctx.font = font;
     if (style.anim) {
       // Pop-in when a line appears.
       const k = Math.min(1, Math.max(0, (t - c.start) / POP));
@@ -132,7 +139,7 @@ export function drawCaptions(ctx, W, H, t, blocks, style) {
         ctx.globalAlpha = baseAlpha * (style.highlight && !active ? 0.55 : 1);
         ctx.lineWidth = px * 0.18;
         ctx.strokeStyle = '#000';
-        ctx.fillStyle = color;
+        ctx.fillStyle = style.colorFor(w.lang || c.lang);
         if (style.highlight && active) {
           ctx.save();
           ctx.translate(x + w.width / 2, y);
@@ -149,7 +156,7 @@ export function drawCaptions(ctx, W, H, t, blocks, style) {
       y += lh;
     }
     ctx.restore();
-    y += blockGap;
+    y += blockGap - lh / 2;
   }
 }
 

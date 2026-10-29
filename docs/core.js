@@ -491,23 +491,49 @@ export function alignScript(script, words, primary, secondary) {
 
 // ---------- Captions ----------
 
-/** Groups words into short captions; a caption never mixes languages. Keeps word timings. */
+/**
+ * Short runs of the other language inside a sentence ("Bunlar um zu ve …") stay in the
+ * sentence's line: `inline` is the line's language, `lang` stays the word's own (its color).
+ * A run at the start or end of a sentence still gets its own line, so a word and its
+ * translation ("der Wald – orman") stay apart for the "Word + translation" layout.
+ */
+function markInline(words) {
+  const out = words.map(w => ({ ...w }));
+  for (let i = 0; i < out.length;) {
+    let j = i;
+    // A run ends at the end of a sentence or a pause, too.
+    while (j + 1 < out.length && out[j + 1].lang === out[i].lang && !/[.!?,;:–—]$/.test(out[j].text)
+      && !out[j].lineEnd && out[j + 1].start - out[j].end < 0.6) j++;
+    const before = out[i - 1], after = out[j + 1];
+    const side = before && (before.inline || before.lang);
+    if (before && after && j - i < 3 && side === after.lang && side !== out[i].lang
+      && !/[.!?,;:–—]$/.test(before.text) && !before.lineEnd && !out[j].lineEnd
+      && out[i].start - before.end < 0.6 && after.start - out[j].end < 0.6) {
+      for (let k = i; k <= j; k++) out[k].inline = before.lang;
+    }
+    i = j + 1;
+  }
+  return out;
+}
+
+/** Groups words into short captions; a caption has one language (words inside may differ). Keeps word timings. */
 export function buildCaptions(words, maxWords = 3) {
   const caps = [];
+  const lineLang = w => w.inline || w.lang;
   let cur = [];
   const flush = () => {
     if (!cur.length) return;
     caps.push({
       id: (globalThis.crypto?.randomUUID?.() || String(Math.random()).slice(2)),
       start: cur[0].start, end: cur.at(-1).end,
-      text: cur.map(w => w.text).join(' '), lang: cur[0].lang,
-      words: cur.map(w => ({ text: w.text, start: w.start, end: w.end })),
+      text: cur.map(w => w.text).join(' '), lang: lineLang(cur[0]),
+      words: cur.map(w => ({ text: w.text, start: w.start, end: w.end, lang: w.lang })),
     });
     cur = [];
   };
-  for (const w of words) {
+  for (const w of markInline(words)) {
     const last = cur.at(-1);
-    if (last && (w.lang !== last.lang || w.start - last.end > 0.6 || cur.length >= maxWords)) flush();
+    if (last && (lineLang(w) !== lineLang(last) || w.start - last.end > 0.6 || cur.length >= maxWords)) flush();
     cur.push(w);
     if (/[.!?,;:]$/.test(w.text) || w.lineEnd) flush();
   }
@@ -520,12 +546,81 @@ export function buildCaptions(words, maxWords = 3) {
   return caps;
 }
 
+// ---------- Colors of single words ----------
+// A caption has one language; single words in it can have the other one (their own color):
+// c.wm = set by hand (tap), c.wl = found automatically. Both are per word of c.text, null = line's.
+const tokens = (text) => text.trim().split(/\s+/).filter(Boolean);
+const norm = (t) => t.toLocaleLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+
+/** The language (and so the color) of each word of a caption. */
+export function wordLangs(c) {
+  return tokens(c.text).map((_, i) => c.wm?.[i] || c.wl?.[i] || c.lang);
+}
+
+/** Letters only one of the two languages uses (Turkish ğ ı ş ç İ, German ä ß). */
+function letterLang(t, langs) {
+  if (langs.includes('tr') && /[ğışçİĞŞÇ]/.test(t)) return 'tr';
+  if (langs.includes('de') && /[äßÄ]/.test(t)) return 'de';
+  return null;
+}
+
+/**
+ * Finds the other-language words inside lines: the ones speech recognition put in the other
+ * language, words with letters only that language has, and the word-list words (the left side
+ * of each pair — the second-language words) inside main-language lines.
+ */
+export function autoWordLangs(caps, glossary, primary, secondary) {
+  const two = secondary && secondary !== primary;
+  const seqs = [];
+  // "um … zu" counts as "um" and "zu".
+  for (const term of two ? parseGlossary(glossary).primary : []) {
+    for (const part of term.split(/\s*(?:…|\.\.\.)\s*/)) {
+      const seq = tokens(part).map(norm).filter(Boolean);
+      // A word written alone (no translation) is most likely a second-language word, unless its letters say otherwise.
+      if (seq.length && !seq.some(t => letterLang(t, [primary, secondary]) === primary)) seqs.push(seq);
+    }
+  }
+  for (const c of caps) {
+    const toks = tokens(c.text), n = toks.length;
+    delete c.wl;
+    if (!two || !n) continue;
+    const wl = new Array(n).fill(null);
+    if (c.words?.length === n) c.words.forEach((w, i) => { if (w.lang && w.lang !== c.lang) wl[i] = w.lang; });
+    toks.forEach((t, i) => { const h = letterLang(t, [primary, secondary]); if (h && h !== c.lang) wl[i] = h; });
+    if (c.lang === primary) {
+      const nt = toks.map(norm);
+      for (const seq of seqs) {
+        for (let i = 0; i + seq.length <= n; i++) {
+          if (seq.every((x, k) => nt[i + k] === x)) for (let k = 0; k < seq.length; k++) wl[i + k] = secondary;
+        }
+      }
+    }
+    if (wl.some(Boolean)) c.wl = wl;
+  }
+}
+
+/** Changes a caption's text, keeping the hand-set colors on the words that are still there. */
+export function setCaptionText(c, text) {
+  if (c.wm) {
+    const was = tokens(c.text).map(norm), used = new Set();
+    const wm = tokens(text).map(norm).map((t, i) => {
+      const j = was[i] === t && !used.has(i) ? i : was.findIndex((o, k) => o === t && !used.has(k));
+      if (j < 0) return null;
+      used.add(j);
+      return c.wm[j] || null;
+    });
+    if (wm.some(Boolean)) c.wm = wm; else delete c.wm;
+  }
+  c.text = text;
+}
+
 /** Word timings for a caption, even after its text was edited (spread evenly if counts differ). */
 export function captionWords(c) {
   const parts = c.text.trim().split(/\s+/).filter(Boolean);
-  if (c.words && c.words.length === parts.length) return parts.map((t, i) => ({ ...c.words[i], text: t }));
+  const langs = wordLangs(c);
+  if (c.words && c.words.length === parts.length) return parts.map((t, i) => ({ ...c.words[i], text: t, lang: langs[i] }));
   const step = (c.end - c.start) / Math.max(1, parts.length);
-  return parts.map((t, i) => ({ text: t, start: c.start + i * step, end: c.start + (i + 1) * step }));
+  return parts.map((t, i) => ({ text: t, start: c.start + i * step, end: c.start + (i + 1) * step, lang: langs[i] }));
 }
 
 export function toSRT(caps) {
