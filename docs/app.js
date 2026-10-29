@@ -3,7 +3,7 @@ import {
   CanvasSink, AudioBufferSink, CanvasSource, AudioBufferSource, QUALITY_HIGH,
   getFirstEncodableVideoCodec, getFirstEncodableAudioCodec,
 } from './lib/mediabunny.min.mjs';
-import { LANGS, SR, buildCaptions, toSRT, alignScript } from './core.js';
+import { LANGS, SR, buildCaptions, toSRT, alignScript, autoWordLangs, wordLangs, setCaptionText } from './core.js';
 import * as C from './claude.js';
 import * as O from './openai.js';
 import * as P from './publish.js';
@@ -252,6 +252,7 @@ async function openVideo(file, project = null) {
       dirty();
     }
     findSilences();
+    recolor();
     $('video').src = S.url;
     if (!S.thumb) captureProjectThumb();
     S.presDrag = false; lastMask = null; loadBgForProject();
@@ -551,7 +552,7 @@ function renderCapList() {
     top.append(t, grow);
     if (langs.length > 1) {
       const chip = mk('button', 'chip', c.lang.toUpperCase(), `Language: ${langName(c.lang)}. Tap to switch.`, () => {
-        c.lang = langs[(langs.indexOf(c.lang) + 1) % langs.length]; renderCapList(); dirty();
+        c.lang = langs[(langs.indexOf(c.lang) + 1) % langs.length]; recolor(); renderCapList(); dirty();
       });
       chip.style.background = colorFor(c.lang);
       top.appendChild(chip);
@@ -568,8 +569,8 @@ function renderCapList() {
     const ta = mk('textarea'); ta.rows = 1; ta.value = c.text; ta.style.color = colorFor(c.lang);
     if (cutIdx >= 0) { ta.style.textDecoration = 'line-through'; ta.style.opacity = '0.5'; }
     ta.setAttribute('aria-label', `Subtitle at ${fmt(c.start)}`);
-    ta.oninput = () => { c.text = ta.value; dirty(); };
-    ta.onfocus = () => { video.pause(); video.currentTime = c.start + 0.01; };
+    ta.oninput = () => { setCaptionText(c, ta.value); recolor(); paintWords(); dirty(); };
+    ta.onfocus = () => { video.pause(); video.currentTime = c.start + 0.01; paintWords(); };
 
     const nudge = mk('div', 'nudge');
     const move = (which, d) => () => {
@@ -584,7 +585,30 @@ function renderCapList() {
       mk('span', null, 'Start'), mk('button', null, '−', 'Start earlier', move('start', -0.1)), mk('button', null, '+', 'Start later', move('start', 0.1)),
       mk('span', null, ' End'), mk('button', null, '−', 'End earlier', move('end', -0.1)), mk('button', null, '+', 'End later', move('end', 0.1)),
     );
-    row.append(top, ta, nudge);
+    // The words of the line, in their colors: tap one to give it the other language's color.
+    // Shown while the line is being edited (keeps the list calm otherwise).
+    const strip = mk('div', 'wl');
+    function paintWords() {
+      strip.innerHTML = '';
+      if (langs.length < 2) return;
+      const ls = wordLangs(c);
+      strip.appendChild(mk('span', 'muted', 'Tap a word to switch its color:'));
+      c.text.trim().split(/\s+/).filter(Boolean).forEach((w, k) => {
+        const b = mk('button', 'chip', w, `${w}: ${langName(ls[k])}. Tap to switch.`, () => {
+          const cur = wordLangs(c)[k];
+          c.wm = Array.from({ length: ls.length }, (_, j) => c.wm?.[j] || null);
+          c.wm[k] = langs[(langs.indexOf(cur) + 1) % langs.length];
+          paintWords(); dirty();
+        });
+        b.style.background = colorFor(ls[k]); b.tabIndex = -1;
+        // Keep the text box focused (and this strip open) while tapping words.
+        b.onpointerdown = (e) => e.preventDefault();
+        b.onmousedown = (e) => e.preventDefault();
+        strip.appendChild(b);
+      });
+    }
+    paintWords();
+    row.append(top, ta, strip, nudge);
     list.appendChild(row);
   });
 }
@@ -625,10 +649,10 @@ for (const b of $('pauseModeSeg').children) b.onclick = () => { S.pauseMode = +b
 $('thresh').oninput = e => { S.threshold = +e.target.value; findSilences(); syncPauses(); syncLength(); dirty(); };
 $('minPause').oninput = e => { S.minPause = +e.target.value; persist(); findSilences(); syncPauses(); syncLength(); };
 $('autoLevel').onclick = () => { S.threshold = suggestThreshold(S.levels); findSilences(); syncPauses(); syncLength(); dirty(); };
-$('primary').onchange = e => { S.primary = e.target.value; persist(); syncStyle(); syncGenButton(); };
-$('secondary').onchange = e => { S.secondary = e.target.value; persist(); syncStyle(); syncGenButton(); };
+$('primary').onchange = e => { S.primary = e.target.value; persist(); recolor(); syncStyle(); syncGenButton(); };
+$('secondary').onchange = e => { S.secondary = e.target.value; persist(); recolor(); syncStyle(); syncGenButton(); };
 $('script').oninput = e => { S.script = e.target.value; $('scriptHint').textContent = S.script.trim() ? 'added' : 'optional'; dirty(); };
-$('glossary').oninput = e => { S.glossary = e.target.value; dirty(); syncSubs(); };
+$('glossary').oninput = e => { S.glossary = e.target.value; recolor(); dirty(); syncSubs(); };
 for (const b of $('accSeg').children) b.onclick = () => { S.accuracy = b.dataset.v; persist(); syncSubs(); };
 
 // ---------- Copy the transcript (e.g. to let Claude fix it) ----------
@@ -723,7 +747,9 @@ $('capsToggle').onchange = e => { S.caps = e.target.checked; persist(); };
 $('wpMinus').onclick = () => { if (S.wordsPer > 1) { S.wordsPer--; persist(); rebuildCaptions(); } };
 $('wpPlus').onclick = () => { if (S.wordsPer < 6) { S.wordsPer++; persist(); rebuildCaptions(); } };
 $('burnToggle').onchange = e => { S.burn = e.target.checked; persist(); };
-function rebuildCaptions() { S.captions = buildCaptions(S.words, S.wordsPer); syncStyle(); dirty(); }
+function rebuildCaptions() { S.captions = buildCaptions(S.words, S.wordsPer); recolor(); syncStyle(); dirty(); }
+/** Finds the other-language words inside lines again (after the lines, languages or word list changed). */
+function recolor() { autoWordLangs(S.captions, S.glossary, S.primary, secondLang()); }
 
 // ---------- Subtitles (Whisper in a worker) ----------
 let worker = null;
