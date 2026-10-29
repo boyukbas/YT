@@ -286,6 +286,38 @@ dialog#mergeDlg::backdrop { background: rgba(0,0,0,.6); }
         </details>
       </div>
     </section>
+
+    <section id="musicBox">
+      <div class="row"><h2 style="margin:0">Background music</h2><input type="checkbox" class="switch" id="musicOn" aria-label="Background music"></div>
+      <p class="muted" style="margin-top:6px">Safe music without copyright claims: YouTube’s own Audio Library. There, filter <b>Attribution not required</b>, download a track, then add it here. Added tracks stay on this device for all your videos.</p>
+      <div class="pair" style="margin-top:10px">
+        <a class="btn" id="ytLib" href="https://www.youtube.com/audiolibrary" target="_blank" rel="noopener" style="text-align:center;text-decoration:none;color:inherit">Open Audio Library</a>
+        <button class="btn" id="musicAdd">Add music file</button>
+      </div>
+      <p class="muted" style="margin-top:6px;font-size:13px">On a phone the Audio Library opens only as a desktop page: in Chrome tap ⋮ → “Desktop site”.</p>
+      <input type="file" id="musicFile" accept="audio/*,.mp3,.m4a,.wav,.ogg" hidden>
+      <div class="cutlist" id="musicList" style="margin-top:10px"></div>
+      <div id="musicOpts">
+        <div class="stack"><div class="head"><span>Music volume</span><output id="musicVolOut"></output></div>
+          <input type="range" id="musicVol" min="0.05" max="0.6" step="0.01"></div>
+        <div class="stack"><div class="head"><span>While you speak</span></div>
+          <div class="seg" id="duckSeg" role="group" aria-label="Music while speaking">
+            <button data-v="lot">Much quieter</button><button data-v="little">A bit quieter</button><button data-v="none">Same</button>
+          </div></div>
+        <p class="muted" style="margin-top:6px">The music gets quieter while you speak and comes back up in pauses. It loops if the video is longer, and fades in and out.</p>
+      </div>
+      <p class="status" id="musicStatus"></p>
+    </section>
+
+    <section id="cleanBox">
+      <h2>Clean up sound</h2>
+      <p class="muted">Removes background noise — traffic, fan, wind, hum, voices far away — and keeps your voice. Runs on the device; used in the export.</p>
+      <div class="seg" id="denoiseSeg" role="group" aria-label="Noise removal" style="margin-top:10px">
+        <button data-v="off">Off</button><button data-v="light">Light</button><button data-v="strong">Strong</button>
+      </div>
+      <button class="btn hidden" id="cleanTry" style="width:100%;margin-top:10px">Hear 8 s cleaned (from the playhead)</button>
+      <p class="status" id="cleanStatus"></p>
+    </section>
     </div>
 
     <div class="panel" data-panel="subs">

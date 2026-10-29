@@ -27,6 +27,7 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
 | `layers.js` | Background & presenter: MediaPipe selfie segmentation, compositing, background video reader |
 | `slides.js` | PDF → slide images (pdf.js legacy build), slide timing |
 | `merge.js` | Combine several videos into one |
+| `audio.js` | Background music (library in IndexedDB `music:<id>`, ducking under speech, loop + fades) and noise removal (RNNoise, streamed, 48 kHz) |
 | `publish.js` | Thumbnail frames, cover maker (MODNet cut-out), Claude prep, chapters |
 | `claude.js` / `openai.js` | Optional APIs with the user's own keys (stored only in localStorage, never logged) |
 | `store.js` | IndexedDB projects + files (`<id>`, `<id>:bg`, `<id>:slides`) |
@@ -40,7 +41,7 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   (also add new files to `SHELL` there). The start screen shows the version.
 - **Self-host libraries.** Under COEP, Safari refuses cross-origin scripts inside workers. Everything in
   `lib/` is self-hosted: transformers.js 4.3.1 (+ onnxruntime wasm), mediabunny 1.61.3, MediaPipe
-  tasks-vision 1.1.0 (+ selfie segmenter models), pdf.js 6.4.299 **legacy** build (modern build needs
+  tasks-vision 1.1.0 (+ selfie segmenter models), RNNoise (`@shiguredo/rnnoise-wasm` 2025.1.5, wasm inlined, loaded only when used), pdf.js 6.4.299 **legacy** build (modern build needs
   `Map.getOrInsertComputed`, missing in current browsers). Pin versions ≥ 14 days old.
 - **GitHub secret scanning** flagged `Mistral3ForConditionalGeneration` in transformers.min.js as a Mistral
   key; it is rewritten with a `\u0061` escape. Re-apply if that file is ever replaced.
@@ -62,9 +63,18 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
 - Always check exported files with ffprobe/ffmpeg frames, not just UI text.
 
 ## Backlog / ideas (not done)
+- **Combine videos runs out of RAM on the phone** (Android, 8 GB; 7 iPhone clips, ~500 MB, Oct 2026 — that
+  video was made on the PC instead). Likely causes in `merge.js`: `clipAudio` holds each clip's whole audio
+  2–3× (decoded parts + OfflineAudioContext input + output); every frame is decoded and re-encoded at up
+  to 1080p (iPhone 4K HEVC decode is heavy); the result is then re-encoded again on export and copied into
+  IndexedDB. Ideas, best first: (1) when clips share codec/size/fps, **copy packets without re-encoding**
+  (mediabunny `EncodedPacketSink` → `EncodedVideoPacketSource`/`EncodedAudioPacketSource`) — fast, tiny RAM;
+  (2) **multi-clip projects**: keep the clips separate and only render once at export (no merge step);
+  (3) stream audio per second instead of whole clips. Check the phone's diagnostics log first.
 - Direct YouTube upload: blocked by Google (unverified apps' uploads are locked private). Option discussed:
   user uploads in the YouTube app, then the app applies title/description/thumbnail via the API (needs a
   Google Cloud OAuth client). User postponed the decision.
-- Background music with automatic ducking; slow zoom-in effects; intro/outro templates.
+- Slow zoom-in effects; intro/outro templates. (Background music + ducking: done 2026-10-29.)
+- Music can't be browsed inside the app: YouTube's Audio Library has no API and needs a login, so the app links to it (`youtube.com/audiolibrary`) and the user adds downloaded files.
 - Subscribe reminder can overlap a presenter box in the bottom corner — could avoid it.
 - Slide info text doesn't refresh while playing.
