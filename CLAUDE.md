@@ -64,7 +64,7 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
 
 ## Backlog / ideas (not done)
 - **Thumbnail maker in the Share tab, in the approved format** (user asked for it, "not now", 2026-10-29).
-  Reference: `D:\YT\work\scripts	humbnail.py` → `D:\YT\V1\output	humbnail_youtube.jpg`. 1280×720, dark navy
+  Reference: `D:\YT\work\scripts\thumbnail.py` → `D:\YT\V1\output\thumbnail_youtube.jpg`. 1280×720, dark navy
   + soft yellow glow, cut-out presenter right (white outline), red level badge ("B2 ALMANCA"), the lesson's German
   keywords stacked huge in yellow, a white Turkish hook question ("FARKI NE?"), TR-DE logo, German-flag stripe.
   The app's cover maker (`publish.js`, MODNet cut-out) is the natural place: add this as a layout, keywords from
