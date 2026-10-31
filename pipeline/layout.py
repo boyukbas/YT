@@ -112,17 +112,24 @@ def wrap(words, maxw, meas):
     return [words[:i]] + wrap(words[i:], maxw, meas)
 
 
-def lines_of(text, f, maxw):
-    """'Turkish [Deutsch] text' → wrapped lines of [(word, is_german)]."""
-    words, de = [], False
-    for tok in text.replace('[', ' [ ').replace(']', ' ] ').split():
-        if tok == '[':
-            de = True
-        elif tok == ']':
-            de = False
+def clean(text):
+    """Text without the markers: [German inside Turkish], <the lesson's pattern>."""
+    return ' '.join(text.translate(str.maketrans('', '', '[]<>')).split())
+
+
+def lines_of(text, f, maxw, de=False):
+    """'Turkish [Deutsch <zu lernen>] text' → wrapped lines of [(word, is_german, is_pattern)]."""
+    words, hl = [], False
+    for tok in text.replace('[', ' [ ').replace(']', ' ] ').replace('<', ' < ').replace('>', ' > ').split():
+        if tok in ('[', ']'):
+            de = tok == '['
+        elif tok in ('<', '>'):
+            hl = tok == '<'
+        elif words and all(ch in '.,;:!?…' for ch in tok):
+            words[-1] = (words[-1][0] + tok,) + words[-1][1:]      # "<zu lernen>." → "lernen."
         else:
-            words.append((tok, de))
-    rows = wrap([w for w, _ in words], maxw, f.getlength)
+            words.append((tok, de, hl))
+    rows = wrap([w[0] for w in words], maxw, f.getlength)
     out, k = [], 0
     for r in rows:
         out.append(words[k:k + len(r)])
@@ -136,11 +143,11 @@ def blocks(cues, spec, fonts_dir):
     out = []
     for c in cues:
         if c['lang'] == 'de':
-            main = lines_of(c['text'].replace('[', '').replace(']', ''), fm, spec.maxw)
-            trn = lines_of(c['tr'], ft, spec.maxw) if c.get('tr') else []
+            main = lines_of(c['text'].replace('[', '').replace(']', ''), fm, spec.maxw, de=True)
+            trn = lines_of(clean(c['tr']), ft, spec.maxw) if c.get('tr') else []
         else:
             main, trn = lines_of(c['text'], fm, spec.maxw), []
-        width = max([fm.getlength(' '.join(w for w, _ in l)) for l in main] + [ft.getlength(' '.join(w for w, _ in l)) for l in trn])
+        width = max([fm.getlength(' '.join(w[0] for w in l)) for l in main] + [ft.getlength(' '.join(w[0] for w in l)) for l in trn])
         out.append({'main': main, 'trn': trn, 'h': len(main) * spec.size * 1.18 + len(trn) * spec.tsize * 1.18 + 10, 'w': width})
     return out
 
@@ -226,23 +233,26 @@ Style: bottom,Arial,{spec.size},{tr},{tr},&H00000000,&H96000000,-1,0,0,0,100,100
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """]
+    bord = round(spec.size / 12.8, 1)
+    hl = ass_color(colors['pattern'])
+
+    def line(words):
+        """One subtitle row; tags only where the word kind changes. The lesson's pattern gets a thick outline in the
+        accent colour, like a highlighter."""
+        s, state = '', None
+        for j, (w, isde, mark) in enumerate(words):
+            if (isde, mark) != state:
+                look = (r'\3c' + hl + r'&\bord' + str(round(bord * 1.9, 1))) if mark else (r'\3c&H000000&\bord' + str(bord))
+                s += '{' + r'\c' + (de if isde else tr) + '&' + look + '}'
+                state = (isde, mark)
+            s += (' ' if j else '') + w
+        return s
+
     for c, b, side in zip(cues, blks, sides):
-        if c['lang'] == 'de':
-            body = r'\N'.join(' '.join(w for w, _ in l) for l in b['main'])
-            body = '{\\c' + de + '&}' + body
-            if b['trn']:
-                body += r'\N{\fs' + str(spec.tsize) + r'\b0\i1\c' + tl + '&}' + r'\N'.join(' '.join(w for w, _ in l) for l in b['trn'])
-        else:
-            rows = []
-            for l in b['main']:
-                s, state = '', False
-                for j, (w, isde) in enumerate(l):
-                    if isde != state:
-                        s += '{\\c' + (de if isde else tr) + '&}'
-                        state = isde
-                    s += (' ' if j else '') + w
-                rows.append(s + ('{\\c' + tr + '&}' if state else ''))
-            body = r'\N'.join(rows)
+        body = r'\N'.join(line(l) for l in b['main'])
+        if b['trn']:
+            body += r'\N{\fs' + str(spec.tsize) + r'\b0\i1\c' + tl + r'&\3c&H000000&\bord' + str(round(bord * 0.75, 1)) + '}' + \
+                r'\N'.join(' '.join(w[0] for w in l) for l in b['trn'])
         out.append(f'Dialogue: 0,{ts_ass(c["s"])},{ts_ass(c["e"])},{side},,0,0,0,,{body}\n')
     path.write_text(''.join(out), encoding='utf-8-sig')
 
@@ -251,13 +261,13 @@ def write_srt(path, cues, lang):
     """lang 'tr': all Turkish (German lines → their translation); 'de': all German; 'spoken': as spoken."""
     rows = []
     for c in cues:
-        plain = c['text'].replace('[', '').replace(']', '')
+        plain = clean(c['text'])
         if lang == 'spoken':
             t = plain
         elif lang == c['lang']:
             t = plain
         else:
-            t = c.get('tr' if lang == 'tr' else 'de') or plain
+            t = clean(c.get('tr' if lang == 'tr' else 'de') or '') or plain
         words = t.split()
         t = '\n'.join(' '.join(x) for x in wrap(words, 42, len))
         rows.append(f'{len(rows) + 1}\n{ts_srt(c["s"])} --> {ts_srt(c["e"])}\n{t}\n')

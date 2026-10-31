@@ -8,7 +8,7 @@ Results go to <lesson>/Output/ (or "Output (Easy)" when an Output folder made el
 Optional <lesson>/settings.json, e.g. {"short": false} = no Short version for this lesson.
 Work files stay on the PC in D:\\YT\\easy-work\\<lesson>.
 """
-import argparse, hashlib, json, os, statistics, sys, time, traceback
+import argparse, hashlib, json, os, shutil, statistics, sys, time, traceback
 from pathlib import Path
 import cv2
 from PIL import Image
@@ -30,12 +30,24 @@ SHORT_MAX = 180.0
 OURS = 'status.json'
 
 
+def local_copy(src, dst):
+    """Mirror a Drive folder to the PC. ffmpeg misreads looped images straight from the Drive mount (J:), so every
+    asset the renderer touches comes from this local copy."""
+    for f in Path(src).rglob('*'):
+        if f.is_file():
+            t = Path(dst) / f.relative_to(src)
+            if not t.exists() or t.stat().st_size != f.stat().st_size or t.stat().st_mtime < f.stat().st_mtime:
+                t.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(f, t)
+    return Path(dst)
+
+
 def load_profile(root):
-    ch = Path(root) / '_channel'
+    ch = local_copy(Path(root) / '_channel', WORK_ROOT / '_channel')
     p = json.loads((ch / 'channel.json').read_text(encoding='utf-8'))
     assets = {'logo': ch / p['logo'], 'subscribe': ch / p['subscribe'], 'fonts': ch / 'fonts', 'music': ch / 'music'}
     pal = p['palette']
-    p['colors'] = {'tr': pal['white']['hex'], 'de': pal['yellow']['hex'], 'translation': pal['soft']['hex']}
+    p['colors'] = {'tr': pal['white']['hex'], 'de': pal['yellow']['hex'], 'translation': pal['soft']['hex'], 'pattern': pal['red']['hex']}
     terms = ch / 'terms.txt'
     p['terms'] = [t.strip() for t in terms.read_text(encoding='utf-8').splitlines() if t.strip()] if terms.exists() else []
     return p, assets
@@ -54,6 +66,39 @@ def lesson_videos(lesson):
 
 def fingerprint(videos):
     return [[v.name, v.stat().st_size] for v in videos]
+
+
+ZOOM = 1.08
+
+
+def plan_zoom(segs, frame, size, logo, banner):
+    """Every second segment is a slight punch-in, so jump cuts look intentional. Anchored at the corner of a logo that
+    is burned into the recording (so it stays in the picture), otherwise centred on her face. Not for very short
+    segments or the last one when a subscribe banner is burned into it. Sets g['zoom']; returns the zooms used."""
+    W, H = size
+    cw, ch = W / ZOOM, H / ZOOM
+    for k, g in enumerate(segs):
+        g.pop('zoom', None)
+        if k % 2 == 0 or g['b'] - g['a'] < 2.0 or (banner and k == len(segs) - 1):
+            continue
+        if logo:
+            x0, y0 = (W - cw if (logo[0] + logo[2]) / 2 > W / 2 else 0), 0
+        else:
+            fr = frame(g, (g['b'] - g['a']) / 2)
+            _, f = L.detector(FACE_MODEL, W, H).detect(fr) if fr is not None else (None, None)
+            fx, fy = ((f[0][0] + f[0][2] / 2), (f[0][1] + f[0][3] / 2)) if f is not None else (W / 2, H / 2)
+            x0, y0 = min(max(0, fx - cw / 2), W - cw), min(max(0, fy - ch * 0.45), H - ch)
+        g['zoom'] = [ZOOM, round(x0), round(y0)]
+    return [g['zoom'] for g in segs if g.get('zoom')]
+
+
+def cover_logo(logo, zooms):
+    """Square where our own (opaque) logo hides the burned-in one at its normal and its punched-in positions."""
+    boxes = [logo] + [((logo[0] - x0) * z, (logo[1] - y0) * z, (logo[2] - x0) * z, (logo[3] - y0) * z) for z, x0, y0 in zooms]
+    cx = sum((b[0] + b[2]) / 2 for b in boxes) / len(boxes)
+    cy = sum((b[1] + b[3]) / 2 for b in boxes) / len(boxes)
+    side = max(2 * ((((b[0] + b[2]) / 2 - cx) ** 2 + ((b[1] + b[3]) / 2 - cy) ** 2) ** 0.5) + (b[2] - b[0]) for b in boxes) + 8
+    return (cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2)
 
 
 def choose_banner_y(spec, cues, blks, sides, faces, b0):
@@ -154,19 +199,22 @@ def process(lesson, root, log_only=False):
     assets['banner'] = R.banner_png(assets['subscribe'], work)
     files, report = {}, {'placement': {}, 'qa': {}, 'notes': ans.get('notes', [])}
     src_logo = src_banner = None
-    for vname, (segs, cues, total, cta, cards), is_short in versions:
+    for vname, (segs, cues, total, cta, cards, sections), is_short in versions:
         tag = 'main' if (segs, cues) == (main[0], main[1]) else vname
         (work / f'timeline-{vname}.json').write_text(json.dumps({'segs': segs, 'cues': cues, 'total': total, 'cta': cta,
                                                                  'cards': cards}, ensure_ascii=False, indent=1), encoding='utf-8')
         st.log(f'{vname}: {len(segs)} segments, {len(cues)} lines, {total:.1f} s')
+        by_id = {c['id']: c for c in clips}
+        frame = lambda g, t, zoom=None: R.source_frame(by_id[g['clip']], g['a'] + t, src, zoom)
+        if src_logo is None:                                         # burned into the recording already?
+            src_logo = R.find_logo([frame(g, 0.5) for g in (segs[0], segs[len(segs) // 2], segs[-1])], assets['logo']) or False
+            src_banner = R.find_banner(frame(segs[-1], max(0, segs[-1]['b'] - segs[-1]['a'] - 3)), assets['banner'])
+            st.log(f'already in the recording: logo {src_logo}, subscribe banner {src_banner}')
+        zoomed = plan_zoom(segs, frame, src, src_logo, src_banner) if profile.get('zoom_cuts', True) and not is_short else []
         st.set('working', f'Cutting the {"Short" if vname == "short" else "video"}')
         lst, inter = R.make_inter(segs, clips, work, src, st, tag)
         st.set('working', 'Finding the best place for the subtitles')
         faces = L.track_faces(segs, inter, cues, FACE_MODEL)
-        if src_logo is None:
-            src_logo = R.find_logo(inter, len(segs), assets['logo']) or False
-            src_banner = R.find_banner(inter, segs, assets['banner'])
-            st.log(f'already in the recording: logo {src_logo}, subscribe banner {src_banner}')
         if is_short and landscape:                                   # square crop around her, text below
             fx = statistics.median((f[0] + f[2]) / 2 for f in faces if f)
             side = src[1]
@@ -176,6 +224,11 @@ def process(lesson, root, log_only=False):
             spec = L.Spec(vname, *src, short=is_short, src_w=src[0], src_h=src[1])
         visible = bool(src_logo) and spec.crop[0] <= src_logo[0] and src_logo[2] <= spec.crop[0] + spec.crop[2]
         spec.logo = spec.to_canvas(src_logo) if visible else R.logo_box(spec)
+        if visible and zoomed:
+            # punch-ins move/enlarge the burned-in logo: our own logo covers both positions, so it never jumps
+            spec.logo = cover_logo(src_logo, zoomed)
+            spec.logo_opaque = True
+            visible = False
         blks = L.blocks(cues, spec, assets['fonts'])
         prefer = profile['subtitles']['short' if spec.short else 'long']
         sides, rep = L.place(spec, faces, blks, prefer)
@@ -190,20 +243,25 @@ def process(lesson, root, log_only=False):
         by = None if src_banner else choose_banner_y(spec, cues, blks, sides, faces, b0)
         banner = None if by is None else ((spec.W - R.banner_width(spec)) / 2, by, (spec.W + R.banner_width(spec)) / 2,
                                           by + R.banner_height(spec))
-        placed = []
-        for k, card in enumerate(cards):
-            png = work / f'card-{vname}-{k}.png'
-            size = chips.draw(card, profile['palette'], spec.H, png, assets['fonts'])
-            xy = chips.place(spec, size, card, cues, blks, sides, faces, banner and (banner, b0))
+        placed, taken = [], []
+        items = [('label', k, x) for k, x in enumerate(sections)] + [('card', k, x) for k, x in enumerate(cards)]
+        for kind, k, item in items:                                  # section labels first, then word cards
+            png = work / f'{kind}-{vname}-{k}.png'
+            draw = chips.draw_label if kind == 'label' else chips.draw
+            size = draw(item, profile['palette'], spec.H, png, assets['fonts'])
+            xy = chips.place(spec, size, item, cues, blks, sides, faces, banner and (banner, b0), taken)
             if xy:
-                placed.append((png, *xy, card['s'], card['e']))
-        rep['cards'] = f'{len(placed)}/{len(cards)}'
+                placed.append((png, *xy, item['s'], item['e']))
+                taken.append(((xy[0], xy[1], xy[0] + size[0], xy[1] + size[1]), item['s'], item['e']))
+        rep['cards'] = f'{len(placed)}/{len(items)} (labels + word cards)'
         dst = out / f'{name}-{vname}.mp4'
         st.set('working', f'Rendering the {"Short" if vname == "short" else "video"}')
-        R.render(spec, lst, ass, profile, assets, total, cta, not visible, by, work, dst, music=track, status=st, cards=placed)
+        outro = None if spec.short or not profile.get('outro', True) else             R.outro_png(spec, profile['palette'], assets, ans.get('next', ''), work / f'outro-{vname}.png')
+        R.render(spec, R.with_outro(lst, outro, src) if outro else lst, ass, profile, assets, total, cta, not visible, by, work,
+                 dst, music=track, status=st, cards=placed, outro=bool(outro))
         qa, sheet = qa_check(dst, spec, cues, blks, sides, work, vname)
         report['qa'][vname] = qa
-        files[dst.name] = f'{"Short" if spec.short else "video"} {spec.W}x{spec.H}, {ts(total)}'
+        files[dst.name] = f'{"Short" if spec.short else "video"} {spec.W}x{spec.H}, {ts(total + (10 if outro else 0))}' +             (' (last 10 s: end-screen card)' if outro else '')
         (out / f'check-frames-{vname}.jpg').write_bytes(sheet.read_bytes())
         st.log(f'{vname}: placement {rep}, covered {len(qa["face_covered"])}, {qa["loudness_lufs"]} LUFS')
         for lang in ('tr', 'de'):

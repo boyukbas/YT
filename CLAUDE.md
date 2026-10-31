@@ -22,7 +22,9 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
 Palette in `_channel/channel.json` (Drive), card in `_channel/brand.png`: **German = yellow #FFD21A, Turkish = white,
 accent = red #E30A17, surfaces = navy #101628**, ink #15171C, translation lines #E8EAF0. Thumbnails: the V1 format
 (`pipeline/thumbnail.py`). Subtitles never cover eyes/nose/mouth; long videos prefer the top, Shorts the bottom.
-Word cards ("KELİME"): one harder word every 30–60 s.
+Word cards ("KELİME"): one harder word every 30–60 s. Section labels at each numbered part; the lesson's pattern is
+highlighted (yellow text, red outline); 10 s end-screen card "Sıradaki ders". Pipeline gotcha: never let ffmpeg read
+looped images from the Drive mount `J:` (it stalls) — the pipeline renders from a local copy of `_channel`.
 
 ## Web app files (`docs/`)
 | File | What |
