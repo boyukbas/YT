@@ -41,8 +41,14 @@ Return ONE JSON object, nothing else:
 
 
 def candidates(segs, inter_path, model, work, n=12):
-    """Frames where her face is big, frontal and sharp, spread over the video → numbered contact sheet."""
+    """Frames where her face is big, frontal and sharp, spread over the video → numbered contact sheet.
+    Made once per lesson: the numbers Claude picked must keep pointing at the same pictures after a re-cut."""
+    import json
     from layout import detector
+    saved = work / 'thumbs' / 'candidates.json'
+    if saved.exists():
+        files = [{**c, 'file': work / 'thumbs' / c['file']} for c in json.loads(saved.read_text(encoding='utf-8'))]
+        return files, work / 'thumbs' / 'candidates.jpg'
     pool = []
     for k, g in enumerate(segs):
         cap = cv2.VideoCapture(str(inter_path(k)))
@@ -90,11 +96,13 @@ def candidates(segs, inter_path, model, work, n=12):
     for i, im in enumerate(tiles):
         sheet.paste(im, ((i % cols) * tw, (i // cols) * th))
     sheet.save(d / 'candidates.jpg', quality=88)
+    saved.write_text(json.dumps([{**c, 'file': c['file'].name} for c in files]), encoding='utf-8')
     return files, d / 'candidates.jpg'
 
 
 def build_prompt(profile, lesson, topic, cues, versions, ncand):
-    rows = [f'{ts(c["s"])}  {c["lang"]}  {c["text"]}' + (f'  [{c["tr"]}]' if c['lang'] == 'de' and c.get('tr') else '') for c in cues]
+    rows = [f'{ts(c["s"])}  {c["lang"]}  {c["text"].replace("<", "").replace(">", "")}' +
+            (f'  [{c["tr"]}]' if c['lang'] == 'de' and c.get('tr') else '') for c in cues]
     return PROMPT.format(channel=profile['name'], handle=profile.get('handle', ''), lesson=lesson, topic=topic,
                          versions=versions, hashtags=' '.join(profile['youtube'].get('hashtags', [])), cues='\n'.join(rows), ncand=ncand)
 

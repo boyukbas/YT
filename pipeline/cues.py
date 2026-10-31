@@ -33,6 +33,11 @@ Return ONE JSON object, nothing else:
                                         // newer German words she actually says (not the grammar term itself, not
                                         // basic words like ich/ist). "s" = when she says it. Nouns with article.
                                         // "tr": short Turkish meaning, max ~22 characters.
+ "sections": [{{"clip": "c1", "s": 19.6, "tag": "1", "title": "Sıfat + zu + Infinitiv"}}],
+                                        // where each numbered part of the lesson starts (shown as a label and used
+                                        // as chapters); short Turkish titles, max ~28 characters; "tag": the part
+                                        // number, or "!" for an important note. [] if no parts.
+ "next": "dass ile yan cümle",          // the topic she announces for the next video ("" if none)
  "cta": {{"clip": "c4", "s": 16.3}},     // where she asks viewers to subscribe/like (null if she doesn't)
  "title_hint": "zu + Infinitiv",        // the lesson topic in a few words
  "terms": ["zu + Infinitiv", "anfangen", ...],   // German terms/structures this lesson teaches (for the term list)
@@ -49,6 +54,9 @@ Rules for cues:
 - Times in seconds, clip-local, taken from the TR word timings (first word start, last word end). Cues never overlap,
   stay inside [in, out] and outside cuts.
 - Cover everything she says between in and out.
+- Mark the structure this lesson teaches inside German text with <angle brackets>, e.g.
+  "Ich habe Lust, Deutsch <zu lernen>." / "[Ich habe Lust, mit dem Sport <anzufangen>]". Only the target structure,
+  only in example sentences; it gets highlighted on screen.
 
 {clips}
 """
@@ -76,11 +84,11 @@ def build_prompt(clips, work, profile):
 
 def timeline(ans, clips, short=False):
     """Edit list → segments [{clip, a, b, start}], cues in output time [{s, e, lang, text, tr, de}], total length,
-    call-to-action time and word cards [{s, e, word, tr}]."""
+    call-to-action time, word cards [{s, e, word, tr}] and section labels [{s, e, tag, title}]."""
     by_id = {c['id']: c for c in clips}
     plan = {c['id']: c for c in ans['clips']}
     segs, cues, t = [], [], 0.0
-    cta, vocab = None, []
+    cta, vocab, sections = None, [], []
     for cid in ans.get('order') or [c['id'] for c in clips]:
         p = plan[cid]
         a0, b0 = max(0.0, p['in']), min(by_id[cid]['duration'], p['out'])
@@ -122,6 +130,9 @@ def timeline(ans, clips, short=False):
                              'tr': c.get('tr', '').strip(), 'de': c.get('de', '').strip()})
         if ans.get('cta') and ans['cta'].get('clip') == cid:
             cta = to_out(ans['cta']['s'])
+        for v in ans.get('sections', []):
+            if v.get('clip') == cid and a0 <= v['s'] <= b0:
+                sections.append({'s': to_out(v['s']), 'title': v['title'].strip(), 'tag': str(v.get('tag', ''))})
         for v in ans.get('vocab', []):
             if v.get('clip') == cid and a0 <= v['s'] <= b0:
                 vocab.append({'s': to_out(v['s']), 'word': v['word'].strip(), 'tr': v['tr'].strip()})
@@ -138,4 +149,6 @@ def timeline(ans, clips, short=False):
     for v in sorted(vocab, key=lambda v: v['s']):
         if (not cards or v['s'] - cards[-1]['s'] >= 20) and v['s'] + 4 < total - 1:
             cards.append({**v, 'e': v['s'] + 4.0})
-    return segs, cues, total, cta, cards
+    for i, v in enumerate(sections, 1):
+        v.update(tag=v['tag'] or str(i), e=v['s'] + 3.5)
+    return segs, cues, total, cta, cards, sections
