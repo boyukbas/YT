@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths-ignore: ['docs/**', 'README.md']
+    paths-ignore: ['docs/**', 'pipeline/**', 'README.md', 'CLAUDE.md']
 jobs:
   build:
     runs-on: macos-15
