@@ -26,7 +26,7 @@ const SETTINGS = ['primary', 'secondary', 'color1', 'color2', 'caps', 'wordsPer'
   'minPause', 'layout', 'size', 'box', 'highlight', 'accurate', 'gpu', 'posX', 'font', 'anim', 'hookSecs', 'accuracy', 'claudeModel', 'claudeFast', 'claudeAuto', 'engine', 'format', 'pauseMode'];
 const saved = (() => { try { return JSON.parse(localStorage.getItem('settings') || '{}'); } catch { return {}; } })();
 const S = {
-  primary: 'de', secondary: 'tr', color1: 'white', color2: 'yellow', caps: true, wordsPer: 3, pos: 0.35, burn: true,
+  primary: 'tr', secondary: 'de', color1: 'white', color2: 'yellow', caps: true, wordsPer: 3, pos: 0.35, burn: true,
   removePauses: true, minPause: 0.4, layout: 'single', size: 0.075, box: false, highlight: false, accurate: false, gpu: true,
   posX: 0.5, font: 'modern', anim: false, hookSecs: 3, claudeModel: 'claude-sonnet-5-5', claudeFast: false, claudeAuto: true, engine: 'device', format: 'original', pauseMode: 0, accuracy: saved.accurate ? 'second' : 'normal',
   ...saved,

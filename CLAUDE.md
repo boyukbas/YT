@@ -5,7 +5,7 @@ for Turkish speakers. Videos mix Turkish (main language) and German. Goal: cover
 an education channel — Shorts and normal videos from the same recording.
 
 The owner talks to Claude in **Turkish**; the app UI is in **English** (deliberate). They mostly use an
-Android phone (Chrome, 8 GB, no WebGPU) and sometimes an iPad Pro or a PC with an RTX 5060 Ti.
+Android phone (Chrome, 8 GB, no WebGPU) and sometimes an iPad Pro or a PC with an RTX 5070.
 They like step-by-step answers, visuals, and clear "what was verified vs. assumed".
 
 ## Layout
@@ -13,7 +13,16 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   https://boyukbas.github.io/YT/  (installable PWA, works offline after first use)
 - `ShortsEditor/`, `project.yml`, `.github/workflows/build-ipa.yml` — native iOS app (SwiftUI + WhisperKit).
   **Shelved**: sideloading failed (Apple login / anisette). Builds still pass in CI; don't invest further unless asked.
-- The iOS workflow ignores `docs/**` and `README.md` changes.
+- `pipeline/` — **Easy mode on the home PC** (Python): a lesson folder in Google Drive (`J:\My Drive\SINEM-YouTube\<lesson>`)
+  in → finished video, caption tracks, 3 thumbnails, YouTube texts out. See `pipeline/README.md`. Decided 2026-10-31:
+  Sinem's channel only; the PC is the worker; she uploads in the YouTube app and an app step fills in the details (not built yet).
+- The iOS workflow ignores `docs/**`, `pipeline/**`, `README.md` and `CLAUDE.md` changes.
+
+## Channel style (same everywhere: video, thumbnails, app)
+Palette in `_channel/channel.json` (Drive), card in `_channel/brand.png`: **German = yellow #FFD21A, Turkish = white,
+accent = red #E30A17, surfaces = navy #101628**, ink #15171C, translation lines #E8EAF0. Thumbnails: the V1 format
+(`pipeline/thumbnail.py`). Subtitles never cover eyes/nose/mouth; long videos prefer the top, Shorts the bottom.
+Word cards ("KELİME"): one harder word every 30–60 s.
 
 ## Web app files (`docs/`)
 | File | What |
