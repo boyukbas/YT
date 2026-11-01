@@ -32,9 +32,11 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
 6. **Check**: every subtitle line is checked on the finished video for face overlap; loudness measured; frame sheet.
 7. **YouTube texts + thumbnails** (`texts.py`, `thumbnail.py`, Claude looks at candidate frames).
 8. **YouTube details** (`youtube.py`): Sinem uploads the finished files in the YouTube app; the watcher finds each upload
-   by its length and sets title, description, tags, category, languages, audience, paid-promotion/AI answers, thumbnail,
-   TR + DE captions, playlist (existing ones only), and posts the comment once the video is public. Record:
-   `Output/youtube-applied.json`; STATUS shows the links. Still in Studio: pin the comment, end screen.
+   by its length (closest file size when Shorts have the same length) and sets title, description, tags, category,
+   languages, audience, paid-promotion/AI answers, thumbnail, TR + DE captions, playlist (existing ones only; Shorts go in
+   `shorts_playlist` in their order and link to the full lesson), and posts the comment once the video is public.
+   `"public": true` in settings.json (or `--public`) also makes them public. Record: `Output/youtube-applied.json`;
+   STATUS shows the links. Still in Studio: pin the comment, end screen. Quota: ~900 units per Short, 10,000 a day.
    One-time sign-in: `python youtube.py login` (pick Almanca Dil Atölyesi). Test without changes:
    `python youtube.py apply "<lesson>" --dry-run`.
 

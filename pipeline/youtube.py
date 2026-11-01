@@ -10,7 +10,11 @@ posts the comment once the video is public (YouTube has no comments on private v
 checked first and done once (record in Output/youtube-applied.json). The API cannot pin the comment, add an end screen
 or make a premiere; those stay in Studio and are listed in STATUS.
 Choices in <lesson>/settings.json: {"title": 1-3, "description": 1-2, "thumbnail": 1-3,
-"publish": "2026-11-05 21:15" (Istanbul time; scheduled publish of a private video), "paid": false, "ai": false}.
+"publish": "2026-11-05 21:15" (Istanbul time; scheduled publish of a private video), "paid": false, "ai": false,
+"public": true (make the video and every Short public once filled in; same as --public),
+"shorts_playlist": "<name>" (an existing playlist; the Shorts go in it in their order)}.
+Quota: 10,000 units a day; a Short with two caption tracks costs ~900, so a lesson with many Shorts can need two days
+(it resumes where it stopped). The quota resets at midnight Pacific time (10:00 Istanbul).
 
 Client: %USERPROFILE%\\.shorts-pipeline\\youtube_client.json (Desktop OAuth client, project "shorts0editor").
 Token:  %USERPROFILE%\\.shorts-pipeline\\youtube_token.json (refreshed automatically; delete it to sign in again)."""
@@ -87,20 +91,23 @@ def sha(path):
     return hashlib.sha1(Path(path).read_bytes()).hexdigest()[:12]
 
 
-def recent_uploads(yt, n=15):
+def recent_uploads(yt, n=25):
     up = yt.channels().list(part='contentDetails', mine=True).execute()['items'][0]['contentDetails']['relatedPlaylists']['uploads']
     ids = [i['contentDetails']['videoId'] for i in
            yt.playlistItems().list(part='contentDetails', playlistId=up, maxResults=n).execute()['items']]
-    return yt.videos().list(part='snippet,status,contentDetails', id=','.join(ids)).execute()['items'] if ids else []
+    return yt.videos().list(part='snippet,status,contentDetails,fileDetails', id=','.join(ids)).execute()['items'] if ids else []
 
 
 def find_upload(yt, mp4, taken):
-    """The upload of this file: made after the render, same length (±2 s), not used for another lesson. Newest wins."""
+    """The upload of this file: made after the render, same length (±2 s), not used for another lesson.
+    Several Shorts of one lesson can have the same length, so the closest file size wins (the YouTube app usually
+    uploads the file unchanged: same size to the byte)."""
     length, made = probe(mp4)['duration'], datetime.fromtimestamp(mp4.stat().st_mtime, timezone.utc) - timedelta(minutes=10)
     hits = [v for v in recent_uploads(yt) if v['id'] not in taken
             and abs(seconds(v['contentDetails']['duration']) - length) <= 2
             and datetime.fromisoformat(v['snippet']['publishedAt'].replace('Z', '+00:00')) >= made]
-    return max(hits, key=lambda v: v['snippet']['publishedAt']) if hits else None
+    size = mp4.stat().st_size
+    return min(hits, key=lambda v: abs(int(v.get('fileDetails', {}).get('fileSize', 0)) - size)) if hits else None
 
 
 def taken_elsewhere(out):
@@ -129,6 +136,7 @@ def wanted(data, settings):
         'thumbnail': f"thumbnail-{settings.get('thumbnail', 1)}.jpg",
         'playlist': data.get('playlist'),
         'comment': data.get('pinned_comment', '').strip(),
+        'public': False,
     }
 
 
@@ -140,12 +148,17 @@ def apply_video(yt, vid, out, mp4, w, rec, dry):
 
     # 1. texts, category, languages, audience, declarations, publish time (one update = 50 units)
     want_sn = {k: w[k] for k in ('title', 'description', 'tags', 'categoryId', 'defaultLanguage', 'defaultAudioLanguage')}
-    diff = [k for k, val in want_sn.items() if sn.get(k) != val]
+    same = lambda k, val: sorted(sn.get(k) or []) == sorted(val) if k == 'tags' else sn.get(k) == val   # YouTube sorts tags
+    diff = [k for k, val in want_sn.items() if not same(k, val)]
     new_st = {k: st[k] for k in ('privacyStatus', 'embeddable', 'license', 'publicStatsViewable') if k in st}
     if st.get('publishAt'):
         new_st['publishAt'] = st['publishAt']
     new_st.update(selfDeclaredMadeForKids=w['madeForKids'], containsSyntheticMedia=w['ai'])
-    if w['publish'] and st['privacyStatus'] == 'private':
+    if w['public'] and st['privacyStatus'] != 'public':
+        new_st['privacyStatus'] = 'public'
+        new_st.pop('publishAt', None)
+        diff.append('public')
+    if w['publish'] and new_st['privacyStatus'] == 'private':
         at = datetime.strptime(w['publish'], '%Y-%m-%d %H:%M').replace(tzinfo=ISTANBUL)
         if at > datetime.now(timezone.utc) + timedelta(minutes=15):
             new_st['publishAt'] = at.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -200,9 +213,12 @@ def apply_video(yt, vid, out, mp4, w, rec, dry):
         elif yt.playlistItems().list(part='id', playlistId=pl['id'], videoId=vid).execute()['items']:
             rec['playlist'] = pl['id']
         else:
+            body = {'playlistId': pl['id'], 'resourceId': {'kind': 'youtube#video', 'videoId': vid}}
+            if w.get('before'):           # Shorts keep their order: after the lower-numbered ones already in the list
+                items = yt.playlistItems().list(part='contentDetails', playlistId=pl['id'], maxResults=50).execute()['items']
+                body['position'] = sum(i['contentDetails']['videoId'] in w['before'] for i in items)
             if not dry:
-                yt.playlistItems().insert(part='snippet', body={'snippet': {
-                    'playlistId': pl['id'], 'resourceId': {'kind': 'youtube#video', 'videoId': vid}}}).execute()
+                yt.playlistItems().insert(part='snippet', body={'snippet': body}).execute()
                 rec['playlist'] = pl['id']
             done.append(f"playlist {pl['snippet']['title']}")
 
@@ -231,8 +247,9 @@ def apply_video(yt, vid, out, mp4, w, rec, dry):
     return done, waiting, problems
 
 
-def apply(lesson, video_id=None, dry=False, log=print):
-    """Fill in the YouTube details for a finished lesson (the video and, if there is one, the Short).
+def apply(lesson, video_id=None, dry=False, log=print, public=False):
+    """Fill in the YouTube details for a finished lesson (the video and its Shorts).
+    public: also make them public (the video, and each Short once its details are set).
     Returns (summary, complete), or None while no matching upload exists yet."""
     lesson = Path(lesson)
     out = next(o for o in (lesson / 'Output (Easy)', lesson / 'Output') if (o / 'youtube.json').exists())
@@ -240,17 +257,24 @@ def apply(lesson, video_id=None, dry=False, log=print):
     sp = lesson / 'settings.json'
     settings = json.loads(sp.read_text(encoding='utf-8')) if sp.exists() else {}
     applied = json.loads((out / APPLIED).read_text(encoding='utf-8')) if (out / APPLIED).exists() else {}
+    public = public or bool(settings.get('public'))
     yt = api()
     lines, complete = [], True
     is_short = lambda f: re.search(r'-short(-\d+)?$', f.stem)
-    for mp4 in sorted(out.glob('*.mp4'), key=lambda f: (bool(is_short(f)), f.name)):      # the video first
+    num = lambda f: int(m.group(1)[1:]) if (m := is_short(f)) and m.group(1) else 0
+    main = None
+    for mp4 in sorted(out.glob('*.mp4'), key=lambda f: (bool(is_short(f)), num(f), f.name)):      # the video first
         short = is_short(mp4)
         w = wanted(data, settings)
-        if short:                     # Shorts: own title + description, no custom thumbnail / playlist / comment
+        w['public'] = public
+        if short:                     # Shorts: own title + description + Shorts playlist, no custom thumbnail / comment
             own = next((s for s in data.get('shorts', []) if mp4.stem.endswith('-' + s['version'])), {})
-            w.update(title=(own.get('title') or data.get('short_title') or w['title'])[:100],
-                     description=own.get('description') or data['descriptions'][-1], thumbnail=None, playlist=None,
-                     comment='')
+            desc = own.get('description') or data['descriptions'][-1]
+            if main:                  # the full lesson as a link, once the video's ID is known
+                desc = desc.replace('Dersin tamamı kanalda.', f'Dersin tamamı: https://youtu.be/{main}')
+            w.update(title=(own.get('title') or data.get('short_title') or w['title'])[:100], description=desc,
+                     thumbnail=None, playlist=settings.get('shorts_playlist') or data.get('shorts_playlist'), comment='',
+                     before={r['id'] for f, r in applied.items() if is_short(Path(f)) and num(Path(f)) < num(mp4)})
         rec = applied.get(mp4.name)
         if video_id and not short:
             rec = rec if rec and rec['id'] == video_id else {'id': video_id}
@@ -262,13 +286,16 @@ def apply(lesson, video_id=None, dry=False, log=print):
                 continue
             rec = {'id': v['id']}
             log(f"{mp4.name} → {v['id']} ({v['snippet']['title']}, {v['status']['privacyStatus']})")
-        elif rec.get('complete') and not dry:
+        if not short:
+            main = rec['id']
+        if rec.get('complete') and not dry and (rec.get('public') or not public):
             lines.append(f"{'Short' if short else 'Video'} https://youtu.be/{rec['id']}: done")
             continue
         done, waiting, problems = apply_video(yt, rec['id'], out, mp4, w, rec, dry)
         if not dry:
             rec['updated'] = datetime.now(ISTANBUL).strftime('%Y-%m-%d %H:%M')
             rec['complete'] = not waiting
+            rec['public'] = rec.get('public') or public
             applied[mp4.name] = rec
             (out / APPLIED).write_text(json.dumps(applied, ensure_ascii=False, indent=1), encoding='utf-8')
         complete &= not waiting
@@ -294,8 +321,9 @@ if __name__ == '__main__':
     ap.add_argument('lesson', nargs='?')
     ap.add_argument('--video', help='video ID (skip the search)')
     ap.add_argument('--dry-run', action='store_true', help='show what would change, change nothing')
+    ap.add_argument('--public', action='store_true', help='also make the video and its Shorts public')
     a = ap.parse_args()
     if a.cmd == 'apply':
-        apply(a.lesson, a.video, a.dry_run)
+        apply(a.lesson, a.video, a.dry_run, public=a.public)
     else:
         check(api(interactive=a.cmd == 'login'))
