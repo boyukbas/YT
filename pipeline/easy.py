@@ -406,7 +406,10 @@ def youtube_step(lesson):
     try:
         r = Y.apply(lesson, log=st.log)
     except Exception as e:
-        r = (f'YouTube step failed: {type(e).__name__}: {e}'[:300], False)
+        if 'quota' in str(e):
+            r = ("YouTube's daily API limit is used up; the watcher tries again after it resets (10:00 Istanbul).", False)
+        else:
+            r = (f'YouTube step failed: {type(e).__name__}: {e}'[:300], False)
     if r and (r[0] != s.get('youtube') or r[1]):
         st.set('done', s.get('step', ''), youtube=r[0], youtube_complete=r[1])
 

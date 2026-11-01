@@ -72,13 +72,14 @@ D:\YT\work\venv\Scripts\python D:\code\YT\pipeline\instagram.py token
 Paste the token (it isn't shown) → Enter. It prints `Instagram: @almancadilatolyesi (MEDIA_CREATOR), …`.
 The PC refreshes the token every week (it's valid 60 days and gets extended each time).
 
-## 5. Turn on automatic posting
+## 5. Automatic posting (already on)
 
 - **How the video gets to Instagram:** Meta downloads it from a link. While one Reel is posted, the PC opens a
-  temporary, random Cloudflare address to that one video + cover and closes it right after (about 1 minute a day).
-  Claude Code needs your OK for this (it blocks opening an inbound tunnel by default).
-- **The watcher:** `easy.py watch --once` every 10 minutes in Task Scheduler (also needed for YouTube and new lessons).
-  It posts the next Reel after 20:00 if none went out in the last 20 hours, oldest lesson first, in Short order.
+  temporary, random Cloudflare address to that one video + cover and closes it right after (1–3 minutes a day).
+  Only the exact file addresses answer; the address dies when it closes. (Allowed and tested 2026-11-02.)
+- **The watcher:** Task Scheduler task "YT Easy mode watcher" runs every 10 minutes (also does YouTube and new
+  lessons). It posts the next Reel after 20:00 if none went out in the last 20 hours, oldest lesson first, in Short
+  order. Nothing is posted until step 4 is done.
 
 Check any time: `instagram.py check` (account, posts used of the 24 h limit), `instagram.md` in the lesson's Output
 shows which Reels went out with their links, and `D:\YT\easy-work\instagram.log` has every post or problem.

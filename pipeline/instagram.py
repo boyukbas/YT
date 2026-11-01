@@ -185,8 +185,12 @@ def prepare(lesson, log=print):
 # ---------- posting ----------
 
 class Quiet(http.server.SimpleHTTPRequestHandler):
+    """Serves the shared files only: no folder listings (they would reveal the random path)."""
     def log_message(self, *a):
         pass
+
+    def list_directory(self, path):
+        self.send_error(404)
 
 
 class Share:
@@ -214,7 +218,7 @@ class Share:
                 if m and not found:
                     found.append(m.group(0))
         threading.Thread(target=read, daemon=True).start()
-        end = time.time() + 90
+        end = time.time() + 180                      # it took 73 s once (2026-11-02)
         while not found and time.time() < end:
             time.sleep(0.5)
         if not found:

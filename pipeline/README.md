@@ -61,6 +61,9 @@ such parts get one condensed Short.
 D:\YT\work\venv\Scripts\python -I easy.py run "J:\My Drive\SINEM-YouTube\<lesson>"
 D:\YT\work\venv\Scripts\python -I easy.py watch "J:\My Drive\SINEM-YouTube" --once     # Task Scheduler, every 10 min
 ```
+Task Scheduler: **"YT Easy mode watcher"** (registered 2026-11-02) runs `watch.cmd` every 10 minutes and at logon, hidden
+(`conhost --headless`), only while the user is logged on (the Drive mount `J:` needs the session); output in
+`D:\YT\easy-work\watch.log`. Overlapping runs are skipped (Task Scheduler + `watch.lock`).
 A lesson is picked up when its clips haven't changed for 10 minutes and differ from the last run.
 **Drive gotcha:** ffmpeg misreads looped images straight from the Drive mount (`J:`) ("Failed to reallocate parser
 buffer", then it stalls), so `_channel` is mirrored to `D:\YT\easy-work\_channel` and rendered from there.
