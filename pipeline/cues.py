@@ -42,9 +42,10 @@ Return ONE JSON object, nothing else:
                                         // separate Shorts, each a part that makes sense ON ITS OWN (a viewer who never
                                         // saw the lesson understands it): one question/rule/contrast with its examples.
                                         // 20-90 s each (cuts included), start at the start of a sentence and end after
-                                        // a complete thought; skip parts that only lead somewhere else. As many as the
-                                        // lesson has good ones (typically one per numbered part); [] for lessons under
-                                        // ~60 s. "cuts": extra ranges to leave out of that Short (side remarks,
+                                        // a complete thought; skip parts that only lead somewhere else. At most
+                                        // {shorts_max}: only the strongest (a clear hook a stranger would stop for),
+                                        // best first; they are published a day or more apart, so fewer good ones beat
+                                        // many. [] for lessons under ~60 s. "cuts": extra ranges to leave out of that Short (side remarks,
                                         // "next part" transitions). "idea": the hook shown at its start (<= 26
                                         // characters, Turkish or the German phrase itself; may end with "?").
  "next": "dass ile yan cümle",          // the topic she announces for the next video ("" if none)
@@ -89,6 +90,7 @@ def build_prompt(clips, work, profile):
         tx = {p: json.loads((work / 'tx' / f'{c["id"]}.{p}.json').read_text(encoding='utf-8')) for p in ('tr', 'de', 'auto')}
         blocks.append(clip_block(c, tx))
     return PROMPT.format(channel=profile['name'], primary_name='Turkish', n=len(clips), short_max=170,
+                         shorts_max=profile.get('shorts_max', 3),
                          terms=', '.join(profile.get('terms', [])) or '-', clips='\n\n'.join(blocks))
 
 

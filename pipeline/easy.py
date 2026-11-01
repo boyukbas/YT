@@ -2,7 +2,8 @@
 
   python easy.py run  "J:\\My Drive\\SINEM-YouTube\\<lesson>"      process one lesson now
   python easy.py watch "J:\\My Drive\\SINEM-YouTube" [--once]      look for new lessons (Task Scheduler: --once every 10 min)
-                                                                   and fill in YouTube details of uploaded ones (youtube.py)
+                                                                   and fill in YouTube details of uploaded ones (youtube.py),
+                                                                   and post one Reel a day on Instagram (instagram.py)
 
 Drive layout:  SINEM-YouTube/_channel/channel.json (+ logo, banner, fonts, music/)  ·  SINEM-YouTube/<lesson>/*.mp4|mov
 Results go to <lesson>/Output/ (or "Output (Easy)" when an Output folder made elsewhere already exists).
@@ -201,7 +202,10 @@ def process(lesson, root, log_only=False):
     settings = json.loads((lesson / 'settings.json').read_text(encoding='utf-8')) if (lesson / 'settings.json').exists() else {}
     ideas = {}
     if settings.get('short', profile.get('short', True)) and (landscape or main[2] > SHORT_MAX):
-        parts = [(f'short-{i}', C.part(ans, sh), sh.get('idea', '')) for i, sh in enumerate(ans.get('shorts', []), 1)]
+        cap = int(settings.get('shorts_max', profile.get('shorts_max', 3)))
+        if len(ans.get('shorts', [])) > cap:        # few good Shorts, published days apart, don't flood subscribers
+            st.log(f"WARNING: {len(ans['shorts'])} Shorts proposed, keeping the first {cap} (shorts_max)")
+        parts = [(f'short-{i}', C.part(ans, sh), sh.get('idea', '')) for i, sh in enumerate(ans.get('shorts', [])[:cap], 1)]
         if not parts:
             parts = [('short', ans if main[2] > SHORT_MAX else None, '')]
         for vname, a, idea in parts:
@@ -335,6 +339,10 @@ def process(lesson, root, log_only=False):
     (out / 'terms.txt').write_text('\n'.join(terms) + '\n', encoding='utf-8')
     data['notes'] = report['notes'] + data.get('notes', [])
     T.write(out, name, data, profile, files)
+    if any(v[2] for v in specs_info[1:]):                    # Instagram: a cover + caption per Short (posted by the watcher)
+        import instagram
+        instagram.make_covers(out, data, {c['n']: c['file'] for c in cand}, assets['logo'], profile['palette'], st.log)
+        instagram.write_md(lesson, out, data)
     (work / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding='utf-8')
     covered = sum(len(q['face_covered']) for q in report['qa'].values())
     st.set('done', f'{", ".join(f for f in files if f.endswith(".mp4"))}' +
@@ -373,6 +381,7 @@ def watch(root, once):
                     safe_process(lesson, root)
                 if lesson.is_dir() and not lesson.name.startswith(('_', '.')):
                     youtube_step(lesson)
+            instagram_step(root)
             if once:
                 break
             time.sleep(600)
@@ -400,6 +409,18 @@ def youtube_step(lesson):
         r = (f'YouTube step failed: {type(e).__name__}: {e}'[:300], False)
     if r and (r[0] != s.get('youtube') or r[1]):
         st.set('done', s.get('step', ''), youtube=r[0], youtube_complete=r[1])
+
+
+def instagram_step(root):
+    """One Reel a day on Instagram (instagram.py), once its token is set up. Problems go to the watcher log."""
+    import instagram
+    try:
+        r = instagram.daily(root)
+    except Exception as e:
+        r = f'Instagram step failed: {type(e).__name__}: {e}'[:300]
+    if r:
+        with open(WORK_ROOT / 'instagram.log', 'a', encoding='utf-8') as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M')} {r}\n")
 
 
 def safe_process(lesson, root):

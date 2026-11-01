@@ -11,7 +11,9 @@ checked first and done once (record in Output/youtube-applied.json). The API can
 or make a premiere; those stay in Studio and are listed in STATUS.
 Choices in <lesson>/settings.json: {"title": 1-3, "description": 1-2, "thumbnail": 1-3,
 "publish": "2026-11-05 21:15" (Istanbul time; scheduled publish of a private video), "paid": false, "ai": false,
-"public": true (make the video and every Short public once filled in; same as --public),
+"public": true (make the main video public once filled in; same as --public),
+"shorts_time": "19:00", "shorts_every": 1 (Shorts are never published together: each private Short is scheduled
+for the next free day across all lessons, at this Istanbul time; upload Shorts as Private),
 "shorts_playlist": "<name>" (an existing playlist; the Shorts go in it in their order)}.
 Quota: 10,000 units a day; a Short with two caption tracks costs ~900, so a lesson with many Shorts can need two days
 (it resumes where it stopped). The quota resets at midnight Pacific time (10:00 Istanbul).
@@ -38,6 +40,8 @@ SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
 CHANNEL_ID = 'UCivLHbvcLIKKGkLjnOrMaHA'                  # Almanca Dil Atölyesi (@sinembb)
 ISTANBUL = timezone(timedelta(hours=3))                  # Turkey has no daylight saving time
 APPLIED = 'youtube-applied.json'
+SHORTS_TIME = '19:00'                                    # Istanbul; Shorts go public one a day at this time
+SHORTS_WARN = 3                                          # more Shorts than this per lesson → a warning in STATUS
 MANUAL = ['pin the comment', 'end screen (video + subscribe on the right half, last 10 s)']
 
 
@@ -119,6 +123,25 @@ def taken_elsewhere(out):
     return ids
 
 
+def next_slot(out, applied, settings, planned=()):
+    """When the next Short goes public: one Short a day (settings "shorts_every" days apart) at "shorts_time"
+    (Istanbul), after every Short already out or scheduled in any lesson, and never in the past.
+    Subscribers get a notification per video, so Shorts are spread out instead of published together."""
+    recs = list(applied.items())
+    for p in out.parent.parent.glob(f'*/*/{APPLIED}'):
+        if p.parent != out:
+            recs += json.loads(p.read_text(encoding='utf-8')).items()
+    times = [datetime.fromisoformat(r['publish_at'].replace('Z', '+00:00')) for f, r in recs
+             if re.search(r'-short(-\d+)?\.mp4$', f) and r.get('publish_at')] + list(planned)
+    hh, mm = map(int, settings.get('shorts_time', SHORTS_TIME).split(':'))
+    now = datetime.now(ISTANBUL)
+    day = max(times).astimezone(ISTANBUL).date() + timedelta(days=int(settings.get('shorts_every', 1))) if times else now.date()
+    at = datetime(day.year, day.month, day.day, hh, mm, tzinfo=ISTANBUL)
+    while at < now + timedelta(minutes=30):
+        at += timedelta(days=1)
+    return at
+
+
 def wanted(data, settings):
     """What the video should look like, from youtube.json + the lesson's choices."""
     pick = lambda key, lst: lst[min(max(int(settings.get(key, 1)), 1), len(lst)) - 1]
@@ -172,6 +195,11 @@ def apply_video(yt, vid, out, mp4, w, rec, dry):
         diff.append('publishAt')
     if v.get('paidProductPlacementDetails', {}).get('hasPaidProductPlacement') != w['paid']:
         diff.append('paid')
+    if new_st['privacyStatus'] == 'public':            # remembered for the Shorts schedule (one a day)
+        rec['publish_at'] = sn['publishedAt'] if st['privacyStatus'] == 'public' else \
+            datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    elif new_st.get('publishAt'):
+        rec['publish_at'] = new_st['publishAt']
     if diff:
         if not dry:
             yt.videos().update(part='snippet,status,paidProductPlacementDetails', body={
@@ -262,7 +290,11 @@ def apply(lesson, video_id=None, dry=False, log=print, public=False):
     lines, complete = [], True
     is_short = lambda f: re.search(r'-short(-\d+)?$', f.stem)
     num = lambda f: int(m.group(1)[1:]) if (m := is_short(f)) and m.group(1) else 0
-    main = None
+    main, planned = None, []
+    n_shorts = sum(bool(is_short(f)) for f in out.glob('*.mp4'))
+    if n_shorts > SHORTS_WARN:
+        lines.append(f'WARNING: {n_shorts} Shorts in one lesson; they go public one a day, so the last one is '
+                     f'{n_shorts} days away. Next time keep it to {SHORTS_WARN} or fewer (shorts_max)')
     for mp4 in sorted(out.glob('*.mp4'), key=lambda f: (bool(is_short(f)), num(f), f.name)):      # the video first
         short = is_short(mp4)
         w = wanted(data, settings)
@@ -288,10 +320,17 @@ def apply(lesson, video_id=None, dry=False, log=print, public=False):
             log(f"{mp4.name} → {v['id']} ({v['snippet']['title']}, {v['status']['privacyStatus']})")
         if not short:
             main = rec['id']
-        if rec.get('complete') and not dry and (rec.get('public') or not public):
+        else:                         # Shorts never go public all at once: each gets the next free day
+            w['public'] = False
+            w['publish'] = None if rec.get('publish_at') else next_slot(out, applied, settings, planned).strftime('%Y-%m-%d %H:%M')
+        if rec.get('complete') and not dry and (rec.get('public') or not public or short):
             lines.append(f"{'Short' if short else 'Video'} https://youtu.be/{rec['id']}: done")
             continue
         done, waiting, problems = apply_video(yt, rec['id'], out, mp4, w, rec, dry)
+        if short and rec.get('publish_at'):
+            planned.append(datetime.fromisoformat(rec['publish_at'].replace('Z', '+00:00')))
+            if 'publishAt' in ' '.join(done):
+                done.append('public on ' + planned[-1].astimezone(ISTANBUL).strftime('%a %d %b %H:%M'))
         if not dry:
             rec['updated'] = datetime.now(ISTANBUL).strftime('%Y-%m-%d %H:%M')
             rec['complete'] = not waiting
@@ -324,6 +363,11 @@ if __name__ == '__main__':
     ap.add_argument('--public', action='store_true', help='also make the video and its Shorts public')
     a = ap.parse_args()
     if a.cmd == 'apply':
-        apply(a.lesson, a.video, a.dry_run, public=a.public)
+        try:
+            apply(a.lesson, a.video, a.dry_run, public=a.public)
+        except HttpError as e:
+            if 'quotaExceeded' not in str(e):
+                raise
+            sys.exit('YouTube API quota used up for today; run again after 10:00 Istanbul time (done parts are kept).')
     else:
         check(api(interactive=a.cmd == 'login'))

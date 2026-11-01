@@ -15,7 +15,9 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   **Shelved**: sideloading failed (Apple login / anisette). Builds still pass in CI; don't invest further unless asked.
 - `pipeline/` — **Easy mode on the home PC** (Python): a lesson folder in Google Drive (`J:\My Drive\SINEM-YouTube\<lesson>`)
   in → finished video, caption tracks, 3 thumbnails, YouTube texts out. See `pipeline/README.md`. Decided 2026-10-31:
-  Sinem's channel only; the PC is the worker; she uploads in the YouTube app and an app step fills in the details (not built yet).
+  Sinem's channel only; the PC is the worker; she uploads in the YouTube app and `youtube.py` fills in the details.
+  Max 3 Shorts per lesson, published one a day (19:00); Instagram Reels one a day (20:00) via `instagram.py`
+  (setup: `pipeline/instagram-setup.md`).
 - The iOS workflow ignores `docs/**`, `pipeline/**`, `README.md` and `CLAUDE.md` changes.
 
 ## Channel style (same everywhere: video, thumbnails, app)

@@ -84,8 +84,8 @@ def make(photo, words, question, badge, logo, out, vertical=False, cut=None, pal
     if vertical:
         W, H = 1080, 1920
         canvas = background(W, H, (40, 800, 1040, 1900))
-        place_person(canvas, cut, 1080, -80 if mirror else (W - int(cut.width * 1080 / cut.height)) // 2, H - 1080 + 40)
-        left, top, max_w = 70, 190, 940
+        place_person(canvas, cut, 1080, -80 if mirror else (W - int(cut.width * 1080 / cut.height)) // 2, H - 1080 + 110)
+        left, top, max_w = 70, 250, 940          # badge + words inside the middle 3:4 (Instagram's profile grid)
     else:
         W, H = 1280, 720
         canvas = background(W, H, (700, 40, 1300, 760))
@@ -108,7 +108,7 @@ def make(photo, words, question, badge, logo, out, vertical=False, cut=None, pal
     tb = d.textbbox((0, 0), badge, font=f)
     d.rounded_rectangle((left + 4, top, left + 4 + tb[2] + 40 * k, top + 66 * k), radius=16 * k, fill=RED)
     d.text((left + 4 + 20 * k, top + 8 * k), badge, font=f, fill=WHITE)
-    size = min(fit(d, w, max_w, int((150 if len(words) <= 2 else 128) * k)) for w in words)
+    size = min(fit(d, w, max_w, int((150 if len(words) <= 2 else 128) * (1.2 if vertical else 1))) for w in words)
     qsize = fit(d, question, max_w, int(84 * k))
     f_k = ImageFont.truetype(F_BLACK, size)
     block = sum(d.textbbox((0, 0), w, font=f_k, stroke_width=10)[3] - 14 for w in words) + 14 \
@@ -119,7 +119,7 @@ def make(photo, words, question, badge, logo, out, vertical=False, cut=None, pal
         y = text((left, y), w, size, YELLOW, 10)[3] - 14
     text((left + 6, y + 14), question, qsize, WHITE, 9)
     lg = Image.open(logo).convert('RGBA').resize((96, 96), Image.LANCZOS)
-    canvas.alpha_composite(lg, (W - 96 - 28, (H - 96 - 34) if not vertical else 190))
+    canvas.alpha_composite(lg, (W - 96 - 28, (H - 96 - 34) if not vertical else top))
     img = canvas.convert('RGB')
     img.save(out, quality=92)
     img.resize((W // 4, H // 4), Image.LANCZOS).save(str(out).replace('.jpg', '_small_preview.jpg'), quality=90)

@@ -22,11 +22,14 @@ Return ONE JSON object, nothing else:
 {{
  "titles": ["...", "...", "..."],           // 3 different angles; <= 70 characters; main keyword early (what people search)
  "short_title": "...",                      // for a single version called "short" (<= 60 chars); "" otherwise
- "shorts": [{{"version": "short-1", "title": "...", "description": "..."}}],
+ "shorts": [{{"version": "short-1", "title": "...", "description": "...",
+             "cover": {{"frame": 3, "words": ["Vorname", "Nachname"], "question": "FARKI NE?"}}}}],
                                             // one per numbered Short version (short-1, short-2, ...): a title that
                                             // works without the lesson (<= 60 chars, a hook/question, main keyword
                                             // early, may end with #Shorts) and 2-4 lines of description (what it
-                                            // teaches, "Dersin tamamı kanalda", hashtags incl. #Shorts); [] if none
+                                            // teaches, "Dersin tamamı kanalda", hashtags incl. #Shorts); "cover": its
+                                            // own Reel cover, same rules as thumbnails, a different frame per Short
+                                            // where possible; [] if none
  "descriptions": ["...", "..."],            // 2 complete descriptions: hook question, what the video teaches, the
                                             // example sentences with Turkish translations, a tip, the chapters block
                                             // (if chapters), a short call to subscribe, hashtags last line (max 10)

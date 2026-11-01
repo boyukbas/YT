@@ -40,7 +40,12 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
    One-time sign-in: `python youtube.py login` (pick Almanca Dil Atölyesi). Test without changes:
    `python youtube.py apply "<lesson>" --dry-run`.
 
-**Shorts:** one per self-contained part of the lesson (Claude picks them in the subtitle step: `shorts` in the answer),
+**Instagram** (`instagram.py`, setup in `instagram-setup.md`): every Short also gets `cover-short-N.jpg` (its own photo +
+keywords, text inside the 3:4 grid crop) and a caption in `instagram.md`; the watcher posts one Reel a day after 20:00
+(Instagram API with Instagram Login; Meta fetches the file through a temporary Cloudflare quick tunnel).
+
+**Shorts:** at most 3 (`shorts_max` in channel.json / settings.json), the strongest self-contained parts (Claude picks
+them in the subtitle step: `shorts` in the answer); they go public one a day at 19:00 (youtube.py schedules them),
 `<lesson>-short-1.mp4`, `-short-2.mp4`, … each with its own title and description in `youtube.md`. Lessons without
 such parts get one condensed Short.
 
