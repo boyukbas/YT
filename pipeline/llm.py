@@ -3,7 +3,7 @@
 Backends, first that works:
   api     ANTHROPIC_API_KEY, or a key in %USERPROFILE%\\.shorts-pipeline\\anthropic_key
   cli     `claude -p` (Claude Code on this PC). For unattended use run `claude setup-token` once and save the token it
-          prints in %USERPROFILE%\\.shorts-pipeline\\claude_token (normal Claude Code logins expire)
+          prints in %USERPROFILE%\\.shorts-pipeline\\claude_token (or claude-token.txt; normal Claude Code logins expire)
   manual  writes work/llm/<name>.prompt.md and stops; a Claude Code session writes <name>.answer.json
 Answers are cached in work/llm, so a re-run never asks twice.
 """
@@ -12,13 +12,15 @@ from pathlib import Path
 
 MODEL = os.environ.get('PIPELINE_MODEL', 'claude-opus-5-5')
 KEY_FILE = Path.home() / '.shorts-pipeline' / 'anthropic_key'
-CLI_TOKEN = Path.home() / '.shorts-pipeline' / 'claude_token'
+CLI_TOKENS = [Path.home() / '.shorts-pipeline' / n for n in ('claude_token', 'claude_token.txt', 'claude-token.txt')]
 
 
 def _cli_env():
     env = dict(os.environ)
-    if CLI_TOKEN.exists() and CLI_TOKEN.read_text().strip():
-        env['CLAUDE_CODE_OAUTH_TOKEN'] = CLI_TOKEN.read_text().strip()
+    for p in CLI_TOKENS:
+        if p.exists() and p.read_text(encoding='utf-8-sig').strip():
+            env['CLAUDE_CODE_OAUTH_TOKEN'] = p.read_text(encoding='utf-8-sig').strip()
+            break
     return env
 
 

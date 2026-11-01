@@ -52,7 +52,7 @@ such parts get one condensed Short.
 ## Claude backend (`llm.py`)
 - `ANTHROPIC_API_KEY` or `%USERPROFILE%\.shorts-pipeline\anthropic_key` → API
 - else `claude -p` (Claude Code). Normal logins expire, so for unattended runs: `claude setup-token` once and save the
-  printed token in `%USERPROFILE%\.shorts-pipeline\claude_token`
+  printed token in `%USERPROFILE%\.shorts-pipeline\claude_token` (or `claude-token.txt`; saved 2026-11-02)
 - else **manual**: the lesson's STATUS says "Waiting"; a Claude Code session answers `D:\YT\easy-work\<lesson>\llm\<step>.prompt.md`
   by writing `<step>.answer.json`, then run again. Answers are cached, so re-runs never ask twice.
 
