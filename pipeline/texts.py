@@ -21,7 +21,12 @@ keywords go big next to her). Prefer a natural smile, eyes open, looking at the 
 Return ONE JSON object, nothing else:
 {{
  "titles": ["...", "...", "..."],           // 3 different angles; <= 70 characters; main keyword early (what people search)
- "short_title": "...",                      // for the Short (<= 60 chars, may end with #Shorts); "" if no Short
+ "short_title": "...",                      // for a single version called "short" (<= 60 chars); "" otherwise
+ "shorts": [{{"version": "short-1", "title": "...", "description": "..."}}],
+                                            // one per numbered Short version (short-1, short-2, ...): a title that
+                                            // works without the lesson (<= 60 chars, a hook/question, main keyword
+                                            // early, may end with #Shorts) and 2-4 lines of description (what it
+                                            // teaches, "Dersin tamamı kanalda", hashtags incl. #Shorts); [] if none
  "descriptions": ["...", "..."],            // 2 complete descriptions: hook question, what the video teaches, the
                                             // example sentences with Turkish translations, a tip, the chapters block
                                             // (if chapters), a short call to subscribe, hashtags last line (max 10)
@@ -129,6 +134,9 @@ def write(out_dir, slug, data, profile, files):
     L += ['## Title options (pick one)'] + [f'{i}. {t}' for i, t in enumerate(data['titles'], 1)] + ['']
     if data.get('short_title'):
         L += ['## Short title', data['short_title'], '']
+    for sh in data.get('shorts', []):
+        f = next((k for k in files if k.endswith(f"-{sh['version']}.mp4")), sh['version'])
+        L += [f"## {sh['version'].replace('short', 'Short')} (`{f}`)", f"**{sh['title']}**", '', sh['description'], '']
     for i, d in enumerate(data['descriptions'], 1):
         L += [f'## Description option {i}', '', d, '']
     if data.get('chapters'):

@@ -22,9 +22,9 @@ Return ONE JSON object, nothing else:
    "cuts": [[12.1, 15.3, "false start, she repeats the sentence"]],   // ranges to remove inside the clip:
                                         // ONLY retakes/false starts/abandoned sentences and long hesitations.
                                         // NEVER cut deliberate repetitions: teachers say an example twice on purpose.
-   "short_cuts": [[72.2, 76.4, "side remark"]],   // ONLY if all clips together are longer than {short_max} s: extra
-                                        // ranges to leave out of the Short version so it ends up under {short_max} s
-                                        // (side remarks, second repetitions, "next video" teasers). [] otherwise.
+   "short_cuts": [],                    // not used when "shorts" (below) has entries; otherwise, ONLY if all clips
+                                        // together are longer than {short_max} s: extra ranges to leave out of the one
+                                        // condensed Short so it ends up under {short_max} s. [] otherwise.
    "cues": [{{"s": 1.27, "e": 4.10, "lang": "tr", "text": "...", "de": "German translation of this Turkish line"}},
             {{"s": 4.2, "e": 7.0, "lang": "de", "text": "Ich fange an, Deutsch zu lernen.", "tr": "Almanca öğrenmeye başlıyorum."}}]
  }}],
@@ -37,6 +37,16 @@ Return ONE JSON object, nothing else:
                                         // where each numbered part of the lesson starts (shown as a label and used
                                         // as chapters); short Turkish titles, max ~28 characters; "tag": the part
                                         // number, or "!" for an important note. [] if no parts.
+ "shorts": [{{"clip": "c1", "s": 52.3, "e": 94.0, "cuts": [[70.1, 74.6, "repeats the question"]],
+             "idea": "Vorname mı Nachname mı?"}}],
+                                        // separate Shorts, each a part that makes sense ON ITS OWN (a viewer who never
+                                        // saw the lesson understands it): one question/rule/contrast with its examples.
+                                        // 20-90 s each (cuts included), start at the start of a sentence and end after
+                                        // a complete thought; skip parts that only lead somewhere else. As many as the
+                                        // lesson has good ones (typically one per numbered part); [] for lessons under
+                                        // ~60 s. "cuts": extra ranges to leave out of that Short (side remarks,
+                                        // "next part" transitions). "idea": the hook shown at its start (<= 26
+                                        // characters, Turkish or the German phrase itself; may end with "?").
  "next": "dass ile yan cümle",          // the topic she announces for the next video ("" if none)
  "cta": {{"clip": "c4", "s": 16.3}},     // where she asks viewers to subscribe/like (null if she doesn't)
  "title_hint": "zu + Infinitiv",        // the lesson topic in a few words
@@ -80,6 +90,19 @@ def build_prompt(clips, work, profile):
         blocks.append(clip_block(c, tx))
     return PROMPT.format(channel=profile['name'], primary_name='Turkish', n=len(clips), short_max=170,
                          terms=', '.join(profile.get('terms', [])) or '-', clips='\n\n'.join(blocks))
+
+
+def part(ans, sh):
+    """The edit plan narrowed to one self-contained Short ({clip, s, e, cuts}); use with timeline(..., short=True)."""
+    a = json.loads(json.dumps(ans))
+    a['order'] = [sh['clip']]
+    p = next(c for c in a['clips'] if c['id'] == sh['clip'])
+    p['in'], p['out'] = max(p['in'], sh['s']), min(p['out'], sh['e'])
+    p['short_cuts'] = sh.get('cuts', [])
+    idea = sh.get('idea', '').strip()
+    if idea:      # a Short stands alone: its hook opens it instead of the lesson's numbered part labels
+        a['sections'] = [{'clip': sh['clip'], 's': p['in'] + 0.3, 'tag': '?' if idea.endswith('?') else '!', 'title': idea}]
+    return a
 
 
 def timeline(ans, clips, short=False):

@@ -2,7 +2,8 @@
 
 Backends, first that works:
   api     ANTHROPIC_API_KEY, or a key in %USERPROFILE%\\.shorts-pipeline\\anthropic_key
-  cli     `claude -p` (Claude Code on this PC; for unattended use run `claude setup-token` once)
+  cli     `claude -p` (Claude Code on this PC). For unattended use run `claude setup-token` once and save the token it
+          prints in %USERPROFILE%\\.shorts-pipeline\\claude_token (normal Claude Code logins expire)
   manual  writes work/llm/<name>.prompt.md and stops; a Claude Code session writes <name>.answer.json
 Answers are cached in work/llm, so a re-run never asks twice.
 """
@@ -11,6 +12,14 @@ from pathlib import Path
 
 MODEL = os.environ.get('PIPELINE_MODEL', 'claude-opus-5-5')
 KEY_FILE = Path.home() / '.shorts-pipeline' / 'anthropic_key'
+CLI_TOKEN = Path.home() / '.shorts-pipeline' / 'claude_token'
+
+
+def _cli_env():
+    env = dict(os.environ)
+    if CLI_TOKEN.exists() and CLI_TOKEN.read_text().strip():
+        env['CLAUDE_CODE_OAUTH_TOKEN'] = CLI_TOKEN.read_text().strip()
+    return env
 
 
 class Pending(Exception):
@@ -42,7 +51,7 @@ def _cli_ok():
     if _cli_state is None:
         try:
             r = subprocess.run(['claude', '-p', 'Reply with OK', '--output-format', 'json'], capture_output=True,
-                               text=True, encoding='utf-8', timeout=120)
+                               text=True, encoding='utf-8', timeout=120, env=_cli_env())
             _cli_state = not json.loads(r.stdout).get('is_error', True)
         except Exception:
             _cli_state = False
@@ -80,7 +89,7 @@ def ask(work, name, prompt, images=(), max_tokens=16000):
     else:
         full = prompt + ''.join(f'\n\nLook at this image with the Read tool: {p}' for p in images)
         r = subprocess.run(['claude', '-p', full, '--output-format', 'json', '--model', MODEL, '--allowedTools', 'Read'],
-                           capture_output=True, text=True, encoding='utf-8', timeout=1800, cwd=str(d))
+                           capture_output=True, text=True, encoding='utf-8', timeout=1800, cwd=str(d), env=_cli_env())
         out = json.loads(r.stdout)
         if out.get('is_error'):
             raise RuntimeError('claude -p: ' + str(out.get('result'))[:500])

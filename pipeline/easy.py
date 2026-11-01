@@ -2,6 +2,7 @@
 
   python easy.py run  "J:\\My Drive\\SINEM-YouTube\\<lesson>"      process one lesson now
   python easy.py watch "J:\\My Drive\\SINEM-YouTube" [--once]      look for new lessons (Task Scheduler: --once every 10 min)
+                                                                   and fill in YouTube details of uploaded ones (youtube.py)
 
 Drive layout:  SINEM-YouTube/_channel/channel.json (+ logo, banner, fonts, music/)  ·  SINEM-YouTube/<lesson>/*.mp4|mov
 Results go to <lesson>/Output/ (or "Output (Easy)" when an Output folder made elsewhere already exists).
@@ -17,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import chips
 import cues as C
 import layout as L
+import light
 import llm
 import render as R
 import speech
@@ -105,10 +107,15 @@ def choose_banner_y(spec, cues, blks, sides, faces, b0):
     """Top edge for the subscribe banner during [b0, end]: away from her face and the subtitles on screen."""
     bh = R.banner_height(spec)
     bw = R.banner_width(spec)
-    x0 = (spec.W - bw) / 2
-    cands = [int(spec.H * 0.95 - bh), int(spec.bottom - bh) if spec.short else int(0.6 * spec.H),
-             int(spec.top + 0.12 * spec.H), int(0.5 * spec.H - bh / 2)]
+    x0 = R.banner_x(spec)
+    if spec.studio:     # top of the panel: the section header makes room for it (the board and subtitles stay)
+        return int(0.03 * spec.H)
     late = [i for i, c in enumerate(cues) if c['e'] > b0]
+    if spec.short:      # above the subtitles (the bottom is YouTube's title area); nowhere free → no banner
+        above = min((L.text_box(spec, blks[i], sides[i])[1] for i in late), default=spec.bottom) - 16 - bh
+        cands = [int(above), int(spec.bottom - bh)]
+    else:
+        cands = [int(spec.H * 0.95 - bh), int(0.6 * spec.H), int(spec.top + 0.12 * spec.H), int(0.5 * spec.H - bh / 2)]
     for y in cands:
         box = (x0, y, x0 + bw, y + bh)
         if spec.logo and L.overlaps(box, spec.logo):
@@ -116,7 +123,7 @@ def choose_banner_y(spec, cues, blks, sides, faces, b0):
         if all(not L.overlaps(box, L.no_go(spec.to_canvas(faces[i]))) for i in late if faces[i]) and \
                 all(not L.overlaps(box, L.text_box(spec, blks[i], sides[i])) for i in late):
             return y
-    return cands[0]
+    return None if spec.short else cands[0]
 
 
 def qa_check(video, spec, cues, blks, sides, work, name):
@@ -165,7 +172,7 @@ def process(lesson, root, log_only=False):
     work.mkdir(parents=True, exist_ok=True)
     st = Status(out, work)
     videos = lesson_videos(lesson)
-    st.set('working', f'Starting: {len(videos)} video(s)', inputs=fingerprint(videos), error='')
+    st.set('working', f'Starting: {len(videos)} video(s)', inputs=fingerprint(videos), error='', youtube='', youtube_complete=False)
     name = slug(lesson.name)
 
     # 1. clips
@@ -183,17 +190,27 @@ def process(lesson, root, log_only=False):
     ans = llm.ask(work, 'cues', C.build_prompt(clips, work, profile))
     landscape = sum(c['width'] >= c['height'] for c in clips) * 2 >= len(clips)
     src = R.inter_size(1, 0) if landscape else R.inter_size(0, 1)
+    if profile.get('light', 'auto') == 'auto':                       # lighting measured on her face, per clip
+        st.set('working', 'Checking the lighting')
+        light.for_clips(clips, src, FACE_MODEL, lambda c, t: R.source_frame(c, t, src), work, st.log)
 
-    # versions: the main video, plus a Short (<= 3:00) when the main video isn't one itself
+    # versions: the main video, plus Shorts (<= 3:00) when the main video isn't one itself: one per self-contained part
+    # (ans["shorts"]), or else one condensed Short of the whole lesson
     main = C.timeline(ans, clips)
     versions = [('video', main, not landscape and main[2] <= SHORT_MAX)]
     settings = json.loads((lesson / 'settings.json').read_text(encoding='utf-8')) if (lesson / 'settings.json').exists() else {}
+    ideas = {}
     if settings.get('short', profile.get('short', True)) and (landscape or main[2] > SHORT_MAX):
-        short = main if main[2] <= SHORT_MAX else C.timeline(ans, clips, short=True)
-        if short[2] <= SHORT_MAX:
-            versions.append(('short', short, True))
-        else:
-            ans.setdefault('notes', []).append(f'No Short: even without side remarks the video is {ts(short[2])} (limit 3:00)')
+        parts = [(f'short-{i}', C.part(ans, sh), sh.get('idea', '')) for i, sh in enumerate(ans.get('shorts', []), 1)]
+        if not parts:
+            parts = [('short', ans if main[2] > SHORT_MAX else None, '')]
+        for vname, a, idea in parts:
+            short = C.timeline(a, clips, short=True) if a else main
+            if short[2] <= SHORT_MAX:
+                versions.append((vname, short, True))
+                ideas[vname] = idea
+            else:
+                ans.setdefault('notes', []).append(f'No {vname}: {ts(short[2])} is over the 3:00 limit')
     music = sorted(p for p in assets['music'].glob('*') if p.suffix.lower() in ('.mp3', '.m4a', '.wav', '.ogg'))         if profile.get('music', {}).get('enabled') and assets['music'].exists() else []
     track = str(music[int(hashlib.md5(name.encode()).hexdigest(), 16) % len(music)]) if music else None
     assets['banner'] = R.banner_png(assets['subscribe'], work)
@@ -211,7 +228,7 @@ def process(lesson, root, log_only=False):
             src_banner = R.find_banner(frame(segs[-1], max(0, segs[-1]['b'] - segs[-1]['a'] - 3)), assets['banner'])
             st.log(f'already in the recording: logo {src_logo}, subscribe banner {src_banner}')
         zoomed = plan_zoom(segs, frame, src, src_logo, src_banner) if profile.get('zoom_cuts', True) and not is_short else []
-        st.set('working', f'Cutting the {"Short" if vname == "short" else "video"}')
+        st.set('working', f'Cutting the {vname.replace("short", "Short") if vname.startswith("short") else "video"}')
         lst, inter = R.make_inter(segs, clips, work, src, st, tag)
         st.set('working', 'Finding the best place for the subtitles')
         faces = L.track_faces(segs, inter, cues, FACE_MODEL)
@@ -220,6 +237,8 @@ def process(lesson, root, log_only=False):
             side = src[1]
             cx = min(max(0, fx - side / 2), src[0] - side)
             spec = L.Spec(vname, 1080, 1920, short=True, src_w=src[0], src_h=src[1], crop=(cx, 0, side, side), pic=(0, 200, 1080, 1080))
+        elif not is_short and not landscape and profile.get('studio', True):    # vertical recording, long video
+            spec = L.studio(vname, *src)
         else:
             spec = L.Spec(vname, *src, short=is_short, src_w=src[0], src_h=src[1])
         visible = bool(src_logo) and spec.crop[0] <= src_logo[0] and src_logo[2] <= spec.crop[0] + spec.crop[2]
@@ -230,35 +249,51 @@ def process(lesson, root, log_only=False):
             spec.logo_opaque = True
             visible = False
         blks = L.blocks(cues, spec, assets['fonts'])
-        prefer = profile['subtitles']['short' if spec.short else 'long']
+        prefer = 'bottom' if spec.studio else profile['subtitles']['short' if spec.short else 'long']
         sides, rep = L.place(spec, faces, blks, prefer)
+        hook_row = spec.logo[3] + 14 if spec.short else 0            # Shorts: logo + hook title share the top row
+        if sides is None and spec.short and prefer == 'bottom' and L.lift(spec, faces, blks, hook_row):
+            sides, rep = L.place(spec, faces, blks, prefer)
+            rep['lifted'] = int(spec.lifted)
         if sides is None:
             sides = L.make_band(spec, blks, prefer)
             blks = L.blocks(cues, spec, assets['fonts'])
         report['placement'][vname] = rep
         L.save_plan(work / f'plan-{vname}.json', spec, sides, rep)
         ass = work / f'subs-{vname}.ass'
-        L.write_ass(ass, spec, cues, blks, sides, profile['colors'])
+        L.write_ass(ass, spec, cues, blks, sides, profile['colors'],
+                    L.board(spec, cues, sections, total, profile['colors'], assets['fonts']) if spec.studio else ())
         b0 = max(0.0, min(cta if cta is not None else total - 10, total - 6))
         by = None if src_banner else choose_banner_y(spec, cues, blks, sides, faces, b0)
-        banner = None if by is None else ((spec.W - R.banner_width(spec)) / 2, by, (spec.W + R.banner_width(spec)) / 2,
-                                          by + R.banner_height(spec))
+        banner = None if by is None else (R.banner_x(spec), by, R.banner_x(spec) + R.banner_width(spec), by + R.banner_height(spec))
         placed, taken = [], []
         items = [('label', k, x) for k, x in enumerate(sections)] + [('card', k, x) for k, x in enumerate(cards)]
         for kind, k, item in items:                                  # section labels first, then word cards
             png = work / f'{kind}-{vname}-{k}.png'
             draw = chips.draw_label if kind == 'label' else chips.draw
-            size = draw(item, profile['palette'], spec.H, png, assets['fonts'])
-            xy = chips.place(spec, size, item, cues, blks, sides, faces, banner and (banner, b0), taken)
+            if spec.short and kind == 'label' and ideas.get(vname):  # Shorts: the hook stays on top, next to the logo
+                lx = int(spec.logo[2]) + 20
+                size = chips.draw_label(item, profile['palette'], spec.H, png, assets['fonts'], maxw=spec.W - lx - 30)
+                item = {**item, 'e': total - 0.2}
+                xy = (lx, int((spec.logo[1] + spec.logo[3] - size[1]) / 2))
+            elif spec.studio and kind == 'label':                     # studio: the part's title stays on as a header
+                size = draw(item, profile['palette'], spec.H, png, assets['fonts'])
+                nxt = [x['s'] for x in sections if x['s'] > item['s']]
+                item = {**item, 'e': min((nxt[0] if nxt else total) - 0.2, b0 if banner else total)}
+                xy = (spec.panel[0], int(0.055 * spec.H)) if item['e'] - item['s'] > 1 else None
+            else:
+                fit = {'maxw': int(spec.pic[2]) - 48} if spec.studio and kind == 'card' else {}   # cards sit on her picture
+                size = draw(item, profile['palette'], spec.H, png, assets['fonts'], **fit)
+                xy = chips.place(spec, size, item, cues, blks, sides, faces, banner and (banner, b0), taken)
             if xy:
                 placed.append((png, *xy, item['s'], item['e']))
                 taken.append(((xy[0], xy[1], xy[0] + size[0], xy[1] + size[1]), item['s'], item['e']))
         rep['cards'] = f'{len(placed)}/{len(items)} (labels + word cards)'
         dst = out / f'{name}-{vname}.mp4'
-        st.set('working', f'Rendering the {"Short" if vname == "short" else "video"}')
+        st.set('working', f'Rendering the {vname.replace("short", "Short") if vname.startswith("short") else "video"}')
         outro = None if spec.short or not profile.get('outro', True) else             R.outro_png(spec, profile['palette'], assets, ans.get('next', ''), work / f'outro-{vname}.png')
         R.render(spec, R.with_outro(lst, outro, src) if outro else lst, ass, profile, assets, total, cta, not visible, by, work,
-                 dst, music=track, status=st, cards=placed, outro=bool(outro))
+                 dst, music=track, status=st, cards=placed, outro=bool(outro), outro_png=outro)
         qa, sheet = qa_check(dst, spec, cues, blks, sides, work, vname)
         report['qa'][vname] = qa
         files[dst.name] = f'{"Short" if spec.short else "video"} {spec.W}x{spec.H}, {ts(total + (10 if outro else 0))}' +             (' (last 10 s: end-screen card)' if outro else '')
@@ -276,7 +311,8 @@ def process(lesson, root, log_only=False):
     # 6. YouTube texts + thumbnails (Claude looks at candidate frames)
     st.set('working', 'Writing titles and descriptions')
     cand, sheet = T.candidates(segs, inter, FACE_MODEL, work)
-    vinfo = ', '.join(f'{v} ({"Short" if sh else "normal video"}, {ts(tl[2])})' for v, tl, sh in specs_info)
+    vinfo = ', '.join(f'{v} ({"Short" if sh else "normal video"}, {ts(tl[2])}' + (f', idea: {ideas[v]}' if ideas.get(v) else '') + ')'
+                      for v, tl, sh in specs_info)
     data = llm.ask(work, 'texts', T.build_prompt(profile, lesson.name, ans.get('title_hint', lesson.name), cues, vinfo, len(cand)),
                    images=[sheet])
     data['chapters'] = T.check_chapters(data.get('chapters', []), total) if not specs_info[0][2] else []
@@ -335,11 +371,35 @@ def watch(root, once):
             for lesson in sorted(Path(root).iterdir()):
                 if lesson.is_dir() and not lesson.name.startswith(('_', '.')) and changed(lesson):
                     safe_process(lesson, root)
+                if lesson.is_dir() and not lesson.name.startswith(('_', '.')):
+                    youtube_step(lesson)
             if once:
                 break
             time.sleep(600)
     finally:
         lock.unlink(missing_ok=True)
+
+
+def youtube_step(lesson):
+    """After Sinem uploads the finished video/Shorts in the YouTube app: fill in their details (youtube.py).
+    Runs for finished lessons until everything is set (the comment waits until the video is public)."""
+    out = output_dir(lesson)
+    p = out / OURS
+    if not p.exists():
+        return
+    s = json.loads(p.read_text(encoding='utf-8'))
+    if s.get('state') != 'done' or s.get('youtube_complete') or not (out / 'youtube.json').exists():
+        return
+    import youtube as Y
+    if not Y.TOKEN.exists():
+        return
+    st = Status(out, WORK_ROOT / slug(lesson.name))
+    try:
+        r = Y.apply(lesson, log=st.log)
+    except Exception as e:
+        r = (f'YouTube step failed: {type(e).__name__}: {e}'[:300], False)
+    if r and (r[0] != s.get('youtube') or r[1]):
+        st.set('done', s.get('step', ''), youtube=r[0], youtube_complete=r[1])
 
 
 def safe_process(lesson, root):
@@ -356,6 +416,7 @@ def safe_process(lesson, root):
 
 
 if __name__ == '__main__':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     ap = argparse.ArgumentParser()
     ap.add_argument('cmd', choices=['run', 'watch'])
     ap.add_argument('path')

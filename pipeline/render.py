@@ -16,10 +16,11 @@ def inter_size(src_w, src_h):
 
 def picture_filter(c, size, zoom=None):
     """Source clip → picture: SDR, 30 fps, picture size. Small/compressed sources get compression-noise cleanup before
-    and gentle sharpening after the upscale. zoom = [factor, x0, y0]: punch-in (crop at x0, y0 in picture pixels)."""
+    and gentle sharpening after the upscale; c['grade'] is the clip's lighting correction (light.py). zoom = [factor, x0, y0]: punch-in (crop at x0, y0 in picture pixels)."""
     W, H = size
     small = min(c['width'], c['height']) < 720
-    vf = (tonemap(c['transfer']) + ',' if c['hdr'] else '') + f'fps={FPS},' + ('hqdn3d=1.5:1.5:6:6,' if small else '') +         f'scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H}'
+    vf = (tonemap(c['transfer']) + ',' if c['hdr'] else '') + f'fps={FPS},' + ('hqdn3d=1.5:1.5:6:6,' if small else '') + \
+        (c['grade'] + ',' if c.get('grade') else '') + f'scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H}'
     if zoom and zoom[0] > 1:
         z, x0, y0 = zoom
         vf += f',crop={int(W / z)}:{int(H / z)}:{int(x0)}:{int(y0)},scale={W}:{H}:flags=lanczos'
@@ -108,16 +109,24 @@ def find_banner(fr, banner):
     gray = cv2.cvtColor(fr, cv2.COLOR_BGR2GRAY)
     H, W = gray.shape
     tpl = cv2.imread(str(banner), cv2.IMREAD_UNCHANGED)
-    best = 0.0
+    best = (0.0, None)
     for bw in range(int(0.15 * W), int(0.95 * W), max(4, int(0.02 * W))):
         bh = int(tpl.shape[0] * bw / tpl.shape[1])
         t = cv2.resize(tpl, (bw, bh), interpolation=cv2.INTER_AREA)
         if bh >= H:
             break
-        r = cv2.matchTemplate(gray, cv2.cvtColor(t[:, :, :3], cv2.COLOR_BGR2GRAY), cv2.TM_CCOEFF_NORMED,
-                              mask=(t[:, :, 3] > 128).astype(np.uint8) * 255)
-        best = max(best, float(np.nan_to_num(r).max()))
-    return best > 0.55          # real banner (re-encoded, scaled) ≈ 0.67; plain frames ≈ 0.3
+        r = np.nan_to_num(cv2.matchTemplate(gray, cv2.cvtColor(t[:, :, :3], cv2.COLOR_BGR2GRAY), cv2.TM_CCOEFF_NORMED,
+                                            mask=(t[:, :, 3] > 128).astype(np.uint8) * 255))
+        if r.max() > best[0]:
+            y, x = np.unravel_index(r.argmax(), r.shape)
+            best = (float(r.max()), (x, y, t))
+    if best[0] <= 0.55:         # real banner (re-encoded, scaled) ≈ 0.67; plain frames ≈ 0.3
+        return False
+    # shape alone is fooled by window frames: the red "ABONE OL" button must be there too (~18 % of the banner)
+    x, y, t = best[1]
+    px = fr[y:y + t.shape[0], x:x + t.shape[1]][t[:, :, 3] > 128].astype(int)
+    red = (px[:, 2] > 150) & (px[:, 1] < 90) & (px[:, 0] < 90)
+    return red.mean() > 0.08
 
 
 def banner_png(subscribe_png, work):
@@ -169,25 +178,101 @@ def measure_loudness(src, chain, work, name):
     return m
 
 
+def studio_assets(spec, palette, work):
+    """Pictures for the studio layout: channel background, a soft glow that drifts over it, the card's white frame +
+    shadow, and the rounded-corner mask for her picture. Returns (bg, glow, frame, mask, frame_pad)."""
+    from PIL import Image, ImageDraw, ImageFilter
+    W, H = spec.W, spec.H
+    px, py, pw, ph = (int(round(v)) for v in spec.pic)
+    d = work / 'studio'
+    d.mkdir(exist_ok=True)
+    rgb = lambda k: tuple(int(palette[k]['hex'].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4))
+    navy = rgb('navy')
+    bg = Image.new('RGB', (W, H), navy)
+    top = Image.new('RGB', (W, H), tuple(min(255, v + 14) for v in navy))
+    grad = Image.linear_gradient('L').resize((W, H)).point(lambda v: 255 - v)
+    bg = Image.composite(top, bg, grad)
+    dr = ImageDraw.Draw(bg, 'RGBA')
+    for x in range(-H, W, 46):                                   # faint diagonal texture
+        dr.line([(x, H), (x + H, 0)], fill=(255, 255, 255, 5), width=2)
+    for i, c in enumerate([(0, 0, 0), (221, 0, 0), (255, 206, 0)]):  # German flag stripe, as on the end card
+        dr.rectangle((0, H - 18 + i * 6, W, H - 12 + i * 6), fill=c)
+    dr.rectangle((spec.panel[0], int(0.165 * H), spec.panel[0] + 120, int(0.165 * H) + 6), fill=rgb('red'))   # accent under the header
+    bg.save(d / 'bg.png')
+    g = 1500
+    glow = Image.new('L', (g, g), 0)
+    ImageDraw.Draw(glow).ellipse((g * 0.2, g * 0.2, g * 0.8, g * 0.8), fill=70)
+    glow = glow.filter(ImageFilter.GaussianBlur(g * 0.12))
+    gl = Image.new('RGBA', (g, g), rgb('yellow') + (0,))
+    gl.putalpha(glow)
+    gl.save(d / 'glow.png')
+    pad, r = 40, 30
+    fr = Image.new('RGBA', (pw + 2 * pad, ph + 2 * pad), (0, 0, 0, 0))
+    sh = Image.new('L', fr.size, 0)
+    ImageDraw.Draw(sh).rounded_rectangle((pad, pad + 14, pad + pw, pad + ph + 14), radius=r, fill=150)
+    fr.putalpha(sh.filter(ImageFilter.GaussianBlur(18)))
+    ImageDraw.Draw(fr).rounded_rectangle((pad - 6, pad - 6, pad + pw + 6, pad + ph + 6), radius=r + 6, fill=(255, 255, 255, 255))
+    fr.save(d / 'frame.png')
+    mk = Image.new('L', (pw, ph), 0)
+    ImageDraw.Draw(mk).rounded_rectangle((0, 0, pw - 1, ph - 1), radius=r, fill=255)
+    mk.save(d / 'mask.png')
+    return d / 'bg.png', d / 'glow.png', d / 'frame.png', d / 'mask.png', pad
+
+
+def foot_png(spec, palette, work):
+    """Bottom strip of a lifted Short: transparent → navy over 160 px, then solid navy."""
+    from PIL import Image
+    navy = tuple(int(palette['navy']['hex'].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4))
+    h = int(spec.lifted) + 160
+    a = Image.linear_gradient('L').resize((1, 160)).resize((spec.W, 160))
+    alpha = Image.new('L', (spec.W, h), 255)
+    alpha.paste(a, (0, 0))
+    im = Image.new('RGBA', (spec.W, h), navy + (255,))
+    im.putalpha(alpha)
+    p = work / f'foot-{spec.name}.png'
+    im.save(p)
+    return p
+
+
 def render(spec, lst, ass, profile, assets, total, cta, add_logo, banner_y, work, out_path, music=None, status=None, cards=(),
-           outro=False, outro_len=10.0):
+           outro=False, outro_len=10.0, outro_png=None):
     """add_logo: draw the channel logo at spec.logo (False when the recording already shows it).
     banner_y: top edge of the subscribe banner (chosen away from her face and the subtitles).
-    cards: word cards [(png, x, y, start, end)]. outro: lst already ends with the end-screen card (outro_len s)."""
+    cards: word cards / labels [(png, x, y, start, end)], they fade and slide in.
+    outro: lst already ends with the end-screen card (outro_len s); the studio layout lays outro_png over the whole canvas."""
     W, H = spec.W, spec.H
     inputs = ['-f', 'concat', '-safe', '0', '-i', lst]
     fc = []
     cx, cy, cw, ch = spec.crop
     px, py, pw, ph = (int(round(v)) for v in spec.pic)
-    if (px, py, pw, ph) == (0, 0, W, H) and tuple(spec.crop) == (0, 0, *spec.src_size):
+    length = total + (outro_len if outro else 0)
+    n0 = 1
+    if spec.studio:
+        bg, glow, frame, mask, pad = studio_assets(spec, profile['palette'], work)
+        for p in (bg, glow, frame, mask):
+            inputs += ['-loop', '1', '-framerate', str(FPS), '-t', f'{length:.2f}', '-i', p]
+        g = 1500
+        fc.append(f"[1:v]format=rgba[bg0];[2:v]format=rgba[gl];"
+                  f"[bg0][gl]overlay=x='{W - g // 2 - 420}+260*sin(2*PI*t/23)':y='{-g // 2 + 120}+160*cos(2*PI*t/31)'[bg1];"
+                  f"[bg1][3:v]overlay={px - pad}:{py - pad}[bg2];"
+                  f"[0:v]crop={int(cw)}:{int(ch)}:{int(cx)}:{int(cy)},scale={pw}:{ph}:flags=lanczos,format=rgba[fv];"
+                  f"[4:v]format=gray[mk];[fv][mk]alphamerge[fa];[bg2][fa]overlay={px}:{py}:shortest=1[pic]")
+        n0 = 5
+    elif (px, py, pw, ph) == (0, 0, W, H) and tuple(spec.crop) == (0, 0, *spec.src_size):
         fc.append('[0:v]null[pic]')
     else:
         fc.append(f'[0:v]split[a][b];[a]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},gblur=sigma=40,'
                   f'eq=brightness=-0.06[bg];[b]crop={int(cw)}:{int(ch)}:{int(cx)}:{int(cy)},scale={pw}:{ph}:flags=lanczos[fg];'
-                  f'[bg][fg]overlay={px}:{py}[pic]')
+                  f'[bg][fg]overlay={px}:{py}[pic0]')
+        if spec.lifted:                                   # Shorts moved up: the strip below fades into the channel navy
+            inputs += ['-loop', '1', '-framerate', str(FPS), '-t', f'{length:.2f}', '-i', foot_png(spec, profile['palette'], work)]
+            fc.append(f'[pic0][1:v]overlay=0:{H - int(spec.lifted) - 160}:shortest=1[pic]')
+            n0 = 2
+        else:
+            fc[-1] = fc[-1].replace('[pic0]', '[pic]')
     esc = lambda p: Path(p).as_posix().replace(':', '\\:')      # D:/x → D\:/x inside the filter graph
     fc.append(f"[pic]subtitles='{esc(ass)}':fontsdir='{esc(assets['fonts'])}'[s]")
-    last, n = '[s]', 1
+    last, n = '[s]', n0
     if add_logo:
         lx, ly, lx1, _ = (int(v) for v in spec.logo)
         inputs += ['-loop', '1', '-framerate', str(FPS), '-i', assets['logo']]
@@ -197,18 +282,23 @@ def render(spec, lst, ass, profile, assets, total, cta, add_logo, banner_y, work
     for png, x, y, c0, c1 in cards:
         inputs += ['-loop', '1', '-framerate', str(FPS), '-t', f'{total:.2f}', '-i', png]
         fc.append(f'[{n}:v]format=rgba,fade=t=in:st={c0:.2f}:d=0.3:alpha=1,fade=t=out:st={c1 - 0.3:.2f}:d=0.3:alpha=1[k{n}];'
-                  f"{last}[k{n}]overlay={int(x)}:{int(y)}:enable='between(t,{c0 - 0.05:.2f},{c1:.2f})'[w{n}]")
+                  f"{last}[k{n}]overlay=x='{int(x)}+50*max(0,1-(t-{c0:.2f})/0.35)':y={int(y)}:"
+                  f"enable='between(t,{c0 - 0.05:.2f},{c1:.2f})'[w{n}]")
         last, n = f'[w{n}]', n + 1
     # subscribe banner from the call to action to the end
     b0 = max(0.0, min(cta if cta is not None else total - 10, total - 6))
     b1 = total - 0.9
-    if banner_y is None:                                  # the recording already shows one
-        fc.append(f'{last}format=yuv420p[vm]')
-    else:
+    if banner_y is not None:                              # (None: the recording already shows one)
         inputs += ['-loop', '1', '-framerate', str(FPS), '-i', assets['banner']]
         fc.append(f'[{n}:v]scale={banner_width(spec)}:-1,format=rgba,fade=t=in:st={b0:.2f}:d=0.4:alpha=1,fade=t=out:st={b1 - 0.4:.2f}:d=0.4:alpha=1[bn];'
-                  f"{last}[bn]overlay=(W-w)/2:{int(banner_y)}:shortest=1:enable='between(t,{b0 - 0.1:.2f},{b1:.2f})',format=yuv420p[vm]")
-        n += 1
+                  f"{last}[bn]overlay={int(banner_x(spec))}:{int(banner_y)}:shortest=1:enable='between(t,{b0 - 0.1:.2f},{b1:.2f})'[bb]")
+        last, n = '[bb]', n + 1
+    if spec.studio and outro and outro_png:               # end card over the whole canvas, not inside her picture card
+        inputs += ['-loop', '1', '-framerate', str(FPS), '-t', f'{length:.2f}', '-i', outro_png]
+        fc.append(f"[{n}:v]format=rgba,fade=t=in:st={total:.2f}:d=0.5:alpha=1[oc];"
+                  f"{last}[oc]overlay=0:0:enable='gte(t,{total - 0.01:.2f})'[oo]")
+        last, n = '[oo]', n + 1
+    fc.append(f'{last}format=yuv420p[vm]')
     # audio
     voice = clean_voice(lst, profile, work)
     chain = audio_chain(profile, cleaned=voice is not None)
@@ -232,7 +322,6 @@ def render(spec, lst, ass, profile, assets, total, cta, add_logo, banner_y, work
     else:
         fc.append(f'{a_in}{chain},{norm},aresample=48000[am]')
     fc.append('[vm]null[v];[am]anull[a]')
-    length = total + (outro_len if outro else 0)
     # same inputs as last time and the file is still there → nothing to do
     key = hashlib.md5(json.dumps([inputs, fc, ass.read_text(encoding='utf-8-sig'), Path(lst).read_text(encoding='utf-8'),
                                    (Path(lst).parent / 'segs.json').read_text(encoding='utf-8'), total], default=str).encode()).hexdigest()
@@ -308,6 +397,13 @@ def with_outro(lst, png, size, length=10.0):
 
 def banner_width(spec):
     return int(0.9 * spec.W) if spec.H > spec.W else int(0.45 * spec.W)
+
+
+def banner_x(spec):
+    """Left edge of the subscribe banner: centred, or centred in the text panel of the studio layout."""
+    if spec.studio:
+        return (spec.panel[0] + spec.panel[1] - banner_width(spec)) / 2
+    return (spec.W - banner_width(spec)) / 2
 
 
 def banner_height(spec):

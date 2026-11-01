@@ -31,10 +31,21 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
    a 10 s end-screen card ("Sıradaki ders").
 6. **Check**: every subtitle line is checked on the finished video for face overlap; loudness measured; frame sheet.
 7. **YouTube texts + thumbnails** (`texts.py`, `thumbnail.py`, Claude looks at candidate frames).
+8. **YouTube details** (`youtube.py`): Sinem uploads the finished files in the YouTube app; the watcher finds each upload
+   by its length and sets title, description, tags, category, languages, audience, paid-promotion/AI answers, thumbnail,
+   TR + DE captions, playlist (existing ones only), and posts the comment once the video is public. Record:
+   `Output/youtube-applied.json`; STATUS shows the links. Still in Studio: pin the comment, end screen.
+   One-time sign-in: `python youtube.py login` (pick Almanca Dil Atölyesi). Test without changes:
+   `python youtube.py apply "<lesson>" --dry-run`.
+
+**Shorts:** one per self-contained part of the lesson (Claude picks them in the subtitle step: `shorts` in the answer),
+`<lesson>-short-1.mp4`, `-short-2.mp4`, … each with its own title and description in `youtube.md`. Lessons without
+such parts get one condensed Short.
 
 ## Claude backend (`llm.py`)
 - `ANTHROPIC_API_KEY` or `%USERPROFILE%\.shorts-pipeline\anthropic_key` → API
-- else `claude -p` (Claude Code). For unattended runs log it in once: `claude setup-token`
+- else `claude -p` (Claude Code). Normal logins expire, so for unattended runs: `claude setup-token` once and save the
+  printed token in `%USERPROFILE%\.shorts-pipeline\claude_token`
 - else **manual**: the lesson's STATUS says "Waiting"; a Claude Code session answers `D:\YT\easy-work\<lesson>\llm\<step>.prompt.md`
   by writing `<step>.answer.json`, then run again. Answers are cached, so re-runs never ask twice.
 

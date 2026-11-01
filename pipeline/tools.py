@@ -86,11 +86,21 @@ class Status:
 
     def set(self, state, step='', **extra):
         self.data.update(state=state, step=step, updated=time.strftime('%Y-%m-%d %H:%M'), **extra)
-        self.out.mkdir(parents=True, exist_ok=True)
+        for wait in (5, 10, 20, 30, 60, 0):          # Google Drive (J:) sometimes disappears for a moment
+            try:
+                self.out.mkdir(parents=True, exist_ok=True)
+                break
+            except OSError:
+                if not wait:
+                    raise
+                self.log(f'Drive not reachable, waiting {wait} s')
+                time.sleep(wait)
         (self.out / 'status.json').write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding='utf-8')
         human = {'working': 'Working', 'done': 'Ready', 'failed': 'Failed', 'waiting': 'Waiting'}.get(state, state)
         lines = [f'{human}: {step}', f'Updated {self.data["updated"]}']
         if self.data.get('error'):
             lines.append('Error: ' + self.data['error'])
+        if self.data.get('youtube'):
+            lines += ['', 'YouTube:'] + ['  ' + p for p in self.data['youtube'].split(' | ')]
         (self.out / 'STATUS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
         self.log(f'[{state}] {step}')

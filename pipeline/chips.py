@@ -8,16 +8,22 @@ def rgb(hex_):
     return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
 
 
-def draw(card, palette, H, path, fonts_dir):
-    """Navy card, red edge, small 'KELİME' label, German word in yellow, meaning in white. Returns (w, h)."""
+def draw(card, palette, H, path, fonts_dir, maxw=None):
+    """Navy card, red edge, small 'KELİME' label, German word in yellow, meaning in white. Returns (w, h).
+    maxw: the card shrinks to fit this width."""
     s = H / 1080 if H < 1500 else 1920 / 1080 * 0.62      # vertical canvases: a little smaller than long videos
-    f_lab = ImageFont.truetype(str(fonts_dir / 'arialbd.ttf'), int(22 * s))
-    f_word = ImageFont.truetype(str(fonts_dir / 'arialbd.ttf'), int(52 * s))
-    f_tr = ImageFont.truetype(str(fonts_dir / 'arial.ttf'), int(38 * s))
-    pad, edge = int(26 * s), int(10 * s)
     probe = ImageDraw.Draw(Image.new('RGB', (1, 1)))
-    ww = max(probe.textlength(card['word'], font=f_word), probe.textlength(card['tr'], font=f_tr), probe.textlength('KELİME', font=f_lab))
-    w = int(ww + 2 * pad + edge)
+    while True:
+        f_lab = ImageFont.truetype(str(fonts_dir / 'arialbd.ttf'), int(22 * s))
+        f_word = ImageFont.truetype(str(fonts_dir / 'arialbd.ttf'), int(52 * s))
+        f_tr = ImageFont.truetype(str(fonts_dir / 'arial.ttf'), int(38 * s))
+        pad, edge = int(26 * s), int(10 * s)
+        ww = max(probe.textlength(card['word'], font=f_word), probe.textlength(card['tr'], font=f_tr),
+                 probe.textlength('KELİME', font=f_lab))
+        w = int(ww + 2 * pad + edge)
+        if not maxw or w + 12 <= maxw or s < 0.5:
+            break
+        s *= 0.95
     h = int(pad * 2 + 22 * s + 10 * s + 52 * s * 1.15 + 38 * s * 1.2)
     im = Image.new('RGBA', (w + 12, h + 12), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
@@ -35,14 +41,19 @@ def draw(card, palette, H, path, fonts_dir):
     return im.size
 
 
-def draw_label(sec, palette, H, path, fonts_dir):
-    """Section label: navy pill, red square with the part number (or "!"), title in white. Returns (w, h)."""
+def draw_label(sec, palette, H, path, fonts_dir, maxw=None):
+    """Section label: navy pill, red square with the part number (or "!"), title in white. Returns (w, h).
+    maxw: the label shrinks to fit this width."""
     s = H / 1080 if H < 1500 else 1920 / 1080 * 0.62
-    f_tag = ImageFont.truetype(str(fonts_dir / 'arialbd.ttf'), int(44 * s))
-    f_t = ImageFont.truetype(str(fonts_dir / 'arialbd.ttf'), int(40 * s))
     probe = ImageDraw.Draw(Image.new('RGB', (1, 1)))
-    box, pad = int(64 * s), int(14 * s)
-    w = int(pad + box + 22 * s + probe.textlength(sec['title'], font=f_t) + 30 * s)
+    while True:
+        f_tag = ImageFont.truetype(str(fonts_dir / 'arialbd.ttf'), int(44 * s))
+        f_t = ImageFont.truetype(str(fonts_dir / 'arialbd.ttf'), int(40 * s))
+        box, pad = int(64 * s), int(14 * s)
+        w = int(pad + box + 22 * s + probe.textlength(sec['title'], font=f_t) + 30 * s)
+        if not maxw or w + 12 <= maxw or s < 0.6:
+            break
+        s *= 0.95
     h = box + 2 * pad
     im = Image.new('RGBA', (w + 12, h + 12), (0, 0, 0, 0))
     d = ImageDraw.Draw(im)
@@ -62,7 +73,11 @@ def place(spec, size, card, cues, blks, sides, faces, banner, taken=()):
     w, h = size
     W, H = spec.W, spec.H
     m = int(0.04 * min(W, H))
-    if spec.short:
+    if spec.studio:
+        px, py, pw, ph = spec.pic                       # the panel holds the sentence board: cards go on her picture
+        spots = [(int(px + 24), int(py + ph - h - 0.22 * H)), (int(px + pw - w - 24), int(py + ph - h - 0.22 * H)),
+                 (int(px + 24), int(py + ph - h - 24))]
+    elif spec.short:
         spots = [(m, int(0.40 * H)), (m, int(0.55 * H)), (m, int(0.25 * H)), (W - w - 190, int(0.25 * H))]
     else:
         mid, low = int(0.42 * H), int(0.62 * H)
