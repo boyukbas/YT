@@ -25,8 +25,10 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
    The lesson's pattern (`<zu lernen>` in the cues) gets a red highlighter outline.
 5. **Render**: libass subtitles in the channel palette, logo (skipped when the recording already has it; our own opaque
    logo covers a burned-in one when punch-ins move it), labels + word cards, subscribe banner, a slight punch-in on every
-   second segment (jump cuts look intentional), compression-noise cleanup + sharpening for small sources, noise
-   reduction + compression + two-pass loudness to −14 LUFS, optional ducked music, a 10 s end-screen card ("Sıradaki ders").
+   second segment (jump cuts look intentional), compression-noise cleanup + sharpening for small sources, speech noise
+   removal (DeepFilterNet, `D:\YT\work\tools\deepfilter`; channel.json `"denoise"`: `light` = up to 30 dB, `strong` = all,
+   `off`; ffmpeg's afftdn if the tool is missing) + compression + two-pass loudness to −14 LUFS, optional ducked music,
+   a 10 s end-screen card ("Sıradaki ders").
 6. **Check**: every subtitle line is checked on the finished video for face overlap; loudness measured; frame sheet.
 7. **YouTube texts + thumbnails** (`texts.py`, `thumbnail.py`, Claude looks at candidate frames).
 

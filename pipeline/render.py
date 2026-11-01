@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import cv2
 import numpy as np
-from tools import FFMPEG, ffmpeg, run, tonemap
+from tools import DEEP_FILTER, FFMPEG, ffmpeg, run, tonemap
 
 FPS = 30
 
@@ -130,17 +130,39 @@ def banner_png(subscribe_png, work):
     return dst
 
 
-def audio_chain(profile):
-    nr = {'off': 0, 'light': 10, 'strong': 20}.get(profile.get('denoise', 'light'), 10)
+def clean_voice(lst, profile, work):
+    """Speech noise removal with DeepFilterNet: the cut's audio → a cleaned 48 kHz WAV (cached by the cut list).
+    'light' caps the reduction at 30 dB so pauses keep a little room sound; 'strong' removes all it can.
+    None when denoise is off or the tool is missing (audio_chain then falls back to ffmpeg's afftdn)."""
+    lim = {'light': 30, 'strong': 100}.get(profile.get('denoise', 'light'))
+    if lim is None or not DEEP_FILTER.exists():
+        return None
+    d = Path(lst).parent
+    key = hashlib.md5(json.dumps([Path(lst).read_text(encoding='utf-8'), (d / 'segs.json').read_text(encoding='utf-8')
+                                  if (d / 'segs.json').exists() else '', lim]).encode()).hexdigest()[:10]
+    dst = work / f'voice-{d.name}-{key}.wav'
+    if dst.exists():
+        return dst
+    raw, out_dir = work / 'voice-raw.wav', work / 'voice-df'
+    ffmpeg('-f', 'concat', '-safe', '0', '-i', lst, '-vn', '-ar', '48000', '-c:a', 'pcm_s16le', raw)
+    run([DEEP_FILTER, '-D', '-a', str(lim), '-o', out_dir, raw])
+    shutil.move(out_dir / raw.name, dst)
+    raw.unlink()
+    return dst
+
+
+def audio_chain(profile, cleaned=False):
+    nr = 0 if cleaned else {'off': 0, 'light': 10, 'strong': 20}.get(profile.get('denoise', 'light'), 10)
     chain = 'highpass=f=70,' + (f'afftdn=nr={nr}:nf=-60:tn=1,' if nr else '')
     return chain + 'acompressor=threshold=0.1:ratio=2.5:attack=8:release=150:knee=4,alimiter=limit=0.15:attack=4:release=80:level=disabled'
 
 
-def measure_loudness(lst, chain, work):
-    p = work / f'loudnorm-{Path(lst).parent.name}.json'
+def measure_loudness(src, chain, work, name):
+    """src: ffmpeg input args for the voice (the concat list or the cleaned WAV)."""
+    p = work / f'loudnorm-{name}-{hashlib.md5(json.dumps([str(a) for a in src] + [chain]).encode()).hexdigest()[:10]}.json'
     if p.exists():
         return json.loads(p.read_text())
-    r = run([FFMPEG, '-hide_banner', '-f', 'concat', '-safe', '0', '-i', lst, '-vn', '-af',
+    r = run([FFMPEG, '-hide_banner', *src, '-vn', '-af',
              chain + ',loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json', '-f', 'null', '-'])
     m = json.loads(re.search(r'\{[^{}]*"input_i"[^{}]*\}', r.stderr, re.S).group(0))
     p.write_text(json.dumps(m))
@@ -188,20 +210,27 @@ def render(spec, lst, ass, profile, assets, total, cta, add_logo, banner_y, work
                   f"{last}[bn]overlay=(W-w)/2:{int(banner_y)}:shortest=1:enable='between(t,{b0 - 0.1:.2f},{b1:.2f})',format=yuv420p[vm]")
         n += 1
     # audio
-    chain = audio_chain(profile)
-    m = measure_loudness(lst, chain, work)
+    voice = clean_voice(lst, profile, work)
+    chain = audio_chain(profile, cleaned=voice is not None)
+    if voice:                                             # in sync, but ~0.1 s short at the (silent) end → padded below
+        src, a_in = ['-i', voice], f'[{n}:a]apad,'
+        inputs += src
+        n += 1
+    else:
+        src, a_in = ['-f', 'concat', '-safe', '0', '-i', lst], '[0:a]'
+    m = measure_loudness(src, chain, work, Path(lst).parent.name)
     norm = (f"loudnorm=I={profile.get('loudness', -14)}:TP=-1.5:LRA=11:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
             f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true")
     if music:
         inputs += ['-stream_loop', '-1', '-i', music]
         vol = profile.get('music', {}).get('volume', 0.12)
-        fc.append(f'[0:a]{chain},{norm},aresample=48000,asplit[voice][key];'
+        fc.append(f'{a_in}{chain},{norm},aresample=48000,asplit[voice][key];'
                   f'[{n}:a]aresample=48000,volume={vol},afade=t=in:d=1.5,afade=t=out:st={total - 3:.2f}:d=3,atrim=0:{total:.3f}[mus];'
                   f'[mus][key]sidechaincompress=threshold=0.02:ratio=8:attack=60:release=600[duck];'
                   f'[voice][duck]amix=inputs=2:duration=first:normalize=0[am]')
         n += 1
     else:
-        fc.append(f'[0:a]{chain},{norm},aresample=48000[am]')
+        fc.append(f'{a_in}{chain},{norm},aresample=48000[am]')
     fc.append('[vm]null[v];[am]anull[a]')
     length = total + (outro_len if outro else 0)
     # same inputs as last time and the file is still there → nothing to do

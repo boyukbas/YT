@@ -5,6 +5,7 @@ from pathlib import Path
 FF_DIR = Path(os.environ.get('FFMPEG_DIR', r'C:\Users\baris\AppData\Local\Microsoft\WinGet\Packages'
                              r'\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-9.0.2-full_build\bin'))
 FFMPEG, FFPROBE = str(FF_DIR / 'ffmpeg.exe'), str(FF_DIR / 'ffprobe.exe')
+DEEP_FILTER = Path(os.environ.get('DEEP_FILTER', r'D:\YT\work\tools\deepfilter\deep-filter.exe'))   # DeepFilterNet 0.5.6 CLI
 VIDEO_EXT = {'.mp4', '.mov', '.m4v', '.mkv', '.webm', '.3gp'}
 HERE = Path(__file__).resolve().parent
 
