@@ -16,7 +16,7 @@ Choices in <lesson>/settings.json: {"title": 1-3, "description": 1-2, "thumbnail
 for the next free day across all lessons, at this Istanbul time; upload Shorts as Private),
 "shorts_playlist": "<name>" (an existing playlist; the Shorts go in it in their order)}.
 Quota: 10,000 units a day; a Short with two caption tracks costs ~900, so a lesson with many Shorts can need two days
-(it resumes where it stopped). The quota resets at midnight Pacific time (10:00 Istanbul).
+(it resumes where it stopped). The quota resets at midnight Pacific time (11:00 Istanbul in winter, 10:00 in summer).
 
 Client: %USERPROFILE%\\.shorts-pipeline\\youtube_client.json (Desktop OAuth client, project "shorts0editor").
 Token:  %USERPROFILE%\\.shorts-pipeline\\youtube_token.json (refreshed automatically; delete it to sign in again)."""
@@ -368,6 +368,6 @@ if __name__ == '__main__':
         except HttpError as e:
             if 'quotaExceeded' not in str(e):
                 raise
-            sys.exit('YouTube API quota used up for today; run again after 10:00 Istanbul time (done parts are kept).')
+            sys.exit('YouTube API quota used up for today; run again after midnight Pacific time: 11:00 Istanbul in winter, 10:00 in summer (done parts are kept).')
     else:
         check(api(interactive=a.cmd == 'login'))

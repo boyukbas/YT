@@ -373,6 +373,9 @@ def watch(root, once):
     WORK_ROOT.mkdir(parents=True, exist_ok=True)
     if lock.exists() and time.time() - lock.stat().st_mtime < 6 * 3600:
         return
+    if not Path(root).is_dir():                       # Google Drive not mounted yet (e.g. right after waking up)
+        print(f'{root} not available yet; next try in 10 minutes')
+        return
     try:
         lock.write_text(str(os.getpid()))
         while True:
@@ -407,7 +410,7 @@ def youtube_step(lesson):
         r = Y.apply(lesson, log=st.log)
     except Exception as e:
         if 'quota' in str(e):
-            r = ("YouTube's daily API limit is used up; the watcher tries again after it resets (10:00 Istanbul).", False)
+            r = ("YouTube's daily API limit is used up; the watcher tries again; it resets at midnight Pacific time (11:00 Istanbul in winter, 10:00 in summer).", False)
         else:
             r = (f'YouTube step failed: {type(e).__name__}: {e}'[:300], False)
     if r and (r[0] != s.get('youtube') or r[1]):

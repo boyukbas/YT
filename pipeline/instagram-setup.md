@@ -1,20 +1,23 @@
-# Instagram setup: Almanca Dil Atölyesi
+# Instagram + Facebook setup: Almanca Dil Atölyesi
 
-Goal: the PC posts each lesson's Shorts as Instagram Reels, **one a day after 20:00 (Istanbul)**, each with its own cover
-and caption. You set it up once (about 30 minutes, steps 1–5). After that nothing is needed per video.
+Goal: the PC posts each lesson's Shorts as Reels on **Instagram and the Facebook Page**, **one a day after 20:00
+(Istanbul)**, each with its own cover and caption. You set it up once (steps 1–5). After that nothing is needed per video.
 
 Everything prepared is in Drive: `SINEM-YouTube/_channel/instagram/` (profile picture, this guide) and, per lesson,
 `Output/cover-short-N.jpg` + `Output/instagram.md` (captions, also handy for posting by hand).
 
+Done so far (2026-11-02): Instagram `@almancadilatolyesi`, Facebook Page "Almanca Dil Atölyesi", Meta app
+"Almanca Dil Atölyesi" with the Instagram and Page use cases.
+
 ---
 
-## 1. Create the account (phone, Instagram app) ~5 min
+## 1. Create the Instagram account (phone, Instagram app) ~5 min
 
 Use a new email address or phone number for the account. Then fill in:
 
 | Field | Value |
 |---|---|
-| Username | `almancadilatolyesi` (if taken: `almanca.dil.atolyesi`, `almancadilatolyesi_tr`, `sinem.almanca`) |
+| Username | `almancadilatolyesi` |
 | Name (searchable!) | `Almanca Dil Atölyesi • Almanca Öğren` |
 | Profile picture | `_channel/instagram/profile-picture.png` (TR/DE logo, same as YouTube) |
 | Bio | see below |
@@ -29,11 +32,12 @@ Bio (copy as is, 4 lines):
 👇 Dersin tamamı YouTube'da
 ```
 
-## 2. Switch to a professional account (phone) ~2 min
+## 2. Professional account + link it to the Facebook Page (phone / PC) ~5 min
 
-The API only works with professional accounts.
-Profile → ☰ → **Account type and tools** → **Switch to professional account** → **Creator** → category
-**Education** (or "Teacher") → keep contact info off → **skip** connecting a Facebook Page.
+- Instagram: Profile → ☰ → **Account type and tools** → **Switch to professional account** → **Creator** → category
+  **Education** → keep contact info off. The account must be **public**.
+- Link it to the Page: on Facebook, the Page → **Settings → Linked accounts → Instagram → Connect account** → log in as
+  `almancadilatolyesi` (or in Instagram: Edit profile → **Page** → Connect).
 
 **Use it by hand for 2–3 days before automating:** follow ~20 German-learning and Turkish accounts, like a few posts,
 post the first Reel yourself (Short 1, caption from `instagram.md`). Brand-new accounts that start posting through an
@@ -41,51 +45,53 @@ API right away are more likely to be flagged as bots.
 
 ## 3. Meta developer app (PC, Chrome) ~10 min
 
-Needs a Facebook login (as far as I know Meta developer accounts still require one; it can be your personal account,
-nothing is posted there).
+1. **developers.facebook.com** → **My Apps** → the app → **Use cases**.
+2. **Manage messaging & content on Instagram → Customize → API setup with Facebook login**. The content permissions
+   (`instagram_basic`, `instagram_content_publishing`, `pages_read_engagement`, `business_management`,
+   `pages_show_list`) are listed there; if there is an **Add** button for them, click it. Skip the messaging ones.
+   (Meta calls this setup "legacy" and recommends "Unified login"; legacy still works, and Unified login needs a
+   business portfolio and isn't documented yet.)
+3. **Use cases → Manage everything on your Page → Customize** → **Add** `pages_manage_posts` (and
+   `pages_read_engagement`, `pages_show_list` if not there yet).
+4. Leave the app **Unpublished** (Development mode): it can post to accounts that have a role in the app (yours). No
+   App Review, no business verification.
 
-1. Open **developers.facebook.com** → **Get started** / log in → register as a developer (verify phone/email).
-2. **My Apps → Create app**. Meta shows one of two versions of this wizard:
-   - **Version A** (use-case list): use case **Manage messaging & content on Instagram** → business portfolio
-     **I don't want to connect a business portfolio yet** → name → Create.
-   - **Version B** (Meta's current docs): use case **Other** → app type **Business** → name + contact email → Create →
-     on the app's page scroll to **Instagram** → **Set up**.
-   - App name: `Almanca Atolyesi Poster` (Meta rejects some words, e.g. "Insta"; any name is fine).
-   - It asks your Facebook password once. Never connect or verify a business: not needed for our own account.
-3. In the app: **Instagram → API setup with Instagram login** (left menu, under Instagram). The Instagram account must
-   be **public** and professional (step 2).
-   - **1. Generate access tokens → Add account** → log in to the **new Instagram account** → allow.
-   - If it says the account isn't a tester: left menu **App roles → Roles → Add people → Instagram Tester** → the
-     username. Then in the Instagram app: Settings → **Website permissions → Apps and websites → Tester invites** →
-     accept, and try "Add account" again.
-4. Next to the account: **Generate token** → tick "I understand" → **Copy**.
-   Keep this token secret: don't paste it into a chat, email or Drive.
+## 4. Get the token and give it to the PC ~5 min
 
-The app stays in **Development mode**. That's fine: it only posts to accounts that have a role in the app (yours).
-No App Review, no business verification.
+1. **developers.facebook.com/tools/explorer** (Graph API Explorer).
+2. Right side: **Meta App** → `Almanca Dil Atölyesi`; **User or Page** → **Get User Access Token**.
+3. **Permissions** → add: `pages_show_list`, `pages_read_engagement`, `pages_manage_posts`, `instagram_basic`,
+   `instagram_content_publish`, `business_management`.
+4. **Generate Access Token** → Facebook asks which Pages / Instagram accounts: pick **Almanca Dil Atölyesi** and
+   **almancadilatolyesi** → Continue / Save.
+5. Copy the token (copy icon in the token field). Don't paste it into a chat, email or Drive.
+6. In the app: **App settings → Basic**: you need the **App ID** and the **App secret** (Show → Facebook password).
+7. On the PC, open a terminal and run:
 
-## 4. Give the token to the PC ~1 min
+   ```
+   D:\YT\work\venv\Scripts\python D:\code\YT\pipeline\instagram.py fb-token
+   ```
 
-On the PC, open a terminal and run:
+   It asks the App ID, then the App secret and the token (neither is shown while you paste). It prints the Page,
+   `token never expires`, the permissions, and the Instagram + Page follower counts. The secret and the short token are
+   not stored; only the Page token is (`%USERPROFILE%\.shorts-pipeline\instagram.json`).
 
-```
-D:\YT\work\venv\Scripts\python D:\code\YT\pipeline\instagram.py token
-```
-
-Paste the token (it isn't shown) → Enter. It prints `Instagram: @almancadilatolyesi (MEDIA_CREATOR), …`.
-The PC refreshes the token every week (it's valid 60 days and gets extended each time).
+If it says "No Instagram account linked", do the linking in step 2 and make a new token (4.1–4.5).
 
 ## 5. Automatic posting (already on)
 
-- **How the video gets to Instagram:** Meta downloads it from a link. While one Reel is posted, the PC opens a
-  temporary, random Cloudflare address to that one video + cover and closes it right after (1–3 minutes a day).
-  Only the exact file addresses answer; the address dies when it closes. (Allowed and tested 2026-11-02.)
+- **How the video gets there:** the PC uploads it straight to Meta. The Instagram cover goes up as an unpublished
+  (invisible) Page photo for a minute and is deleted after posting. No temporary link is needed in this mode.
 - **The watcher:** Task Scheduler task "YT Easy mode watcher" runs every 10 minutes (also does YouTube and new
-  lessons). It posts the next Reel after 20:00 if none went out in the last 20 hours, oldest lesson first, in Short
-  order. Nothing is posted until step 4 is done.
+  lessons). After 20:00, if nothing went out in the last 20 hours, it posts the next Reel: first Instagram, then the
+  same Reel on the Page (with the clickable YouTube link of the full lesson). Oldest lesson first, in Short order.
+  If the Page part fails, it retries the next day before moving on. Nothing is posted until step 4 is done.
 
-Check any time: `instagram.py check` (account, posts used of the 24 h limit), `instagram.md` in the lesson's Output
+Check any time: `instagram.py check` (accounts, posts used of the 24 h limit), `instagram.md` in the lesson's Output
 shows which Reels went out with their links, and `D:\YT\easy-work\instagram.log` has every post or problem.
+
+(Other route, not used: "API setup with Instagram login" + `instagram.py token`, where Meta downloads the video
+through a temporary Cloudflare link. New apps can no longer pick it.)
 
 ---
 

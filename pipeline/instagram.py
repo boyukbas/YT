@@ -1,7 +1,9 @@
-"""Instagram: the lesson's Shorts as Reels, with their own cover and caption, posted one a day (Instagram API with
-Instagram Login; see instagram-setup.md for the one-time setup).
+"""Instagram (+ Facebook Page): the lesson's Shorts as Reels, with their own cover and caption, posted one a day
+(see instagram-setup.md for the one-time setup).
 
-  python instagram.py token                         paste the access token once (Meta app dashboard → Generate token)
+  python instagram.py fb-token                      Facebook-login mode: app ID + secret + a Graph API Explorer token →
+                                                    a Page token that doesn't expire; posts to Instagram AND the Page
+  python instagram.py token                         Instagram-login mode: paste the token from the app dashboard
   python instagram.py check                         read-only: account, posts left in the 24 h limit
   python instagram.py prepare "<lesson>"            covers (cover-short-N.jpg) + captions (instagram.md); posts nothing
   python instagram.py post "<lesson>" [--dry-run]   post the lesson's next Reel now (refuses if one went out < 20 h ago
@@ -9,11 +11,14 @@ Instagram Login; see instagram-setup.md for the one-time setup).
   python instagram.py daily "<root>"                the watcher's step: after POST_TIME, post the next Reel of the
                                                     oldest lesson that has some left, if none went out in the last 20 h
 
-Meta downloads the video from a public URL (with Instagram Login there is no direct upload), so while one Reel is being
+Facebook-login mode uploads the video straight to Meta (rupload.facebook.com); the cover goes up as an unpublished
+(invisible) Page photo whose address Instagram reads, deleted after posting. The Page gets the same Reel, with the
+lesson's YouTube link in the text (links work there).
+Instagram-login mode has no direct upload: Meta downloads the video from a public URL, so while one Reel is being
 posted, the PC serves just that video + its cover under a random path through a temporary Cloudflare quick tunnel
 (cloudflared, no account), and closes it as soon as Instagram has the file.
-Token: %USERPROFILE%\\.shorts-pipeline\\instagram.json (long-lived, 60 days; refreshed here every week).
-Record: <lesson>/Output/instagram-posted.json."""
+Token: %USERPROFILE%\\.shorts-pipeline\\instagram.json (Page token: no expiry; Instagram token: 60 days, refreshed
+here every week). Record: <lesson>/Output/instagram-posted.json."""
 import argparse, getpass, http.server, json, re, secrets, shutil, subprocess, sys, tempfile, threading, time
 from datetime import datetime, timedelta, timezone
 from functools import partial
@@ -27,6 +32,8 @@ from tools import probe
 KEYS = Path.home() / '.shorts-pipeline'
 TOKEN = KEYS / 'instagram.json'
 API = 'https://graph.instagram.com/v26.0'
+FB_API = 'https://graph.facebook.com/v26.0'
+RUPLOAD = 'https://rupload.facebook.com'
 CLOUDFLARED = Path(r'D:\YT\tools\cloudflared.exe')
 ISTANBUL = timezone(timedelta(hours=3))
 POSTED = 'instagram-posted.json'
@@ -35,14 +42,25 @@ GAP = timedelta(hours=20)                                # at most one Reel per 
 MAX_TAGS = 5                                             # Instagram shows few hashtags; more looks like spam
 SAVE_LINE = '💾 Kaydet, sonra tekrar et!'
 YOUTUBE_LINE = "▶️ Dersin tamamı YouTube'da: Almanca Dil Atölyesi (link profilde)"
+CHANNEL = 'https://www.youtube.com/@sinembb'
 
 
 # ---------- token + API ----------
 
-def token():
+def saved():
     if not TOKEN.exists():
-        raise RuntimeError('Instagram token missing: run  python instagram.py token')
-    t = json.loads(TOKEN.read_text(encoding='utf-8'))
+        raise RuntimeError('Instagram token missing: run  python instagram.py fb-token  (or token)')
+    return json.loads(TOKEN.read_text(encoding='utf-8'))
+
+
+def fb_mode():
+    return TOKEN.exists() and saved().get('mode') == 'facebook'
+
+
+def token():
+    t = saved()
+    if t.get('mode') == 'facebook':
+        return t['page_token']
     if datetime.now(timezone.utc) - datetime.fromisoformat(t['refreshed']) > timedelta(days=7):
         r = requests.get('https://graph.instagram.com/refresh_access_token',
                          params={'grant_type': 'ig_refresh_token', 'access_token': t['token']}, timeout=30)
@@ -54,18 +72,38 @@ def token():
     return t['token']
 
 
-def call(method, path, **params):
+def call(method, path, files=None, **params):
     """One Graph API call. The token goes in a header, so it never shows up in an error message or log."""
+    url = path if path.startswith('https://') else f"{FB_API if fb_mode() else API}/{path}"
     try:
-        r = requests.request(method, f'{API}/{path}', params=params, timeout=120,
-                             headers={'Authorization': f'Bearer {token()}'})
+        r = requests.request(method, url, timeout=600, headers={'Authorization': f'Bearer {token()}'},
+                             **({'data': params, 'files': files} if files else {'params': params}))
     except requests.RequestException as e:
-        raise RuntimeError(f'Instagram unreachable: {type(e).__name__}') from None
+        raise RuntimeError(f'Meta unreachable: {type(e).__name__}') from None
+    return answer(r)
+
+
+def answer(r):
     j = r.json() if r.headers.get('content-type', '').startswith(('application/json', 'text/javascript')) else {}
     if not r.ok or 'error' in j:
         err = j.get('error', {})
-        raise RuntimeError(f"Instagram {r.status_code}: {err.get('message', r.text[:200])} "
+        err = err if isinstance(err, dict) else {'message': str(err)}
+        raise RuntimeError(f"Meta {r.status_code}: {err.get('message', r.text[:200])} "
                            f"(code {err.get('code')}, {err.get('error_user_msg', '')})")
+    return j
+
+
+def upload(url, path):
+    """Send a whole file to Meta's upload host (resumable upload, in one go)."""
+    try:
+        with open(path, 'rb') as f:
+            r = requests.post(url, data=f, timeout=1800, headers={
+                'Authorization': f'OAuth {token()}', 'offset': '0', 'file_size': str(path.stat().st_size)})
+    except requests.RequestException as e:
+        raise RuntimeError(f'Meta upload failed: {type(e).__name__}') from None
+    j = answer(r)
+    if j.get('success') is False:
+        raise RuntimeError(f'Meta did not accept the upload of {path.name}: {j}')
     return j
 
 
@@ -78,10 +116,59 @@ def save_token():
     check()
 
 
+def save_fb_token():
+    """Facebook-login mode: short user token (Graph API Explorer) → long-lived user token → Page token (no expiry).
+    The app secret and the user tokens are used once here and not stored."""
+    app_id = input('App ID (Meta app → App settings → Basic): ').strip()
+    secret = getpass.getpass('App secret (same page → Show; it is not shown here): ').strip()
+    short = getpass.getpass('User token from the Graph API Explorer (not shown): ').strip()
+    if not (app_id and secret and short):
+        raise SystemExit('App ID, app secret and token are all needed.')
+    try:
+        r = requests.get(f'{FB_API}/oauth/access_token', timeout=30, params={
+            'grant_type': 'fb_exchange_token', 'client_id': app_id, 'client_secret': secret, 'fb_exchange_token': short})
+        long = r.json().get('access_token')
+        if not long:
+            raise SystemExit(f"Token exchange failed: {r.json().get('error', {}).get('message', r.status_code)}")
+        pages = requests.get(f'{FB_API}/me/accounts', timeout=30, headers={'Authorization': f'Bearer {long}'},
+                             params={'fields': 'id,name,access_token,instagram_business_account{id,username}'}).json()
+        if 'error' in pages:
+            raise SystemExit(f"Reading your Pages failed: {pages['error'].get('message')}")
+        pages = pages.get('data', [])
+        linked = [p for p in pages if p.get('instagram_business_account')]
+        if not pages:
+            raise SystemExit('No Facebook Page in this token: tick pages_show_list and pick the Page when Facebook asks.')
+        if not linked:
+            raise SystemExit(f"No Instagram account linked to {', '.join(p['name'] for p in pages)}: "
+                             'Page → Settings → Linked accounts → Instagram → Connect, then make a new token.')
+        p = next((p for p in linked if 'almanca' in p['name'].lower()), linked[0])
+        dbg = requests.get(f'{FB_API}/debug_token', timeout=30, params={
+            'input_token': p['access_token'], 'access_token': f'{app_id}|{secret}'}).json().get('data', {})
+    except requests.RequestException as e:
+        raise SystemExit(f'Meta unreachable: {type(e).__name__}') from None
+    ig = p['instagram_business_account']
+    KEYS.mkdir(parents=True, exist_ok=True)
+    TOKEN.write_text(json.dumps({'mode': 'facebook', 'page_id': p['id'], 'page_name': p['name'],
+                                 'page_token': p['access_token'], 'user_id': ig['id'], 'username': ig.get('username'),
+                                 'refreshed': datetime.now(timezone.utc).isoformat()}), encoding='utf-8')
+    exp = dbg.get('expires_at')
+    print(f"Page: {p['name']} (id {p['id']}), token " + ('never expires' if exp == 0 else
+          f'expires {datetime.fromtimestamp(exp):%Y-%m-%d}' if exp else 'expiry unknown'))
+    print('Permissions: ' + ', '.join(dbg.get('scopes', [])))
+    check()
+
+
 def check():
-    me = call('GET', 'me', fields='user_id,username,account_type,media_count')
-    print(f"Instagram: @{me.get('username')} ({me.get('account_type')}), {me.get('media_count', 0)} posts, id {me.get('user_id')}")
-    t = json.loads(TOKEN.read_text(encoding='utf-8'))
+    t = saved()
+    if t.get('mode') == 'facebook':
+        ig = call('GET', t['user_id'], fields='username,media_count,followers_count')
+        page = call('GET', t['page_id'], fields='name,followers_count')
+        print(f"Instagram: @{ig.get('username')}, {ig.get('media_count', 0)} posts, {ig.get('followers_count', 0)} followers")
+        print(f"Facebook Page: {page.get('name')}, {page.get('followers_count', 0)} followers")
+        me = {'user_id': t['user_id'], 'username': ig.get('username')}
+    else:
+        me = call('GET', 'me', fields='user_id,username,account_type,media_count')
+        print(f"Instagram: @{me.get('username')} ({me.get('account_type')}), {me.get('media_count', 0)} posts, id {me.get('user_id')}")
     if t.get('user_id') != me.get('user_id'):
         TOKEN.write_text(json.dumps({**t, 'user_id': me.get('user_id'), 'username': me.get('username')}), encoding='utf-8')
     try:
@@ -131,6 +218,19 @@ def caption(sh, base_tags):
     return '\n\n'.join([title, '\n'.join(body), SAVE_LINE, ' '.join(tags)])[:2200]
 
 
+def youtube_link(out):
+    """The full lesson on YouTube (youtube.py's record), else the channel."""
+    p = out / 'youtube-applied.json'
+    recs = json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
+    vid = next((r.get('id') for name, r in recs.items() if name.endswith('-video.mp4') and r.get('id')), None)
+    return f'https://youtu.be/{vid}' if vid else CHANNEL
+
+
+def fb_caption(cap, out):
+    """The Facebook text: same as Instagram, but links work there."""
+    return cap.replace(YOUTUBE_LINE, f"▶️ Dersin tamamı YouTube'da: {youtube_link(out)}")
+
+
 def cover_path(mp4):
     return mp4.with_name('cover-' + re.search(r'short-\d+$', mp4.stem).group(0) + '.jpg')      # cover-short-N.jpg
 
@@ -162,8 +262,10 @@ def write_md(lesson, out, data):
          'Posted automatically, one Reel a day after ' + POST_TIME + ' (Istanbul). To post one by hand instead: '
          'Instagram → + → Reel → pick the video → Edit cover → Add from camera roll → the cover → paste the caption.', '']
     for mp4, sh in reels(out, data):
-        p = posted.get(mp4.name)
-        state = f"posted {p['posted']}: {p.get('permalink', '')}" if p else 'not posted yet'
+        p = posted.get(mp4.name, {})
+        state = f"posted {p['posted']}: {p.get('permalink', '')}" if 'id' in p else 'not posted yet'
+        if 'facebook' in p:
+            state += f"; Facebook: {p['facebook']['permalink']}"
         L += [f'## Short {mp4.stem.rsplit("-", 1)[1]} ({state})',
               f'Video `{mp4.name}` · cover `{cover_path(mp4).name}`', '', '```', caption(sh, tags), '```', '']
     (out / 'instagram.md').write_text('\n'.join(L), encoding='utf-8')
@@ -248,16 +350,90 @@ def load(out):
 
 
 def last_post(root):
-    times = [datetime.fromisoformat(r['posted_utc']) for p in Path(root).glob(f'*/*/{POSTED}')
-             for r in json.loads(p.read_text(encoding='utf-8')).values()]
+    times = [datetime.fromisoformat(t) for p in Path(root).glob(f'*/*/{POSTED}')
+             for r in json.loads(p.read_text(encoding='utf-8')).values()
+             for t in (r.get('posted_utc'), r.get('facebook', {}).get('posted_utc')) if t]
     return max(times, default=None)
+
+
+def stamp():
+    return {'posted': datetime.now(ISTANBUL).strftime('%Y-%m-%d %H:%M'), 'posted_utc': datetime.now(timezone.utc).isoformat()}
+
+
+def wait_container(cid, name):
+    for _ in range(60):                                   # Instagram fetches + processes the video (usually < 1 min)
+        time.sleep(10)
+        s = call('GET', cid, fields='status_code,status')
+        if s.get('status_code') == 'FINISHED':
+            return
+        if s.get('status_code') in ('ERROR', 'EXPIRED'):
+            raise RuntimeError(f"Instagram could not process {name}: {s.get('status')}")
+    raise RuntimeError(f'{name}: Instagram still processing after 10 min')
+
+
+def post_instagram(mp4, cover, cap, log):
+    uid = saved().get('user_id') or check()['user_id']
+    log(f'{mp4.name}: sending to Instagram')
+    if fb_mode():
+        page = saved()['page_id']
+        with open(cover, 'rb') as f:                      # an unpublished Page photo gives the cover a public address
+            photo = call('POST', f'{page}/photos', files={'source': (cover.name, f, 'image/jpeg')}, published='false')['id']
+        try:
+            cover_url = max(call('GET', photo, fields='images')['images'], key=lambda i: i['width'])['source']
+            c = call('POST', f'{uid}/media', media_type='REELS', upload_type='resumable', cover_url=cover_url,
+                     caption=cap, share_to_feed='true')
+            upload(c.get('uri') or f"{RUPLOAD}/ig-api-upload/v26.0/{c['id']}", mp4)
+            wait_container(c['id'], mp4.name)
+            m = call('POST', f'{uid}/media_publish', creation_id=c['id'])
+        finally:
+            try:
+                call('DELETE', photo)
+            except RuntimeError as e:
+                log(f'cover photo {photo} not deleted: {e}')
+    else:
+        with Share([mp4, cover]) as (video_url, cover_url):
+            c = call('POST', f'{uid}/media', media_type='REELS', video_url=video_url, cover_url=cover_url, caption=cap,
+                     share_to_feed='true')
+            wait_container(c['id'], mp4.name)
+        m = call('POST', f'{uid}/media_publish', creation_id=c['id'])
+    info = call('GET', m['id'], fields='permalink,timestamp')
+    return {'id': m['id'], 'permalink': info.get('permalink', ''), **stamp()}
+
+
+def post_facebook(mp4, cover, text, log):
+    """The same Reel on the Facebook Page (Reels API: start → upload → finish, then wait until it is published)."""
+    page = saved()['page_id']
+    log(f'{mp4.name}: sending to the Facebook Page')
+    v = call('POST', f'{page}/video_reels', upload_phase='start')
+    upload(v.get('upload_url') or f"{RUPLOAD}/video-upload/v26.0/{v['video_id']}", mp4)
+    try:
+        with open(cover, 'rb') as f:
+            call('POST', f"{v['video_id']}/thumbnails", files={'source': (cover.name, f, 'image/jpeg')}, is_preferred='true')
+    except RuntimeError as e:
+        log(f'Facebook cover not set (the Reel keeps a frame of the video): {e}')
+    call('POST', f'{page}/video_reels', upload_phase='finish', video_id=v['video_id'], video_state='PUBLISHED',
+         description=text)
+    for _ in range(60):
+        time.sleep(10)
+        st = call('GET', v['video_id'], fields='status').get('status', {})
+        phases = [st.get('video_status')] + [st.get(k, {}).get('status') for k in ('uploading_phase', 'processing_phase', 'publishing_phase')]
+        if 'error' in phases:
+            raise RuntimeError(f'Facebook could not publish {mp4.name}: {st}')
+        if st.get('publishing_phase', {}).get('status') == 'complete':
+            break
+    else:
+        raise RuntimeError(f'{mp4.name}: Facebook still processing after 10 min')
+    link = call('GET', v['video_id'], fields='permalink_url').get('permalink_url', '')
+    return {'id': v['video_id'], 'permalink': 'https://www.facebook.com' + link if link.startswith('/') else link, **stamp()}
 
 
 def post_next(lesson, dry=False, force=False, log=print):
     """Post the lesson's next Reel. Returns a one-line summary, or None when it has none left."""
     lesson, out, data = lesson_files(lesson)
     posted = load(out)
-    todo = [(m, sh) for m, sh in reels(out, data) if m.name not in posted]
+    fb = fb_mode()
+    done = lambda r: bool(r) and 'id' in r and (not fb or 'facebook' in r)
+    todo = [(m, sh) for m, sh in reels(out, data) if not done(posted.get(m.name))]
     if not todo:
         return None
     last = last_post(lesson.parent)
@@ -270,33 +446,30 @@ def post_next(lesson, dry=False, force=False, log=print):
         prepare(lesson, log)
     cap = caption(sh, hashtags(lesson.parent))
     if dry:
-        return f'would post {mp4.name} with {cover.name}:\n{cap}'
+        return f'would post {mp4.name} with {cover.name}:\n{cap}' + \
+            (f'\n\nFacebook Page text:\n{fb_caption(cap, out)}' if fb else '')
     length = probe(mp4)['duration']
     if not 3 <= length <= 900:
         raise RuntimeError(f'{mp4.name}: {length:.0f} s, Reels must be 3 s to 15 min')
-    uid = json.loads(TOKEN.read_text(encoding='utf-8')).get('user_id') or check()['user_id']
-    with Share([mp4, cover]) as (video_url, cover_url):
-        log(f'{mp4.name}: sending to Instagram')
-        c = call('POST', f'{uid}/media', media_type='REELS', video_url=video_url, cover_url=cover_url, caption=cap,
-                 share_to_feed='true')
-        for _ in range(60):                           # Instagram fetches + processes the video (usually < 1 min)
-            time.sleep(10)
-            s = call('GET', c['id'], fields='status_code,status')
-            if s.get('status_code') == 'FINISHED':
-                break
-            if s.get('status_code') in ('ERROR', 'EXPIRED'):
-                raise RuntimeError(f"Instagram could not process {mp4.name}: {s.get('status')}")
-        else:
-            raise RuntimeError(f'{mp4.name}: Instagram still processing after 10 min')
-    m = call('POST', f'{uid}/media_publish', creation_id=c['id'])
-    info = call('GET', m['id'], fields='permalink,timestamp')
-    posted[mp4.name] = {'id': m['id'], 'permalink': info.get('permalink', ''),
-                        'posted': datetime.now(ISTANBUL).strftime('%Y-%m-%d %H:%M'),
-                        'posted_utc': datetime.now(timezone.utc).isoformat()}
-    (out / POSTED).write_text(json.dumps(posted, ensure_ascii=False, indent=1), encoding='utf-8')
-    write_md(lesson, out, data)
-    left = len(todo) - 1
-    return f"Instagram: {mp4.name} posted {info.get('permalink', '')} ({left} left in this lesson)"
+    rec = dict(posted.get(mp4.name, {}))
+
+    def save():
+        posted[mp4.name] = rec
+        (out / POSTED).write_text(json.dumps(posted, ensure_ascii=False, indent=1), encoding='utf-8')
+        write_md(lesson, out, data)
+    said = []
+    if 'id' not in rec:
+        rec.update(post_instagram(mp4, cover, cap, log))
+        save()
+        said.append(f"Instagram {rec['permalink']}")
+    if fb and 'facebook' not in rec:
+        try:
+            rec['facebook'] = post_facebook(mp4, cover, fb_caption(cap, out), log)
+            save()
+            said.append(f"Facebook {rec['facebook']['permalink']}")
+        except RuntimeError as e:                         # Instagram has it; the Page gets it with the next daily run
+            said.append(f'WARNING: Facebook Page failed, tries again tomorrow: {e}')
+    return f"{mp4.name} posted: {'; '.join(said)} ({len(todo) - 1} left in this lesson)"
 
 
 def daily(root, log=print):
@@ -321,12 +494,14 @@ def daily(root, log=print):
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['token', 'check', 'prepare', 'post', 'daily'])
+    ap.add_argument('cmd', choices=['fb-token', 'token', 'check', 'prepare', 'post', 'daily'])
     ap.add_argument('path', nargs='?')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--force', action='store_true', help='post even if a Reel went out less than 20 h ago')
     a = ap.parse_args()
-    if a.cmd == 'token':
+    if a.cmd == 'fb-token':
+        save_fb_token()
+    elif a.cmd == 'token':
         save_token()
     elif a.cmd == 'check':
         check()
