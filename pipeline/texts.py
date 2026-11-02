@@ -45,8 +45,8 @@ Return ONE JSON object, nothing else:
                                             // hashtags incl. #Shorts); "cover": its own Reel cover, same rules as
                                             // thumbnails, a different frame per Short where possible; [] if none
  "descriptions": ["...", "..."],            // 2 complete descriptions: hook question, what the video teaches, the
-                                            // example sentences with Turkish translations, a tip, the chapters block
-                                            // (if chapters), why to subscribe (what comes next / how often), hashtags
+                                            // example sentences with Turkish translations, a tip (exam topics: a
+                                            // concrete exam tactic, "sınav taktiği"), the chapters block (if chapters), why to subscribe (what comes next / how often), hashtags
                                             // last line (at most 3)
  "chapters": [{{"t": 0, "title": "Giriş"}}, ...],   // main video only; first at 0, >= 3 chapters, >= 10 s apart, use real
                                             // topic changes from the subtitles; [] if the video is under 60 s

@@ -32,24 +32,23 @@ def stripe(d, x0, x1, y, h=6):
 
 
 def person(cv, cut, h, x, y_bottom, fade=0):
-    """Cut-out with the thumbnails' white outline. Its cut bottom edge sits on the picture's bottom edge,
-    or (fade > 0) the body fades out in a soft oval around the head (so a photo cropped through the shoulders shows
-    no straight edges); the outline fades out first."""
+    """Cut-out with a softly feathered edge (no outline: it turns curly hair into a jagged white line). Its cut
+    bottom edge sits on the picture's bottom edge, or (fade > 0) the body fades out in a soft oval around the head
+    (so a photo cropped through the shoulders or the hair shows no straight edges)."""
     p = cut.resize((int(cut.width * h / cut.height), h), Image.LANCZOS)
-    a = p.split()[3]
-    line = a.filter(ImageFilter.MaxFilter(9))
+    a = p.split()[3].filter(ImageFilter.GaussianBlur(max(1, h / 600)))
     if fade:
-        def oval(shrink):                      # 255 inside an oval around head + shoulders, soft edge `fade` wide
-            m = Image.new('L', p.size, 0)
-            w = p.width
-            ImageDraw.Draw(m).ellipse((-0.05 * w + shrink, -0.6 * h + shrink, 1.05 * w - shrink, 0.88 * h - shrink), fill=255)
-            return m.filter(ImageFilter.GaussianBlur(fade / 8))
-        a = Image.composite(a, Image.new('L', p.size, 0), oval(0))
-        line = Image.composite(line, Image.new('L', p.size, 0), oval(fade // 4))
-        p.putalpha(a)
-    sil = Image.new('RGBA', p.size, WHITE + (0,))
-    sil.putalpha(line)
-    cv.alpha_composite(sil, (x, y_bottom - h))
+        w = p.width
+        m = Image.new('L', p.size, 0)          # 255 inside an oval around head + shoulders
+        ImageDraw.Draw(m).ellipse((-0.05 * w, -0.6 * h, 1.05 * w, 0.88 * h), fill=255)
+        m = m.filter(ImageFilter.GaussianBlur(fade / 8))
+        side = int(fade / 4)                   # hair cut off by the photo's left/right edge fades out too
+        ramp = Image.linear_gradient('L').rotate(90, expand=True).resize((side, h))
+        m.paste(Image.composite(m.crop((0, 0, side, h)), Image.new('L', (side, h), 0), ramp), (0, 0))
+        m.paste(Image.composite(m.crop((w - side, 0, w, h)), Image.new('L', (side, h), 0),
+                                ramp.transpose(Image.FLIP_LEFT_RIGHT)), (w - side, 0))
+        a = Image.composite(a, Image.new('L', p.size, 0), m)
+    p.putalpha(a)
     cv.alpha_composite(p, (x, y_bottom - h))
 
 
@@ -65,19 +64,19 @@ def name_block(cv, x, y, scale, logo):
     return tx + d.textbbox((0, 0), 'ALMANCA', font=font(int(80 * scale)))[2]
 
 
-def chips(d, x, y, items, size):
+def chips(d, x, y, items, size, accent=True):
     f = font(size, F_BOLD)
     for i, t in enumerate(items):
         w = d.textbbox((0, 0), t, font=f)[2]
         d.rounded_rectangle((x, y, x + w + size * 1.2, y + size * 1.8), radius=size * 0.9,
-                            fill=RED if i == 0 else (34, 42, 70))
+                            fill=RED if i == 0 and accent else (34, 42, 70))
         d.text((x + size * 0.6, y + size * 0.35), t, font=f, fill=WHITE)
         x += w + size * 1.2 + size * 0.5
     return x
 
 
 TAGLINE = "A1'den C1'e Almanca"
-TOPICS = ['Hatalar', 'Sınav hazırlık', 'Almanya\'da hayat']   # not tied to one level
+TOPICS = ['Almanca gramer', 'Goethe & telc sınavları', 'Almanya\'da hayat']   # not tied to one level
 
 
 def banner(cut, logo, out):
@@ -100,11 +99,12 @@ def fb_cover(cut, logo, out):
     sx = (W - 1110) // 2
     cv = canvas(W, H, (sx + 700, -100, sx + 1250, H + 100))
     d = ImageDraw.Draw(cv)
-    person(cv, cut, 640, sx + 580, H - 18, fade=300)
+    person(cv, cut, 640, sx + 610, H - 18, fade=300)
     stripe(d, 0, W, H - 18)
     name_block(cv, sx + 10, 120, 0.85, logo)
     d.text((sx + 14, 330), TAGLINE, font=font(42), fill=WHITE)
-    chips(d, sx + 14, 410, TOPICS, 22)
+    chips(d, sx + 14, 395, TOPICS[:2], 22)                     # two rows: less room next to her here
+    chips(d, sx + 14, 443, TOPICS[2:], 22, accent=False)
     cv.convert('RGB').save(out / 'facebook-cover.jpg', quality=92)
 
 
