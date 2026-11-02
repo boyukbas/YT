@@ -2,10 +2,12 @@
 
 Sinem drops the raw clips of a lesson into a Drive folder; this PC turns them into a finished video plus
 everything YouTube needs, and writes it back to the same folder.
+**When new videos come in: follow [RUNBOOK.md](RUNBOOK.md)** (status → `review.py` rule check → report).
 
 ```
 J:\My Drive\SINEM-YouTube\
-  _channel\            channel profile (set once): channel.json, logo.png, subscribe.png, fonts\, music\, terms.txt, brand.png
+  _channel\            channel profile (set once): channel.json, logo.png, subscribe.png, fonts\, music\, terms.txt, brand.png,
+                       brand\ (banner, Facebook cover, Instagram highlights: brandkit.py), CEKIM-REHBERI.txt (filming guide)
   <lesson>\            raw clips (.mov/.mp4), optional settings.json  ({"short": false} = no Short version)
     Output\            results (or "Output (Easy)" if an Output folder made elsewhere exists)
 ```
@@ -22,7 +24,10 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
 4. **Placement** (`layout.py`): face tracking (OpenCV YuNet, `models/`), subtitles never on eyes/nose/mouth;
    long videos prefer the top, Shorts the bottom; few blocked lines flip, many → other side, none → a text band.
    Section labels and word cards (`chips.py`) and the subscribe banner go where nothing important is.
-   The lesson's pattern (`<zu lernen>` in the cues) gets a red highlighter outline.
+   The lesson's pattern (`<zu lernen>` in the cues) gets a red highlighter outline. German lines are the biggest,
+   Turkish smaller, the translation under a German line smaller still; deliberate wrong/right examples (`"mark"` in a
+   cue) get a red ✘ / green ✔ and their colour. Vertical recordings in a long video use the studio layout (cropped
+   to her upper body, face high in the card).
 5. **Render**: libass subtitles in the channel palette, logo (skipped when the recording already has it; our own opaque
    logo covers a burned-in one when punch-ins move it), labels + word cards, subscribe banner, a slight punch-in on every
    second segment (jump cuts look intentional), compression-noise cleanup + sharpening for small sources, speech noise
@@ -43,11 +48,13 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
 **Instagram** (`instagram.py`, setup in `instagram-setup.md`): every Short also gets `cover-short-N.jpg` (its own photo +
 keywords, text inside the 3:4 grid crop) and a caption in `instagram.md`; the watcher posts one Reel a day after 20:00
 to Instagram and the same Reel to the Facebook Page (Facebook-login mode, `instagram.py fb-token`: Page token without
-expiry). Instagram fetches video + cover through a temporary Cloudflare quick tunnel (its direct upload refuses Page
+expiry), and the long video on the Page between 12:00 and 17:00 once it is public on YouTube (chunked upload). Instagram fetches video + cover through a temporary Cloudflare quick tunnel (its direct upload refuses Page
 tokens); the Page gets a direct upload (rupload.facebook.com).
 
 **Shorts:** at most 3 (`shorts_max` in channel.json / settings.json), the strongest self-contained parts (Claude picks
-them in the subtitle step: `shorts` in the answer); they go public one a day at 19:00 (youtube.py schedules them),
+them in the subtitle step: `shorts` in the answer, each with a `kind`: mistake / exam / life / ege / rule; 20–45 s
+best, 60 s max, `ege` stories up to 90 s; a kind with a series in channel.json `youtube.series` gets
+" | <series> #n" in its title); they go public one a day at 19:00, never within 3 h of a long video (youtube.py schedules them),
 `<lesson>-short-1.mp4`, `-short-2.mp4`, … each with its own title and description in `youtube.md`. Lessons without
 such parts get one condensed Short.
 

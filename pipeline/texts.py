@@ -1,5 +1,6 @@
 """YouTube texts (titles, descriptions, chapters, tags, pinned comment) + thumbnail choices, in one Claude call."""
 import json
+from pathlib import Path
 import cv2
 from PIL import Image, ImageDraw, ImageFont
 from tools import ts
@@ -10,7 +11,14 @@ presented by Sinem. Write everything for this new video in Turkish (German examp
 Lesson folder: "{lesson}"   Topic: {topic}
 Versions: {versions}
 Channel defaults: category Education, video + audio language Turkish, not made for kids.
-Always-used hashtags: {hashtags}
+Channel hashtags (pick from these first): {hashtags}
+Shorts series (a Short of that kind gets the series in its title, with the number given): {series}
+Course playlists (pick the one that fits; a new name only if none does): {playlists}
+
+The channel's audience: Turks preparing for a German exam (Goethe/telc A1 for family reunification, B1) or moving to /
+living in Germany. Titles promise a result or name a mistake/exam moment, they don't just name the grammar topic:
+"Goethe A1 Sprechen Teil 1: Adayların En Çok Yaptığı 3 Hata (+ Hazır Cevap)" beats "Kendini Tanıtma 7 Başlık".
+Question titles get more clicks on this channel than level labels like "A2 Almanca".
 
 Final subtitles of the main video (time  lang  text  [translation]):
 {cues}
@@ -20,29 +28,37 @@ keywords go big next to her). Prefer a natural smile, eyes open, looking at the 
 
 Return ONE JSON object, nothing else:
 {{
- "titles": ["...", "...", "..."],           // 3 different angles; <= 70 characters; main keyword early (what people search)
+ "titles": ["...", "...", "..."],           // 3 different angles for Test & Compare; <= 70 characters; Turkish; main
+                                            // keyword early (what people search: "Goethe A1 Sprechen", "Anmeldung");
+                                            // never a hashtag or '#' in a title
  "short_title": "...",                      // for a single version called "short" (<= 60 chars); "" otherwise
  "shorts": [{{"version": "short-1", "title": "...", "description": "...",
              "cover": {{"frame": 3, "words": ["Vorname", "Nachname"], "question": "FARKI NE?"}}}}],
                                             // one per numbered Short version (short-1, short-2, ...): a title that
-                                            // works without the lesson (<= 60 chars, a hook/question, main keyword
-                                            // early, may end with #Shorts) and 2-4 lines of description (what it
-                                            // teaches, "Dersin tamamı kanalda", hashtags incl. #Shorts); "cover": its
-                                            // own Reel cover, same rules as thumbnails, a different frame per Short
-                                            // where possible; [] if none
+                                            // works without the lesson (<= 60 chars without the series part, a hook or
+                                            // question, main keyword early, NO hashtags) + " | <series> #<n>" when its
+                                            // kind has a series; 2-3 lines of description (what it teaches, one line
+                                            // "Dersin tamamı kanalda: <the long video's title>", last line at most 3
+                                            // hashtags incl. #Shorts); "cover": its own Reel cover, same rules as
+                                            // thumbnails, a different frame per Short where possible; [] if none
  "descriptions": ["...", "..."],            // 2 complete descriptions: hook question, what the video teaches, the
                                             // example sentences with Turkish translations, a tip, the chapters block
-                                            // (if chapters), a short call to subscribe, hashtags last line (max 10)
+                                            // (if chapters), why to subscribe (what comes next / how often), hashtags
+                                            // last line (at most 3)
  "chapters": [{{"t": 0, "title": "Giriş"}}, ...],   // main video only; first at 0, >= 3 chapters, >= 10 s apart, use real
                                             // topic changes from the subtitles; [] if the video is under 60 s
  "tags": ["...", ...],                      // 10-20 search phrases, Turkish + German, no '#'
- "pinned_comment": "...",                   // a question that invites comments, e.g. a mini exercise from the lesson
+ "pinned_comment": "...",                   // a question about the viewer that invites answers, e.g. "Sınavın ne
+                                            // zaman? Yorumlara yaz, birlikte hazırlanalım." or a mini exercise from the
+                                            // lesson ("Bu cümleyi düzelt: ...")
  "level": "A2",                             // CEFR level of the lesson
- "playlist": "...",                         // a playlist name this belongs in (short, Turkish)
- "thumbnails": [                            // 3 different proposals
+ "playlist": "...",                         // the course playlist this belongs in (see the list above)
+ "thumbnails": [                            // 3 different proposals (tested against each other on YouTube)
    {{"frame": 3, "words": ["zu +", "Infinitiv"], "question": "NE ZAMAN?"}},
    ...],                                    // words: 1-3 short German keyword lines (<= 12 chars each, what people
-                                            // search); question: <= 14 chars, Turkish, upper case, a hook
+                                            // search); question: <= 14 chars, Turkish, upper case, a hook that ADDS to
+                                            // the title (a result or a mistake: "3 HATA", "HAZIR CEVAP", "BUNU DEME!"),
+                                            // not a repeat of it. Pick frames with a clear, lively expression.
  "notes": []                                // anything the presenter should check (English)
 }}
 """
@@ -108,11 +124,23 @@ def candidates(segs, inter_path, model, work, n=12):
     return files, d / 'candidates.jpg'
 
 
-def build_prompt(profile, lesson, topic, cues, versions, ncand):
+def series_numbers(root, profile):
+    """{kind: 'Türklerin Almanca Hataları #4'}: each series' next number, counted from the Shorts titles of all lessons."""
+    names = profile['youtube'].get('series', {})
+    titles = [s.get('title', '') for p in Path(root).glob('*/*/youtube.json') for s in
+              json.loads(p.read_text(encoding='utf-8')).get('shorts', [])]
+    return {k: f'{n} #{sum(n in t for t in titles) + 1}' for k, n in names.items() if n}
+
+
+def build_prompt(profile, lesson, topic, cues, versions, ncand, series=None):
     rows = [f'{ts(c["s"])}  {c["lang"]}  {c["text"].replace("<", "").replace(">", "")}' +
-            (f'  [{c["tr"]}]' if c['lang'] == 'de' and c.get('tr') else '') for c in cues]
+            (f'  [{c["tr"]}]' if c['lang'] == 'de' and c.get('tr') else '') +
+            (f'  ({c["mark"]})' if c.get('mark') else '') for c in cues]
+    yt = profile['youtube']
     return PROMPT.format(channel=profile['name'], handle=profile.get('handle', ''), lesson=lesson, topic=topic,
-                         versions=versions, hashtags=' '.join(profile['youtube'].get('hashtags', [])), cues='\n'.join(rows), ncand=ncand)
+                         versions=versions, hashtags=' '.join(yt.get('hashtags', [])), cues='\n'.join(rows), ncand=ncand,
+                         series=', '.join(f'{k}: "{v}"' for k, v in (series or {}).items()) or '-',
+                         playlists=', '.join(f'"{p}"' for p in yt.get('playlists', [])) or '-')
 
 
 def check_chapters(ch, total):

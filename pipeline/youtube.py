@@ -125,20 +125,25 @@ def taken_elsewhere(out):
 
 def next_slot(out, applied, settings, planned=()):
     """When the next Short goes public: one Short a day (settings "shorts_every" days apart) at "shorts_time"
-    (Istanbul), after every Short already out or scheduled in any lesson, and never in the past.
+    (Istanbul), after every Short already out or scheduled in any lesson, never in the past, and never within 3 hours
+    of a long video going public (then 3 hours after it, like the Sunday teaser).
     Subscribers get a notification per video, so Shorts are spread out instead of published together."""
     recs = list(applied.items())
     for p in out.parent.parent.glob(f'*/*/{APPLIED}'):
         if p.parent != out:
             recs += json.loads(p.read_text(encoding='utf-8')).items()
-    times = [datetime.fromisoformat(r['publish_at'].replace('Z', '+00:00')) for f, r in recs
-             if re.search(r'-short(-\d+)?\.mp4$', f) and r.get('publish_at')] + list(planned)
+    when = lambda r: datetime.fromisoformat(r['publish_at'].replace('Z', '+00:00'))
+    times = [when(r) for f, r in recs if re.search(r'-short(-\d+)?\.mp4$', f) and r.get('publish_at')] + list(planned)
+    longs = [when(r) for f, r in recs if f.endswith('-video.mp4') and r.get('publish_at')]
     hh, mm = map(int, settings.get('shorts_time', SHORTS_TIME).split(':'))
     now = datetime.now(ISTANBUL)
     day = max(times).astimezone(ISTANBUL).date() + timedelta(days=int(settings.get('shorts_every', 1))) if times else now.date()
     at = datetime(day.year, day.month, day.day, hh, mm, tzinfo=ISTANBUL)
     while at < now + timedelta(minutes=30):
         at += timedelta(days=1)
+    near = [t for t in longs if abs(t - at) < timedelta(hours=3)]
+    if near:
+        at = max(near).astimezone(ISTANBUL) + timedelta(hours=3)
     return at
 
 

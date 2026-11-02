@@ -39,6 +39,7 @@ ISTANBUL = timezone(timedelta(hours=3))
 POSTED = 'instagram-posted.json'
 POST_TIME = '20:00'                                      # Istanbul; the daily Reel goes out after this time
 GAP = timedelta(hours=20)                                # at most one Reel per day
+LONG_HOURS = (12, 17)                                    # Facebook long videos: from 12:00, last start 16:59
 MAX_TAGS = 5                                             # Instagram shows few hashtags; more looks like spam
 SAVE_LINE = '💾 Kaydet, sonra tekrar et!'
 YOUTUBE_LINE = "▶️ Dersin tamamı YouTube'da: Almanca Dil Atölyesi (link profilde)"
@@ -279,6 +280,9 @@ def write_md(lesson, out, data):
     L = ['# Instagram Reels', '',
          'Posted automatically, one Reel a day after ' + POST_TIME + ' (Istanbul). To post one by hand instead: '
          'Instagram → + → Reel → pick the video → Edit cover → Add from camera roll → the cover → paste the caption.', '']
+    lv = posted.get('_facebook', {}).get('long')
+    if lv:
+        L += [f"Long video on the Facebook Page: posted {lv['posted']}: {lv['permalink']}", '']
     for mp4, sh in reels(out, data):
         p = posted.get(mp4.name, {})
         state = f"posted {p['posted']}: {p.get('permalink', '')}" if 'id' in p else 'not posted yet'
@@ -430,6 +434,61 @@ def post_facebook(mp4, cover, text, log):
     return {'id': v['video_id'], 'permalink': 'https://www.facebook.com' + link if link.startswith('/') else link, **stamp()}
 
 
+def page_video(mp4, **fields):
+    """Chunked upload of a video to the Page (a single upload of 158 MB was refused with 413). Returns {'id': ...}."""
+    url = f"https://graph-video.facebook.com/v26.0/{saved()['page_id']}/videos"
+    s = call('POST', url, upload_phase='start', file_size=str(mp4.stat().st_size))
+    start, end = int(s['start_offset']), int(s['end_offset'])
+    with open(mp4, 'rb') as f:
+        while start < end:
+            f.seek(start)
+            r = call('POST', url, files={'video_file_chunk': (mp4.name, f.read(end - start), 'application/octet-stream')},
+                     upload_phase='transfer', upload_session_id=s['upload_session_id'], start_offset=str(start))
+            start, end = int(r['start_offset']), int(r['end_offset'])
+    call('POST', url, upload_phase='finish', upload_session_id=s['upload_session_id'], **fields)
+    return {'id': s['video_id']}
+
+
+def long_video(lesson):
+    """(mp4, youtube.json data, YouTube record) of the lesson's long video, when YouTube has it public; else None."""
+    lesson, out, data = lesson_files(lesson)
+    mp4 = next(out.glob('*-video.mp4'), None)
+    p = out / 'youtube-applied.json'
+    rec = (json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}).get(mp4.name if mp4 else '', {})
+    at = rec.get('publish_at')
+    if not mp4 or not rec.get('public') or not at or datetime.fromisoformat(at.replace('Z', '+00:00')) > datetime.now(timezone.utc):
+        return None
+    return mp4, data, rec
+
+
+def post_long_facebook(lesson, dry=False, log=print):
+    """The lesson's long video as a normal Facebook Page video (16:9 suits Facebook; Instagram gets the Reels only),
+    once it is public on YouTube. Same title and description as on YouTube (chapters work on Facebook too)."""
+    found = long_video(lesson)
+    lesson, out, _ = lesson_files(lesson)
+    posted = load(out)
+    if not found or 'long' in posted.get('_facebook', {}):
+        return None
+    mp4, data, rec = found
+    title = data['titles'][0][:255]
+    text = data['descriptions'][0].replace('\r', '')
+    if dry:
+        return f'would post {mp4.name} to the Facebook Page: {title}'
+    log(f'{mp4.name}: sending to the Facebook Page as a video')
+    v = page_video(mp4, title=title, description=text, published='true')
+    link = ''
+    for _ in range(30):                                   # Facebook processes the video; the link comes with it
+        time.sleep(10)
+        link = call('GET', v['id'], fields='permalink_url').get('permalink_url', '')
+        if link:
+            break
+    posted.setdefault('_facebook', {})['long'] = {'id': v['id'], 'permalink': 'https://www.facebook.com' + link
+                                                  if link.startswith('/') else link, **stamp()}
+    (out / POSTED).write_text(json.dumps(posted, ensure_ascii=False, indent=1), encoding='utf-8')
+    write_md(lesson, out, data)
+    return f"Facebook Page: {mp4.name} posted {posted['_facebook']['long']['permalink']}"
+
+
 def post_next(lesson, dry=False, force=False, log=print):
     """Post the lesson's next Reel. Returns a one-line summary, or None when it has none left."""
     lesson, out, data = lesson_files(lesson)
@@ -477,21 +536,33 @@ def post_next(lesson, dry=False, force=False, log=print):
 
 def daily(root, log=print):
     """Watcher step: at most one Reel a day, after POST_TIME, oldest lesson first, not before channel.json's
-    "instagram": {"start": "YYYY-MM-DD"} (a new account should be used by hand for a few days first)."""
+    "instagram": {"start": "YYYY-MM-DD"} (a new account should be used by hand for a few days first).
+    Facebook-login mode also puts each lesson's long video on the Page once it is public on YouTube: one a day, between
+    LONG_HOURS, so it never lands within 3 hours of the evening Reel."""
     if not TOKEN.exists():
         return None
     now = datetime.now(ISTANBUL)
+    start = profile(root).get('instagram', {}).get('start')
+    if start and now.strftime('%Y-%m-%d') < start:
+        return None
+    lessons = sorted((p.parent.parent for p in Path(root).glob('*/*/youtube.json') if not p.parent.parent.name.startswith('_')),
+                     key=lambda l: next(l.glob('*/youtube.json')).stat().st_mtime)
+    if fb_mode() and LONG_HOURS[0] <= now.hour < LONG_HOURS[1]:
+        longs = [datetime.fromisoformat(r['long']['posted_utc']) for l in lessons for o in l.glob(f'*/{POSTED}')
+                 for r in [json.loads(o.read_text(encoding='utf-8')).get('_facebook', {})] if 'long' in r]
+        if not longs or datetime.now(timezone.utc) - max(longs) > GAP:
+            for lesson in lessons:
+                r = post_long_facebook(lesson, log=log)
+                if r:
+                    log(r)
+                    return r
     hh, mm = map(int, POST_TIME.split(':'))
     last = last_post(root)
-    start = profile(root).get('instagram', {}).get('start')
-    if (now.hour, now.minute) < (hh, mm) or (last and datetime.now(timezone.utc) - last < GAP) or \
-            (start and now.strftime('%Y-%m-%d') < start):
+    if (now.hour, now.minute) < (hh, mm) or (last and datetime.now(timezone.utc) - last < GAP):
         return None
     warn = renew_warning()
     if warn:
         log(warn)
-    lessons = sorted((p.parent.parent for p in Path(root).glob('*/*/youtube.json') if not p.parent.parent.name.startswith('_')),
-                     key=lambda l: next(l.glob('*/youtube.json')).stat().st_mtime)
     for lesson in lessons:
         r = post_next(lesson, log=log)
         if r:

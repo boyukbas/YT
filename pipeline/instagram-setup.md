@@ -87,7 +87,8 @@ If it says "No Instagram account linked", do the linking in step 2 and make a ne
 - **The watcher:** Task Scheduler task "YT Easy mode watcher" runs every 10 minutes (also does YouTube and new
   lessons). After 20:00, if nothing went out in the last 20 hours, it posts the next Reel: first Instagram, then the
   same Reel on the Page (with the clickable YouTube link of the full lesson). Oldest lesson first, in Short order.
-  If the Page part fails, it retries the next day before moving on. Nothing is posted until step 4 is done, and not
+  If the Page part fails, it retries the next day before moving on. The **long video** goes on the Page too (its
+  YouTube title + description, chunked upload): between 12:00 and 17:00, once it is public on YouTube. Nothing is posted until step 4 is done, and not
   before the start date in `_channel/channel.json` → `"instagram": {"start": "2026-11-05"}` (change or delete it to
   start earlier).
 - **Renewal:** the key itself never expires, but Meta stops its data access 90 days after your last login to the app
@@ -109,4 +110,6 @@ through a temporary Cloudflare link. New apps can no longer pick it.)
 - **Music:** the Reels carry our own background music from YouTube's Audio Library. That's fine on Instagram as
   well; just never add Instagram's music on top by hand to a Reel that was posted through the API.
 - **Long video:** 16:9 and 6+ minutes doesn't work on Instagram; the Reels point to YouTube instead ("link profilde").
+  The Facebook Page does get it (see the watcher above).
+- **Profile art:** `_channel/brand/` has the Facebook cover, Instagram highlight covers and the YouTube banner.
 - **Not possible by API:** Instagram's own music, collaborators via invite, editing the cover after posting.

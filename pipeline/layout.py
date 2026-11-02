@@ -5,6 +5,9 @@ Rules (agreed with the channel):
 - choose once per video: long videos prefer the top, Shorts the bottom (under the chin, above YouTube's buttons)
 - if the preferred side fails for a few lines only, just those lines use the other side; if it fails often,
   the other side is used for the whole video; if neither fits, the picture shrinks and the text gets its own band
+- German is the lesson, so it is the biggest text: German lines > Turkish lines > the Turkish translation under a German
+  line; German words inside a Turkish line are a bit bigger too (2026-11-02, from the channel's growth review)
+- a wrong example ("mark": "wrong") shows red with ✗, the corrected one ("right") green with ✓
 """
 import json
 import cv2
@@ -71,14 +74,15 @@ class Spec:
         self.lifted = 0
         self.src_size = (src_w, src_h)
         vertical = H > W
-        self.size = 64 if vertical else round(0.056 * H)
-        self.tsize = 46 if vertical else round(0.043 * H)
+        self.size = 58 if vertical else round(0.051 * H)          # Turkish lines
+        self.dsize = 74 if vertical else round(0.064 * H)         # German lines (the lesson): biggest
+        self.tsize = 42 if vertical else round(0.037 * H)         # Turkish translation under a German line
         self.margin_l, self.margin_r = (60, 180) if short else (int(0.1 * W), int(0.1 * W))
         self.maxw = 820 if vertical else int(0.62 * W)
-        # text anchors: top edge of a top block, bottom edge of a bottom block (Shorts: below the top bar,
-        # above the title/channel area)
+        # text anchors: top edge of a top block, bottom edge of a bottom block (Shorts/Reels: below the top bar, above
+        # the title/caption area that YouTube, Instagram and Facebook lay over the bottom ~20 %)
         self.top = int(0.09 * H) if short else int(0.045 * H)
-        self.bottom = int(0.79 * H) if short else int(0.95 * H)
+        self.bottom = int(0.77 * H) if short else int(0.95 * H)
         self.logo = None
 
     studio = False
@@ -91,18 +95,25 @@ class Spec:
         return ((box[0] - cx) * sx + px, (box[1] - cy) * sy + py, (box[2] - cx) * sx + px, (box[3] - cy) * sy + py)
 
 
-def studio(name, src_w, src_h):
+STUDIO_CROP = 0.78        # share of the vertical recording's height shown: her face ~28 % bigger than the whole frame
+
+
+def studio(name, src_w, src_h, faces=()):
     """Long video from a vertical recording: 16:9 canvas on the animated channel background, her picture as a card on
-    the left, a panel on the right for the section header, word cards and subtitles (text never touches her)."""
+    the left, a panel on the right for the section header, word cards and subtitles (text never touches her).
+    The card shows the upper STUDIO_CROP of the frame around her face, so she isn't tiny on a TV or desktop."""
     W, H = 1920, 1080
+    ch = int(src_h * STUDIO_CROP)
+    fy = sorted((f[1] + f[3]) / 2 for f in faces if f)
+    cy = min(max(0, (fy[len(fy) // 2] if fy else 0.32 * src_h) - 0.32 * ch), src_h - ch)
     ph = int(0.926 * H)
-    pw = int(ph * src_w / src_h)
-    s = Spec(name, W, H, False, src_w, src_h, pic=(110, (H - ph) // 2, pw, ph))
+    pw = int(ph * src_w / ch)
+    s = Spec(name, W, H, False, src_w, src_h, crop=(0, cy, src_w, ch), pic=(110, (H - ph) // 2, pw, ph))
     s.studio = True
     s.panel = (110 + pw + 90, W - 70)                    # x range of the text panel
     s.margin_l, s.margin_r = s.panel[0], W - s.panel[1]
     s.maxw = s.panel[1] - s.panel[0] - 40
-    s.size, s.tsize = 64, 46
+    s.size, s.dsize, s.tsize = 56, 70, 40
     s.top, s.bottom = int(0.30 * H), int(0.90 * H)
     return s
 
@@ -142,8 +153,14 @@ def clean(text):
     return ' '.join(text.translate(str.maketrans('', '', '[]<>')).split())
 
 
-def lines_of(text, f, maxw, de=False):
-    """'Turkish [Deutsch <zu lernen>] text' → wrapped lines of [(word, is_german, is_pattern)]."""
+INLINE_DE = 1.15          # German words inside a Turkish line, relative to the Turkish size
+MARKS = {'wrong': ('✘', '#FF4B4B'), 'right': ('✔', '#2FD36B')}
+SYMBOLS = 'Segoe UI Symbol'                      # ✗ ✓ (seguisym.ttf; Arial has neither)
+
+
+def lines_of(text, f, maxw, de=False, fde=None, lead=0):
+    """'Turkish [Deutsch <zu lernen>] text' → wrapped lines of [(word, is_german, is_pattern)]. fde: font that German
+    words are measured with when they are bigger than the rest; lead: room taken by a ✗/✓ in front of the first row."""
     words, hl = [], False
     for tok in text.replace('[', ' [ ').replace(']', ' ] ').replace('<', ' < ').replace('>', ' > ').split():
         if tok in ('[', ']'):
@@ -154,26 +171,35 @@ def lines_of(text, f, maxw, de=False):
             words[-1] = (words[-1][0] + tok,) + words[-1][1:]      # "<zu lernen>." → "lernen."
         else:
             words.append((tok, de, hl))
-    rows = wrap([w[0] for w in words], maxw, f.getlength)
+    german = {w for w, isde, _ in words if isde}
+    meas = (lambda s: sum((fde if w in german else f).getlength(w) for w in s.split()) + f.getlength(' ') * s.count(' ')) \
+        if fde else f.getlength
+    rows = wrap([w[0] for w in words], maxw - lead, meas)
     out, k = [], 0
     for r in rows:
         out.append(words[k:k + len(r)])
         k += len(r)
-    return out
+    return out, meas
 
 
 def blocks(cues, spec, fonts_dir):
     """Per cue: wrapped main lines, translation lines and the block height in canvas pixels."""
-    fm, ft = font(fonts_dir, 1, 0, spec.size), font(fonts_dir, 0, 1, spec.tsize)
+    ft = font(fonts_dir, 0, 1, spec.tsize)
+    fd, fi = font(fonts_dir, 1, 0, spec.dsize), font(fonts_dir, 1, 0, round(spec.size * INLINE_DE))
     out = []
     for c in cues:
+        lead = spec.dsize * 1.1 if c.get('mark') in MARKS else 0
         if c['lang'] == 'de':
-            main = lines_of(c['text'].replace('[', '').replace(']', ''), fm, spec.maxw, de=True)
-            trn = lines_of(clean(c['tr']), ft, spec.maxw) if c.get('tr') else []
+            main, meas = lines_of(c['text'].replace('[', '').replace(']', ''), fd, spec.maxw, de=True, lead=lead)
+            trn, tmeas = lines_of(clean(c['tr']), ft, spec.maxw) if c.get('tr') else ([], ft.getlength)
+            hs = [spec.dsize] * len(main)
         else:
-            main, trn = lines_of(c['text'], fm, spec.maxw), []
-        width = max([fm.getlength(' '.join(w[0] for w in l)) for l in main] + [ft.getlength(' '.join(w[0] for w in l)) for l in trn])
-        out.append({'main': main, 'trn': trn, 'h': len(main) * spec.size * 1.18 + len(trn) * spec.tsize * 1.18 + 10, 'w': width})
+            main, meas = lines_of(c['text'], font(fonts_dir, 1, 0, spec.size), spec.maxw, fde=fi, lead=lead)
+            trn, tmeas = [], ft.getlength
+            hs = [round(spec.size * INLINE_DE) if any(w[1] for w in l) else spec.size for l in main]
+        width = max([meas(' '.join(w[0] for w in l)) + (lead if i == 0 else 0) for i, l in enumerate(main)] +
+                    [tmeas(' '.join(w[0] for w in l)) for l in trn])
+        out.append({'main': main, 'trn': trn, 'h': sum(hs) * 1.18 + len(trn) * spec.tsize * 1.18 + 10, 'w': width})
     return out
 
 
@@ -323,20 +349,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     bord = round(spec.size / 12.8, 1)
     hl = ass_color(colors['pattern'])
 
-    def line(words):
-        """One subtitle row; tags only where the word kind changes. The lesson's pattern gets a thick outline in the
-        accent colour, like a highlighter."""
+    def line(words, lang, ok=None):
+        """One subtitle row; tags only where the word kind changes. German is bigger (the whole line for German cues,
+        a bit for German words in Turkish). The lesson's pattern gets a thick outline in the accent colour, like a
+        highlighter. ok: a ✗/✓ colour for the German words of a marked example."""
         s, state = '', None
         for j, (w, isde, mark) in enumerate(words):
+            mark = mark and not ok                               # a ✘/✔ line keeps its own colour, no highlighter
             if (isde, mark) != state:
                 look = (r'\3c' + hl + r'&\bord' + str(round(bord * 1.9, 1))) if mark else (r'\3c&H000000&\bord' + str(bord))
-                s += '{' + r'\c' + (de if isde else tr) + '&' + look + '}'
+                fs = spec.dsize if lang == 'de' else round(spec.size * INLINE_DE) if isde else spec.size
+                s += '{' + rf'\fs{fs}\c' + ((ok or de) if isde else tr) + '&' + look + '}'
                 state = (isde, mark)
             s += (' ' if j else '') + w
         return s
 
     for c, b, side in zip(cues, blks, sides):
-        body = r'\N'.join(line(l) for l in b['main'])
+        sym, col = MARKS.get(c.get('mark'), (None, None))
+        ok = ass_color(col) if col else None
+        rows = [line(l, c['lang'], ok) for l in b['main']]
+        if sym:
+            rows[0] = rf'{{\fn{SYMBOLS}\fs{spec.dsize}\c{ok}&\3c&H000000&\bord{bord}}}{sym} {{\fnArial}}' + rows[0]
+        body = r'\N'.join(rows)
         if b['trn']:
             body += r'\N{\fs' + str(spec.tsize) + r'\b0\i1\c' + tl + r'&\3c&H000000&\bord' + str(round(bord * 0.75, 1)) + '}' + \
                 r'\N'.join(' '.join(w[0] for w in l) for l in b['trn'])

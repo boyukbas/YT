@@ -26,7 +26,8 @@ Return ONE JSON object, nothing else:
                                         // together are longer than {short_max} s: extra ranges to leave out of the one
                                         // condensed Short so it ends up under {short_max} s. [] otherwise.
    "cues": [{{"s": 1.27, "e": 4.10, "lang": "tr", "text": "...", "de": "German translation of this Turkish line"}},
-            {{"s": 4.2, "e": 7.0, "lang": "de", "text": "Ich fange an, Deutsch zu lernen.", "tr": "Almanca öğrenmeye başlıyorum."}}]
+            {{"s": 4.2, "e": 7.0, "lang": "de", "text": "Ich fange an, Deutsch zu lernen.", "tr": "Almanca öğrenmeye başlıyorum."}},
+            {{"s": 7.3, "e": 9.0, "lang": "de", "text": "Ich bin kalt.", "tr": "Ben soğuk biriyim.", "mark": "wrong"}}]
  }}],
  "vocab": [{{"clip": "c1", "s": 61.1, "word": "die Lust", "tr": "istek, heves"}}],
                                         // word cards shown on screen: about ONE every 30-60 s of video, the harder /
@@ -38,16 +39,25 @@ Return ONE JSON object, nothing else:
                                         // as chapters); short Turkish titles, max ~28 characters; "tag": the part
                                         // number, or "!" for an important note. [] if no parts.
  "shorts": [{{"clip": "c1", "s": 52.3, "e": 94.0, "cuts": [[70.1, 74.6, "repeats the question"]],
-             "idea": "Vorname mı Nachname mı?"}}],
+             "idea": "Vorname mı Nachname mı?", "kind": "mistake"}}],
                                         // separate Shorts, each a part that makes sense ON ITS OWN (a viewer who never
-                                        // saw the lesson understands it): one question/rule/contrast with its examples.
-                                        // 20-90 s each (cuts included), start at the start of a sentence and end after
-                                        // a complete thought; skip parts that only lead somewhere else. At most
+                                        // saw the lesson understands it): ONE point (one mistake, one exam answer, one
+                                        // rule with its examples), explained in Turkish.
+                                        // Length: 20-45 s is best, 60 s at most (cuts included); only a German
+                                        // narration of a real moment ("kind": "ege") may run to 90 s. Viewers swipe
+                                        // away at ~30 s, so cut side remarks hard.
+                                        // Start ON the hook: the wrong sentence, the exam question or the surprising
+                                        // fact in the first second (never a greeting or "bu videoda"); end right after
+                                        // the payoff (the right form / the answer), ideally on a line that loops back
+                                        // to the start. Skip parts that only lead somewhere else. At most
                                         // {shorts_max}: only the strongest (a clear hook a stranger would stop for),
                                         // best first; they are published a day or more apart, so fewer good ones beat
                                         // many. [] for lessons under ~60 s. "cuts": extra ranges to leave out of that Short (side remarks,
                                         // "next part" transitions). "idea": the hook shown at its start (<= 26
                                         // characters, Turkish or the German phrase itself; may end with "?").
+                                        // "kind": "mistake" (a typical Turkish speaker's mistake), "exam" (an exam
+                                        // task/answer), "life" (life in Germany), "ege" (German narration of a real
+                                        // moment) or "rule".
  "next": "dass ile yan cümle",          // the topic she announces for the next video ("" if none)
  "cta": {{"clip": "c4", "s": 16.3}},     // where she asks viewers to subscribe/like (null if she doesn't)
  "title_hint": "zu + Infinitiv",        // the lesson topic in a few words
@@ -65,6 +75,8 @@ Rules for cues:
 - Times in seconds, clip-local, taken from the TR word timings (first word start, last word end). Cues never overlap,
   stay inside [in, out] and outside cuts.
 - Cover everything she says between in and out.
+- When she contrasts a WRONG German sentence with the RIGHT one (a typical mistake, ✗ vs ✓), give that German cue
+  "mark": "wrong" or "mark": "right" (shown red with ✗ / green with ✓). Only for such deliberate wrong/right pairs.
 - Mark the structure this lesson teaches inside German text with <angle brackets>, e.g.
   "Ich habe Lust, Deutsch <zu lernen>." / "[Ich habe Lust, mit dem Sport <anzufangen>]". Only the target structure,
   only in example sentences; it gets highlighted on screen.
@@ -152,7 +164,8 @@ def timeline(ans, clips, short=False):
             s, e = to_out(max(c['s'], a0)), to_out(min(c['e'], b0))
             if e - s > 0.3:
                 cues.append({'s': s, 'e': e, 'lang': c['lang'], 'text': c['text'].strip(),
-                             'tr': c.get('tr', '').strip(), 'de': c.get('de', '').strip()})
+                             'tr': c.get('tr', '').strip(), 'de': c.get('de', '').strip(),
+                             **({'mark': c['mark']} if c.get('mark') in ('wrong', 'right') else {})})
         if ans.get('cta') and ans['cta'].get('clip') == cid:
             cta = to_out(ans['cta']['s'])
         for v in ans.get('sections', []):

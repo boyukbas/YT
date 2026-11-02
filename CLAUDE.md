@@ -20,12 +20,16 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   `instagram.py` (setup: `pipeline/instagram-setup.md`; Meta app "Almanca Dil Atölyesi", Facebook-login mode).
   Watcher: Task Scheduler "YT Easy mode watcher" every 10 min (`pipeline/watch.cmd`, log `D:\YT\easy-work\watch.log`).
   YouTube API quota resets at midnight Pacific = 11:00 Istanbul in winter, 10:00 in summer.
+  **User says "new video(s)" → follow `pipeline/RUNBOOK.md`** (STATUS → `review.py` rule check → look at frames → report).
 - The iOS workflow ignores `docs/**`, `pipeline/**`, `README.md` and `CLAUDE.md` changes.
 
 ## Channel style (same everywhere: video, thumbnails, app)
 Palette in `_channel/channel.json` (Drive), card in `_channel/brand.png`: **German = yellow #FFD21A, Turkish = white,
 accent = red #E30A17, surfaces = navy #101628**, ink #15171C, translation lines #E8EAF0. Thumbnails: the V1 format
 (`pipeline/thumbnail.py`). Subtitles never cover eyes/nose/mouth; long videos prefer the top, Shorts the bottom.
+German lines are the biggest, Turkish smaller; wrong/right examples get ✘ red / ✔ green. Shorts 20–45 s (60 max), one
+point, hook first; titles without '#', ≤ 3 hashtags; never two uploads within 3 h (growth plan, Nov 2026).
+Channel art in `_channel/brand/` (`pipeline/brandkit.py`); Sinem's filming guide `_channel/CEKIM-REHBERI.txt`.
 Word cards ("KELİME"): one harder word every 30–60 s. Section labels at each numbered part; the lesson's pattern is
 highlighted (yellow text, red outline); 10 s end-screen card "Sıradaki ders". Pipeline gotcha: never let ffmpeg read
 looped images from the Drive mount `J:` (it stalls) — the pipeline renders from a local copy of `_channel`.

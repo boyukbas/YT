@@ -47,6 +47,9 @@ def local_copy(src, dst):
 
 def load_profile(root):
     ch = local_copy(Path(root) / '_channel', WORK_ROOT / '_channel')
+    sym = ch / 'fonts' / 'seguisym.ttf'                  # ✗ / ✓ on marked examples (layout.MARKS); Windows' own font
+    if not sym.exists() and Path(r'C:\Windows\Fonts\seguisym.ttf').exists():
+        shutil.copy2(r'C:\Windows\Fonts\seguisym.ttf', sym)
     p = json.loads((ch / 'channel.json').read_text(encoding='utf-8'))
     assets = {'logo': ch / p['logo'], 'subscribe': ch / p['subscribe'], 'fonts': ch / 'fonts', 'music': ch / 'music'}
     pal = p['palette']
@@ -200,12 +203,17 @@ def process(lesson, root, log_only=False):
     main = C.timeline(ans, clips)
     versions = [('video', main, not landscape and main[2] <= SHORT_MAX)]
     settings = json.loads((lesson / 'settings.json').read_text(encoding='utf-8')) if (lesson / 'settings.json').exists() else {}
-    ideas = {}
+    ideas, kinds = {}, {}
     if settings.get('short', profile.get('short', True)) and (landscape or main[2] > SHORT_MAX):
         cap = int(settings.get('shorts_max', profile.get('shorts_max', 3)))
         if len(ans.get('shorts', [])) > cap:        # few good Shorts, published days apart, don't flood subscribers
             st.log(f"WARNING: {len(ans['shorts'])} Shorts proposed, keeping the first {cap} (shorts_max)")
         parts = [(f'short-{i}', C.part(ans, sh), sh.get('idea', '')) for i, sh in enumerate(ans.get('shorts', [])[:cap], 1)]
+        kinds = {f'short-{i}': sh.get('kind', '') for i, sh in enumerate(ans.get('shorts', [])[:cap], 1)}
+        for i, sh in enumerate(ans.get('shorts', [])[:cap], 1):
+            n = C.timeline(C.part(ans, sh), clips, short=True)[2]
+            if n > (90 if sh.get('kind') == 'ege' else 60):
+                st.log(f'WARNING: short-{i} is {n:.0f} s; lesson Shorts work best under 60 s (viewers swipe at ~30 s)')
         if not parts:
             parts = [('short', ans if main[2] > SHORT_MAX else None, '')]
         for vname, a, idea in parts:
@@ -242,7 +250,7 @@ def process(lesson, root, log_only=False):
             cx = min(max(0, fx - side / 2), src[0] - side)
             spec = L.Spec(vname, 1080, 1920, short=True, src_w=src[0], src_h=src[1], crop=(cx, 0, side, side), pic=(0, 200, 1080, 1080))
         elif not is_short and not landscape and profile.get('studio', True):    # vertical recording, long video
-            spec = L.studio(vname, *src)
+            spec = L.studio(vname, *src, faces)
         else:
             spec = L.Spec(vname, *src, short=is_short, src_w=src[0], src_h=src[1])
         visible = bool(src_logo) and spec.crop[0] <= src_logo[0] and src_logo[2] <= spec.crop[0] + spec.crop[2]
@@ -315,11 +323,13 @@ def process(lesson, root, log_only=False):
     # 6. YouTube texts + thumbnails (Claude looks at candidate frames)
     st.set('working', 'Writing titles and descriptions')
     cand, sheet = T.candidates(segs, inter, FACE_MODEL, work)
-    vinfo = ', '.join(f'{v} ({"Short" if sh else "normal video"}, {ts(tl[2])}' + (f', idea: {ideas[v]}' if ideas.get(v) else '') + ')'
-                      for v, tl, sh in specs_info)
-    data = llm.ask(work, 'texts', T.build_prompt(profile, lesson.name, ans.get('title_hint', lesson.name), cues, vinfo, len(cand)),
-                   images=[sheet])
+    vinfo = ', '.join(f'{v} ({"Short" if sh else "normal video"}, {ts(tl[2])}' + (f', idea: {ideas[v]}' if ideas.get(v) else '') +
+                      (f', kind: {kinds[v]}' if kinds.get(v) else '') + ')' for v, tl, sh in specs_info)
+    data = llm.ask(work, 'texts', T.build_prompt(profile, lesson.name, ans.get('title_hint', lesson.name), cues, vinfo, len(cand),
+                                                 T.series_numbers(lesson.parent, profile)), images=[sheet])
     data['chapters'] = T.check_chapters(data.get('chapters', []), total) if not specs_info[0][2] else []
+    for sh in data.get('shorts', []):
+        sh['kind'] = kinds.get(sh.get('version'), '')                # for review.py (length rule) and the series
     st.set('working', 'Making thumbnails')
     cuts = {}
     for i, th in enumerate(data['thumbnails'][:3], 1):
