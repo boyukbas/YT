@@ -33,18 +33,19 @@ def stripe(d, x0, x1, y, h=6):
 
 def person(cv, cut, h, x, y_bottom, fade=0):
     """Cut-out with the thumbnails' white outline. Its cut bottom edge sits on the picture's bottom edge,
-    or (fade > 0) fades into the background over that many pixels; the outline fades out first."""
+    or (fade > 0) the body fades out in a soft oval around the head (so a photo cropped through the shoulders shows
+    no straight edges); the outline fades out first."""
     p = cut.resize((int(cut.width * h / cut.height), h), Image.LANCZOS)
     a = p.split()[3]
     line = a.filter(ImageFilter.MaxFilter(9))
     if fade:
-        def ramp(n, end):                      # 255 down to 0 over n pixels, ending `end` pixels above the bottom
+        def oval(shrink):                      # 255 inside an oval around head + shoulders, soft edge `fade` wide
             m = Image.new('L', p.size, 0)
-            m.paste(255, (0, 0, p.width, h - n - end))
-            m.paste(Image.linear_gradient('L').resize((p.width, n)).transpose(Image.FLIP_TOP_BOTTOM), (0, h - n - end))
-            return m
-        a = Image.composite(a, Image.new('L', p.size, 0), ramp(fade, 0))
-        line = Image.composite(line, Image.new('L', p.size, 0), ramp(fade, fade // 2))
+            w = p.width
+            ImageDraw.Draw(m).ellipse((-0.05 * w + shrink, -0.6 * h + shrink, 1.05 * w - shrink, 0.88 * h - shrink), fill=255)
+            return m.filter(ImageFilter.GaussianBlur(fade / 8))
+        a = Image.composite(a, Image.new('L', p.size, 0), oval(0))
+        line = Image.composite(line, Image.new('L', p.size, 0), oval(fade // 4))
         p.putalpha(a)
     sil = Image.new('RGBA', p.size, WHITE + (0,))
     sil.putalpha(line)
@@ -85,7 +86,7 @@ def banner(cut, logo, out):
     sx, sy, sw, sh = (W - 1546) // 2, (H - 423) // 2, 1546, 423
     cv = canvas(W, H, (sx + sw - 700, sy - 160, sx + sw + 160, sy + sh + 200))
     d = ImageDraw.Draw(cv)
-    person(cv, cut, 760, sx + sw - 510, sy + 25 + 760, fade=220)   # head inside the band, body fades out below it
+    person(cv, cut, 640, sx + sw - 540, sy + 15 + 640, fade=330)   # head inside the band, body fades out below it
     stripe(d, 0, W, H - 18)
     name_block(cv, sx + 30, sy + 40, 1.0, logo)
     d.text((sx + 34, sy + 255), TAGLINE, font=font(50), fill=WHITE)
@@ -99,7 +100,7 @@ def fb_cover(cut, logo, out):
     sx = (W - 1110) // 2
     cv = canvas(W, H, (sx + 700, -100, sx + 1250, H + 100))
     d = ImageDraw.Draw(cv)
-    person(cv, cut, 590, sx + 750, H)
+    person(cv, cut, 640, sx + 580, H - 18, fade=300)
     stripe(d, 0, W, H - 18)
     name_block(cv, sx + 10, 120, 0.85, logo)
     d.text((sx + 14, 330), TAGLINE, font=font(42), fill=WHITE)
