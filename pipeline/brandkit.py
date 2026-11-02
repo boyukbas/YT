@@ -76,7 +76,7 @@ def chips(d, x, y, items, size):
 
 
 TAGLINE = 'Türkçe anlatımla Almanca'
-TOPICS = ['Goethe A1', 'Sınav hazırlık', 'Almanya\'da hayat']
+TOPICS = ['Tercüman Sinem ile', 'Her seviye', 'Sınav hazırlık', 'Almanya\'da hayat']   # not tied to one level
 
 
 def banner(cut, logo, out):
@@ -103,31 +103,36 @@ def fb_cover(cut, logo, out):
     stripe(d, 0, W, H - 18)
     name_block(cv, sx + 10, 120, 0.85, logo)
     d.text((sx + 14, 330), TAGLINE, font=font(42), fill=WHITE)
-    chips(d, sx + 14, 410, TOPICS, 24)
+    chips(d, sx + 14, 410, [t for t in TOPICS if t != 'Her seviye'], 22)      # less room next to her here
     cv.convert('RGB').save(out / 'facebook-cover.jpg', quality=92)
 
 
 def highlights(out):
-    """Instagram highlight covers: 1080×1920, Instagram shows a small circle from the middle, so 2-5 big letters."""
-    items = [('a1', [('A1', YELLOW, F_BLACK)], 'GOETHE'),
+    """Instagram highlight covers: 1080×1920, Instagram shows a small circle from the middle: one big German word
+    (yellow) over its Turkish name (white), as in the videos."""
+    items = [('merhaba', [('Hallo!', YELLOW, F_BLACK)], 'TANIŞALIM'),
              ('hatalar', [('✘', RED, F_SYMBOL), ('✔', GREEN, F_SYMBOL)], 'HATALAR'),
-             ('ege', [('EGE', YELLOW, F_BLACK)], 'ALMANCA'),
-             ('hayat', [('DE', YELLOW, F_BLACK)], "ALMANYA'DA"),
-             ('kelime', [('Aa', YELLOW, F_BLACK)], 'KELİME')]
+             ('sinav', [('Prüfung', YELLOW, F_BLACK)], 'SINAV'),
+             ('hayat', [('Alltag', YELLOW, F_BLACK)], "ALMANYA'DA HAYAT"),
+             ('kelime', [('Wörter', YELLOW, F_BLACK)], 'KELİMELER')]
     for name, parts, small in items:
         W, H = 1080, 1920
         cv = canvas(W, H)
         d = ImageDraw.Draw(cv)
         cx, cy, r = W // 2, H // 2, 470
         d.ellipse((cx - r, cy - r, cx + r, cy + r), outline=YELLOW, width=18)
-        size = 330 if sum(len(p[0]) for p in parts) <= 2 else 250
-        fs = [font(size, f) for _, _, f in parts]
-        ws = [d.textbbox((0, 0), t, font=f)[2] for (t, _, _), f in zip(parts, fs)]
+        size = 330
+        while True:                                               # as big as fits inside the circle
+            fs = [font(size, f) for _, _, f in parts]
+            ws = [d.textbbox((0, 0), t, font=f)[2] for (t, _, _), f in zip(parts, fs)]
+            if sum(ws) + 40 * (len(parts) - 1) <= 2 * r - 280 or size <= 120:
+                break
+            size -= 10
         x = cx - (sum(ws) + 40 * (len(parts) - 1)) // 2
         for (t, c, _), f, w in zip(parts, fs, ws):
             d.text((x, cy - 40), t, font=f, fill=c, anchor='lm')
             x += w + 40
-        f = font(70)
+        f = font(70 if len(small) <= 10 else 52)
         d.text((cx, cy + 210), small, font=f, fill=WHITE, anchor='mm')
         stripe(d, cx - 180, cx + 180, cy + 280, 10)
         cv.convert('RGB').save(out / f'highlight-{name}.jpg', quality=92)

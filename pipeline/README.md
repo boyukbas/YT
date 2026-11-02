@@ -52,8 +52,8 @@ expiry), and the long video on the Page between 12:00 and 17:00 once it is publi
 tokens); the Page gets a direct upload (rupload.facebook.com).
 
 **Shorts:** at most 3 (`shorts_max` in channel.json / settings.json), the strongest self-contained parts (Claude picks
-them in the subtitle step: `shorts` in the answer, each with a `kind`: mistake / exam / life / ege / rule; 20–45 s
-best, 60 s max, `ege` stories up to 90 s; a kind with a series in channel.json `youtube.series` gets
+them in the subtitle step: `shorts` in the answer, each with a `kind`: mistake / exam / life / rule; 20–45 s
+best, 60 s max; a kind with a series in channel.json `youtube.series` gets
 " | <series> #n" in its title); they go public one a day at 19:00, never within 3 h of a long video (youtube.py schedules them),
 `<lesson>-short-1.mp4`, `-short-2.mp4`, … each with its own title and description in `youtube.md`. Lessons without
 such parts get one condensed Short.

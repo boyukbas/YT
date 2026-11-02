@@ -43,8 +43,7 @@ Return ONE JSON object, nothing else:
                                         // separate Shorts, each a part that makes sense ON ITS OWN (a viewer who never
                                         // saw the lesson understands it): ONE point (one mistake, one exam answer, one
                                         // rule with its examples), explained in Turkish.
-                                        // Length: 20-45 s is best, 60 s at most (cuts included); only a German
-                                        // narration of a real moment ("kind": "ege") may run to 90 s. Viewers swipe
+                                        // Length: 20-45 s is best, 60 s at most (cuts included). Viewers swipe
                                         // away at ~30 s, so cut side remarks hard.
                                         // Start ON the hook: the wrong sentence, the exam question or the surprising
                                         // fact in the first second (never a greeting or "bu videoda"); end right after
@@ -56,8 +55,7 @@ Return ONE JSON object, nothing else:
                                         // "next part" transitions). "idea": the hook shown at its start (<= 26
                                         // characters, Turkish or the German phrase itself; may end with "?").
                                         // "kind": "mistake" (a typical Turkish speaker's mistake), "exam" (an exam
-                                        // task/answer), "life" (life in Germany), "ege" (German narration of a real
-                                        // moment) or "rule".
+                                        // task/answer), "life" (life in Germany) or "rule".
  "next": "dass ile yan cümle",          // the topic she announces for the next video ("" if none)
  "cta": {{"clip": "c4", "s": 16.3}},     // where she asks viewers to subscribe/like (null if she doesn't)
  "title_hint": "zu + Infinitiv",        // the lesson topic in a few words

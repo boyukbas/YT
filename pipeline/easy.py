@@ -212,7 +212,7 @@ def process(lesson, root, log_only=False):
         kinds = {f'short-{i}': sh.get('kind', '') for i, sh in enumerate(ans.get('shorts', [])[:cap], 1)}
         for i, sh in enumerate(ans.get('shorts', [])[:cap], 1):
             n = C.timeline(C.part(ans, sh), clips, short=True)[2]
-            if n > (90 if sh.get('kind') == 'ege' else 60):
+            if n > 60:
                 st.log(f'WARNING: short-{i} is {n:.0f} s; lesson Shorts work best under 60 s (viewers swipe at ~30 s)')
         if not parts:
             parts = [('short', ans if main[2] > SHORT_MAX else None, '')]

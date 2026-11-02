@@ -76,7 +76,7 @@ def main(lesson):
         p = probe(str(m))
         v = m.stem.split('-short')[-1]
         kind = kinds.get('short' + v, '')
-        cap = 90 if kind == 'ege' else 60
+        cap = 60
         say(p['height'] > p['width'] and p['duration'] <= cap,
             f"{m.name}: {p['width']}x{p['height']}, {p['duration']:.0f} s (kind {kind or '-'}, best under {cap} s)")
     for f in ['thumbnail-1.jpg', 'thumbnail-2.jpg', 'thumbnail-3.jpg', 'youtube.md']:

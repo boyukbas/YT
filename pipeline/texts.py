@@ -15,9 +15,12 @@ Channel hashtags (pick from these first): {hashtags}
 Shorts series (a Short of that kind gets the series in its title, with the number given): {series}
 Course playlists (pick the one that fits; a new name only if none does): {playlists}
 
-The channel's audience: Turks preparing for a German exam (Goethe/telc A1 for family reunification, B1) or moving to /
-living in Germany. Titles promise a result or name a mistake/exam moment, they don't just name the grammar topic:
-"Goethe A1 Sprechen Teil 1: Adayların En Çok Yaptığı 3 Hata (+ Hazır Cevap)" beats "Kendini Tanıtma 7 Başlık".
+The channel's audience: Turkish speakers learning German at any level (A1 to B2/C1): for an exam (Goethe, telc), for
+work in Germany (e.g. health professionals), or for moving to / living in Germany. Sinem is a German-Turkish
+translator and interpreter who teaches German. The channel is not tied to one level or exam: name the level or exam
+only when the lesson really is about it.
+Titles promise a result or name a mistake/exam moment, they don't just name the grammar topic:
+"Almanca Kendini Tanıtma: Türklerin En Çok Yaptığı 3 Hata (+ Hazır Cevap)" beats "Kendini Tanıtma 7 Başlık".
 Question titles get more clicks on this channel than level labels like "A2 Almanca".
 
 Final subtitles of the main video (time  lang  text  [translation]):
@@ -29,7 +32,7 @@ keywords go big next to her). Prefer a natural smile, eyes open, looking at the 
 Return ONE JSON object, nothing else:
 {{
  "titles": ["...", "...", "..."],           // 3 different angles for Test & Compare; <= 70 characters; Turkish; main
-                                            // keyword early (what people search: "Goethe A1 Sprechen", "Anmeldung");
+                                            // keyword early (what people search: "Almanca kendini tanıtma", "Anmeldung");
                                             // never a hashtag or '#' in a title
  "short_title": "...",                      // for a single version called "short" (<= 60 chars); "" otherwise
  "shorts": [{{"version": "short-1", "title": "...", "description": "...",

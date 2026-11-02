@@ -9,7 +9,9 @@
 
 KONUŞMA
 4. İlk cümle merak uyandırsın, selamlama sonra gelsin:
-   "Sınavda bunu herkes yanlış söylüyor:"  /  "Goethe A1'de bu soru kesin geliyor:"
+   "Sınavda bunu herkes yanlış söylüyor:"  /  "Bunu Almanya'da her gün duyacaksın:"
+   Hemen ardından tek cümleyle kendini tanıt (uzun videolarda): "Ben Sinem. On yılı aşkın süredir Almanca
+   tercümanıyım ve Almanca öğretiyorum." Diğer seçenekler: _channel/TANITIM-METINLERI.txt
 5. Ders 4–8 dakika, numaralı bölümler: "Birinci: …", "İkinci: …" (bölüm başlıkları videoya otomatik eklenir).
 6. Yanlış / doğru: önce yanlışı söyle, sonra doğrusunu. Videoda yanlış kırmızı ✘, doğru yeşil ✔ ile çıkar.
    Almanca cümleyi yavaş ve net söyle, sonra Türkçesini.
@@ -20,9 +22,8 @@ KONUŞMA
 
 SERİLER (konuyu buna göre seçmek işe yarar)
 - Türklerin Almanca Hataları — bir hata, doğrusu, kısa açıklama
-- Goethe A1 — sınav soruları ve hazır cevaplar
+- Sınav — Goethe / telc soruları ve hazır cevaplar (hangi seviye olursa)
 - Almanya'da Hayat — Anmeldung, doktor, iş gibi günlük durumlar
-- Ege'de Almanca — kısa hikâye anlatımı (60–90 saniye)
 
 YÜKLEME
 10. Klipleri Drive'da yeni bir klasöre koy: SINEM-YouTube / <ders adı>. Yaklaşık yarım saat sonra

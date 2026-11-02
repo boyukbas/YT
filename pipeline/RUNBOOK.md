@@ -24,7 +24,7 @@ powershell Get-Content D:\YT\easy-work\watch.log -Tail 30
 ```
 python -I review.py "J:\My Drive\SINEM-YouTube\<lesson>"
 ```
-It checks the channel rules: Shorts ≤ 60 s (kind `ege` ≤ 90 s) and at most 3, vertical; main video horizontal; titles
+It checks the channel rules: Shorts ≤ 60 s and at most 3, vertical; main video horizontal; titles
 without `#`; ≤ 3 hashtags per description; chapters, pinned question, playlist; subtitle lines on her face (QA);
 Instagram covers; upcoming publish times one a day and 3 h apart. Then **look** (Read tool) at
 `Output\check-frames-*.jpg`, `thumbnail-1..3.jpg`, `cover-short-*.jpg`, and read `youtube.md`.
@@ -60,9 +60,9 @@ Short message, in English, with what was verified:
 ## Rules the pipeline follows (from the growth plan, Nov 2026)
 - Captions: German biggest (yellow), Turkish smaller (white), translation under German lines; wrong/right pairs get
   ✘ red / ✔ green (`mark` in the cues). Long videos prefer the top, Shorts the bottom; never on eyes/nose/mouth.
-- Shorts: one point each, hook in the first second, Turkish explanation, 20–45 s best, 60 s max ("Ege'de Almanca"
-  stories up to 90 s), loop ending. Kinds: `mistake` (series "Türklerin Almanca Hataları #n"), `exam`, `life`
-  ("Almanya'da Hayat"), `ege`, `rule`.
+- Shorts: one point each, hook in the first second, Turkish explanation, 20–45 s best, 60 s max, loop ending.
+  Kinds: `mistake` (series "Türklerin Almanca Hataları #n"), `exam`, `life` ("Almanya'da Hayat #n"), `rule`.
+- The channel is not tied to one level or exam (decided 2026-11-02): all levels, exams, work and life in Germany.
 - Titles in Turkish, a promise or a mistake, keyword first, never `#`; hashtags only in descriptions, at most 3.
 - One upload a day at 19:00; Sunday: long video first, its teaser Short 3 h later. Max 3 Shorts per lesson.
 - Thumbnails: V1 format (`thumbnail.py`), the question adds to the title ("3 HATA", "HAZIR CEVAP", "BUNU DEME!").
