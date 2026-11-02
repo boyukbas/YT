@@ -23,13 +23,14 @@ Use a new email address or phone number for the account. Then fill in:
 | Bio | see below |
 | Link | `https://www.youtube.com/@sinembb` (Edit profile → Links → Add external link, title "YouTube dersleri") |
 
-Bio (copy as is, 4 lines):
+Bio (copy as is, 5 lines; chosen 2026-11-02, 143 of 150 characters):
 
 ```
-🇹🇷→🇩🇪 Türkçe anlatımla Almanca
-🎯 A1–B2 · Goethe sınav hazırlık
-🎬 Her gün 1 kısa ders · Sinem
-👇 Dersin tamamı YouTube'da
+A1'den C1'e Almanca 🇩🇪
+👩‍🏫 Almanca öğretmeni Sinem
+📚 Gramer · Goethe & telc sınav taktikleri
+🏠 Almanya'da hayat
+👇 Tüm dersler YouTube'da
 ```
 
 ## 2. Professional account + link it to the Facebook Page (phone / PC) ~5 min
