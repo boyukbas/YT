@@ -45,12 +45,15 @@ Needs a Facebook login (as far as I know Meta developer accounts still require o
 nothing is posted there).
 
 1. Open **developers.facebook.com** → **Get started** / log in → register as a developer (verify phone/email).
-2. **My Apps → Create app**.
-   - App name: `Almanca Atolyesi Poster` (Meta rejects some words, e.g. "Insta"; any name is fine)
-   - Use case: **Manage messaging & content on Instagram**
-   - Business portfolio: **I don't want to connect a business portfolio yet**
-   - Create (it asks your Facebook password once).
-3. In the app: **Instagram → API setup with Instagram login**.
+2. **My Apps → Create app**. Meta shows one of two versions of this wizard:
+   - **Version A** (use-case list): use case **Manage messaging & content on Instagram** → business portfolio
+     **I don't want to connect a business portfolio yet** → name → Create.
+   - **Version B** (Meta's current docs): use case **Other** → app type **Business** → name + contact email → Create →
+     on the app's page scroll to **Instagram** → **Set up**.
+   - App name: `Almanca Atolyesi Poster` (Meta rejects some words, e.g. "Insta"; any name is fine).
+   - It asks your Facebook password once. Never connect or verify a business: not needed for our own account.
+3. In the app: **Instagram → API setup with Instagram login** (left menu, under Instagram). The Instagram account must
+   be **public** and professional (step 2).
    - **1. Generate access tokens → Add account** → log in to the **new Instagram account** → allow.
    - If it says the account isn't a tester: left menu **App roles → Roles → Add people → Instagram Tester** → the
      username. Then in the Instagram app: Settings → **Website permissions → Apps and websites → Tester invites** →
