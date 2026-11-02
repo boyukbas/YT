@@ -81,8 +81,9 @@ If it says "No Instagram account linked", do the linking in step 2 and make a ne
 
 ## 5. Automatic posting (already on)
 
-- **How the video gets there:** the PC uploads it straight to Meta. The Instagram cover goes up as an unpublished
-  (invisible) Page photo for a minute and is deleted after posting. No temporary link is needed in this mode.
+- **How the video gets there:** Instagram downloads the video + cover from a temporary, random Cloudflare address
+  that the PC opens for 2–3 minutes and closes right after (only those two files answer; tested 2026-11-02: link up in
+  ~70 s, Instagram done ~40 s later). Its direct upload refuses Page keys. The Facebook Page gets a direct upload.
 - **The watcher:** Task Scheduler task "YT Easy mode watcher" runs every 10 minutes (also does YouTube and new
   lessons). After 20:00, if nothing went out in the last 20 hours, it posts the next Reel: first Instagram, then the
   same Reel on the Page (with the clickable YouTube link of the full lesson). Oldest lesson first, in Short order.

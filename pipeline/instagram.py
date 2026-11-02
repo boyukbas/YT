@@ -11,12 +11,10 @@
   python instagram.py daily "<root>"                the watcher's step: after POST_TIME, post the next Reel of the
                                                     oldest lesson that has some left, if none went out in the last 20 h
 
-Facebook-login mode uploads the video straight to Meta (rupload.facebook.com); the cover goes up as an unpublished
-(invisible) Page photo whose address Instagram reads, deleted after posting. The Page gets the same Reel, with the
-lesson's YouTube link in the text (links work there).
-Instagram-login mode has no direct upload: Meta downloads the video from a public URL, so while one Reel is being
-posted, the PC serves just that video + its cover under a random path through a temporary Cloudflare quick tunnel
-(cloudflared, no account), and closes it as soon as Instagram has the file.
+Instagram downloads the video + cover from a public URL (its direct upload refuses Page tokens), so while one Reel is
+being posted, the PC serves just those two files under a random path through a temporary Cloudflare quick tunnel
+(cloudflared, no account), and closes it as soon as Instagram has them. In Facebook-login mode the Page then gets the
+same Reel by direct upload (rupload.facebook.com), with the lesson's YouTube link in the text (links work there).
 Token: %USERPROFILE%\\.shorts-pipeline\\instagram.json (Page token: no expiry; Instagram token: 60 days, refreshed
 here every week). Record: <lesson>/Output/instagram-posted.json."""
 import argparse, getpass, http.server, json, re, secrets, shutil, subprocess, sys, tempfile, threading, time
@@ -394,28 +392,13 @@ def wait_container(cid, name):
 def post_instagram(mp4, cover, cap, log):
     uid = saved().get('user_id') or check()['user_id']
     log(f'{mp4.name}: sending to Instagram')
-    if fb_mode():
-        page = saved()['page_id']
-        with open(cover, 'rb') as f:                      # an unpublished Page photo gives the cover a public address
-            photo = call('POST', f'{page}/photos', files={'source': (cover.name, f, 'image/jpeg')}, published='false')['id']
-        try:
-            cover_url = max(call('GET', photo, fields='images')['images'], key=lambda i: i['width'])['source']
-            c = call('POST', f'{uid}/media', media_type='REELS', upload_type='resumable', cover_url=cover_url,
-                     caption=cap, share_to_feed='true')
-            upload(c.get('uri') or f"{RUPLOAD}/ig-api-upload/v26.0/{c['id']}", mp4)
-            wait_container(c['id'], mp4.name)
-            m = call('POST', f'{uid}/media_publish', creation_id=c['id'])
-        finally:
-            try:
-                call('DELETE', photo)
-            except RuntimeError as e:
-                log(f'cover photo {photo} not deleted: {e}')
-    else:
-        with Share([mp4, cover]) as (video_url, cover_url):
-            c = call('POST', f'{uid}/media', media_type='REELS', video_url=video_url, cover_url=cover_url, caption=cap,
-                     share_to_feed='true')
-            wait_container(c['id'], mp4.name)
-        m = call('POST', f'{uid}/media_publish', creation_id=c['id'])
+    # Instagram's direct upload (rupload ig-api-upload) refuses Page tokens (ProcessingFailedError, 2026-11-02), and
+    # user tokens expire after 60 days, so Instagram fetches the files through the temporary link in both modes.
+    with Share([mp4, cover]) as (video_url, cover_url):
+        c = call('POST', f'{uid}/media', media_type='REELS', video_url=video_url, cover_url=cover_url, caption=cap,
+                 share_to_feed='true')
+        wait_container(c['id'], mp4.name)
+    m = call('POST', f'{uid}/media_publish', creation_id=c['id'])
     info = call('GET', m['id'], fields='permalink,timestamp')
     return {'id': m['id'], 'permalink': info.get('permalink', ''), **stamp()}
 
