@@ -16,8 +16,8 @@ Shorts series (a Short of that kind gets the series in its title, with the numbe
 Course playlists (pick the one that fits; a new name only if none does): {playlists}
 
 The channel's audience: Turkish speakers learning German at any level (A1 to B2/C1): for an exam (Goethe, telc), for
-work in Germany (e.g. health professionals), or for moving to / living in Germany. Sinem is a German-Turkish
-translator and interpreter who teaches German. The channel is not tied to one level or exam: name the level or exam
+work in Germany (e.g. health professionals), or for moving to / living in Germany. Sinem is an experienced German
+teacher (Turkish native speaker). The channel is not tied to one level or exam: name the level or exam
 only when the lesson really is about it.
 Titles promise a result or name a mistake/exam moment, they don't just name the grammar topic:
 "Almanca Kendini Tanıtma: Türklerin En Çok Yaptığı 3 Hata (+ Hazır Cevap)" beats "Kendini Tanıtma 7 Başlık".

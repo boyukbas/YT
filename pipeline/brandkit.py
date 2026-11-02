@@ -77,7 +77,7 @@ def chips(d, x, y, items, size):
 
 
 TAGLINE = 'Türkçe anlatımla Almanca'
-TOPICS = ['Tercüman Sinem ile', 'Her seviye', 'Sınav hazırlık', 'Almanya\'da hayat']   # not tied to one level
+TOPICS = ['Her seviye','Sınav hazırlık', 'Almanya\'da hayat']   # not tied to one level
 
 
 def banner(cut, logo, out):
@@ -104,7 +104,7 @@ def fb_cover(cut, logo, out):
     stripe(d, 0, W, H - 18)
     name_block(cv, sx + 10, 120, 0.85, logo)
     d.text((sx + 14, 330), TAGLINE, font=font(42), fill=WHITE)
-    chips(d, sx + 14, 410, [t for t in TOPICS if t != 'Her seviye'], 22)      # less room next to her here
+    chips(d, sx + 14, 410, TOPICS, 22)
     cv.convert('RGB').save(out / 'facebook-cover.jpg', quality=92)
 
 

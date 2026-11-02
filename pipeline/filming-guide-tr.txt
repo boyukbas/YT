@@ -10,8 +10,8 @@
 KONUŞMA
 4. İlk cümle merak uyandırsın, selamlama sonra gelsin:
    "Sınavda bunu herkes yanlış söylüyor:"  /  "Bunu Almanya'da her gün duyacaksın:"
-   Hemen ardından tek cümleyle kendini tanıt (uzun videolarda): "Ben Sinem. On yılı aşkın süredir Almanca
-   tercümanıyım ve Almanca öğretiyorum." Diğer seçenekler: _channel/TANITIM-METINLERI.txt
+   Hemen ardından tek cümleyle kendini tanıt (uzun videolarda): "Ben Sinem, Almanca öğretmeniyim.
+   Bugün … öğreneceğiz." Diğer seçenekler: _channel/TANITIM-METINLERI.txt
 5. Ders 4–8 dakika, numaralı bölümler: "Birinci: …", "İkinci: …" (bölüm başlıkları videoya otomatik eklenir).
 6. Yanlış / doğru: önce yanlışı söyle, sonra doğrusunu. Videoda yanlış kırmızı ✘, doğru yeşil ✔ ile çıkar.
    Almanca cümleyi yavaş ve net söyle, sonra Türkçesini.
