@@ -76,8 +76,8 @@ def chips(d, x, y, items, size):
     return x
 
 
-TAGLINE = 'Türkçe anlatımla Almanca'
-TOPICS = ['Her seviye','Sınav hazırlık', 'Almanya\'da hayat']   # not tied to one level
+TAGLINE = "A1'den C1'e Almanca"
+TOPICS = ['Hatalar', 'Sınav hazırlık', 'Almanya\'da hayat']   # not tied to one level
 
 
 def banner(cut, logo, out):

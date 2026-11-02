@@ -29,7 +29,7 @@ accent = red #E30A17, surfaces = navy #101628**, ink #15171C, translation lines 
 (`pipeline/thumbnail.py`). Subtitles never cover eyes/nose/mouth; long videos prefer the top, Shorts the bottom.
 German lines are the biggest, Turkish smaller; wrong/right examples get ✘ red / ✔ green. Shorts 20–45 s (60 max), one
 point, hook first; titles without '#', ≤ 3 hashtags; never two uploads within 3 h (growth plan, Nov 2026).
-Channel art in `_channel/brand/` (`pipeline/brandkit.py`); Sinem's filming guide `_channel/CEKIM-REHBERI.txt`.
+Slogan: "A1'den C1'e Almanca" (Sinem as a German teacher, all levels; not interpreter, not A1-only). Channel art in `_channel/brand/` (`pipeline/brandkit.py`); Sinem's filming guide `_channel/CEKIM-REHBERI.txt`.
 Word cards ("KELİME"): one harder word every 30–60 s. Section labels at each numbered part; the lesson's pattern is
 highlighted (yellow text, red outline); 10 s end-screen card "Sıradaki ders". Pipeline gotcha: never let ffmpeg read
 looped images from the Drive mount `J:` (it stalls) — the pipeline renders from a local copy of `_channel`.
