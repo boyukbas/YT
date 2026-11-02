@@ -1,5 +1,5 @@
 """Rule check of a finished lesson, before Sinem uploads (RUNBOOK.md step 3):
-    python -I review.py "<lesson folder>"
+    python -I review.py "<lesson folder>" ["<channel root>" (default: the lesson's parent)]
 Prints OK / CHECK lines for the channel's rules (Shorts length and count, titles, hashtags, face overlap, files,
 Instagram covers, publish times) and exits with 1 when something needs a look."""
 import json
@@ -49,8 +49,9 @@ def schedule(root):
     say(len(days) == len(set(days)), f'{len(times)} scheduled upload(s), at most one a day')
 
 
-def main(lesson):
+def main(lesson, root=None):
     lesson = Path(lesson)
+    root = Path(root or lesson.parent)
     out = output(lesson)
     print(f'{lesson.name}  ({out})')
     st = json.loads((out / 'status.json').read_text(encoding='utf-8')) if (out / 'status.json').exists() else {}
@@ -58,7 +59,7 @@ def main(lesson):
         say(False, f"not finished: {st.get('state', 'not started')} {st.get('step', '')} {st.get('error', '')}".strip())
         return
     meta = json.loads((out / 'youtube.json').read_text(encoding='utf-8'))
-    profile = json.loads((lesson.parent / '_channel' / 'channel.json').read_text(encoding='utf-8'))
+    profile = json.loads((root / '_channel' / 'channel.json').read_text(encoding='utf-8'))
     shorts_max = profile.get('shorts_max', 3)
     kinds = {sh['version']: sh.get('kind', '') for sh in meta.get('shorts', [])}
 
@@ -117,11 +118,11 @@ def main(lesson):
     say((out / 'instagram.md').exists() or not shorts, 'instagram.md')
 
     print('Schedule (all lessons)')
-    schedule(lesson.parent)
+    schedule(root)
 
 
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
-    main(sys.argv[1])
+    main(*sys.argv[1:3])
     print(f'\n{len(problems)} thing(s) to check' if problems else '\nAll rules OK')
     sys.exit(1 if problems else 0)

@@ -11,7 +11,7 @@ powershell Get-Content D:\YT\easy-work\watch.log -Tail 30
 ```
 - **No Output folder yet**: the watcher waits until the clips haven't changed for 10 minutes (Drive still uploading),
   then starts within 10 minutes. To start now: `python -I easy.py run "J:\My Drive\SINEM-YouTube\<lesson>"` (in the
-  background; a 6-minute recording takes ~25 minutes on the RTX 5070).
+  background; a 6-minute recording takes ~30 minutes on the RTX 5070; redoing only the texts ~5 minutes).
 - **Working**: STATUS shows the step. Nothing to do.
 - **Waiting: needs a Claude answer**: the Claude token stopped working. Answer the named `llm\<step>.prompt.md` by
   writing `<step>.answer.json` next to it (same JSON shape the prompt asks for), run again; then tell the user to
