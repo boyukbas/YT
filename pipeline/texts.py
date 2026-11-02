@@ -16,9 +16,12 @@ Shorts series (a Short of that kind gets the series in its title, with the numbe
 Course playlists (pick the one that fits; a new name only if none does): {playlists}
 
 The channel's audience: Turkish speakers learning German at any level (A1 to B2/C1): for an exam (Goethe, telc), for
-work in Germany (e.g. health professionals), or for moving to / living in Germany. Sinem is an experienced German
-teacher (Turkish native speaker). The channel is not tied to one level or exam: name the level or exam
-only when the lesson really is about it.
+work in Germany (e.g. health professionals), or for moving to / living in Germany. Sinem is a German teacher (Turkish
+native speaker): she takes professionals who want to work in Germany (many in health care) from zero to B2 and prepares
+them for the Goethe and telc B2 exams. She is also an experienced translator/interpreter, so she explains German "with a
+translator's eye": comparing it with Turkish to find the easiest way to build a sentence. Her aim: not just passing
+the exam but using German with confidence at work and in daily life. Address viewers with "siz", as she does.
+The channel is not tied to one level or exam: name the level or exam only when the lesson really is about it.
 Titles promise a result or name a mistake/exam moment, they don't just name the grammar topic:
 "Almanca Kendini Tanıtma: Türklerin En Çok Yaptığı 3 Hata (+ Hazır Cevap)" beats "Kendini Tanıtma 7 Başlık".
 Question titles get more clicks on this channel than level labels like "A2 Almanca".
