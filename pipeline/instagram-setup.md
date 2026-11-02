@@ -73,7 +73,8 @@ API right away are more likely to be flagged as bots.
    ```
 
    It asks the App ID, then the App secret and the token (neither is shown while you paste). It prints the Page,
-   `token never expires`, the permissions, and the Instagram + Page follower counts. The secret and the short token are
+   `token never expires`, the permissions, and the Instagram + Page follower counts. A `WARNING: missing …` line means
+   a permission wasn't ticked in 4.3: tick it, generate a new token and run it again. The secret and the short token are
    not stored; only the Page token is (`%USERPROFILE%\.shorts-pipeline\instagram.json`).
 
 If it says "No Instagram account linked", do the linking in step 2 and make a new token (4.1–4.5).
@@ -85,7 +86,11 @@ If it says "No Instagram account linked", do the linking in step 2 and make a ne
 - **The watcher:** Task Scheduler task "YT Easy mode watcher" runs every 10 minutes (also does YouTube and new
   lessons). After 20:00, if nothing went out in the last 20 hours, it posts the next Reel: first Instagram, then the
   same Reel on the Page (with the clickable YouTube link of the full lesson). Oldest lesson first, in Short order.
-  If the Page part fails, it retries the next day before moving on. Nothing is posted until step 4 is done.
+  If the Page part fails, it retries the next day before moving on. Nothing is posted until step 4 is done, and not
+  before the start date in `_channel/channel.json` → `"instagram": {"start": "2026-11-05"}` (change or delete it to
+  start earlier).
+- **Renewal:** the key itself never expires, but Meta stops its data access 90 days after your last login to the app
+  (now: 2027-01-31). Two weeks before, the log says so: repeat step 4 (new token → `fb-token`).
 
 Check any time: `instagram.py check` (accounts, posts used of the 24 h limit), `instagram.md` in the lesson's Output
 shows which Reels went out with their links, and `D:\YT\easy-work\instagram.log` has every post or problem.

@@ -34,6 +34,8 @@ TOKEN = KEYS / 'instagram.json'
 API = 'https://graph.instagram.com/v26.0'
 FB_API = 'https://graph.facebook.com/v26.0'
 RUPLOAD = 'https://rupload.facebook.com'
+FB_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'instagram_basic',
+             'instagram_content_publish', 'business_management']
 CLOUDFLARED = Path(r'D:\YT\tools\cloudflared.exe')
 ISTANBUL = timezone(timedelta(hours=3))
 POSTED = 'instagram-posted.json'
@@ -150,12 +152,26 @@ def save_fb_token():
     KEYS.mkdir(parents=True, exist_ok=True)
     TOKEN.write_text(json.dumps({'mode': 'facebook', 'page_id': p['id'], 'page_name': p['name'],
                                  'page_token': p['access_token'], 'user_id': ig['id'], 'username': ig.get('username'),
+                                 'data_access_until': dbg.get('data_access_expires_at'),
                                  'refreshed': datetime.now(timezone.utc).isoformat()}), encoding='utf-8')
     exp = dbg.get('expires_at')
     print(f"Page: {p['name']} (id {p['id']}), token " + ('never expires' if exp == 0 else
           f'expires {datetime.fromtimestamp(exp):%Y-%m-%d}' if exp else 'expiry unknown'))
     print('Permissions: ' + ', '.join(dbg.get('scopes', [])))
+    missing = [s for s in FB_SCOPES if s not in dbg.get('scopes', [])]
+    if missing:
+        print(f"WARNING: missing {', '.join(missing)}: tick them in the Graph API Explorer and make a new token, "
+              'or posting will fail.')
     check()
+
+
+def renew_warning():
+    """Meta lets a token read data for 90 days after the last login; then fb-token has to be run again."""
+    until = saved().get('data_access_until')
+    if until and datetime.fromtimestamp(until, timezone.utc) - datetime.now(timezone.utc) < timedelta(days=14):
+        return (f"WARNING: Meta access ends {datetime.fromtimestamp(until):%Y-%m-%d}: make a new token in the Graph API "
+                'Explorer and run  instagram.py fb-token  (instagram-setup.md, step 4).')
+    return None
 
 
 def check():
@@ -194,9 +210,13 @@ def reels(out, data):
     return [(f, by_version.get(f'short-{num(f)}', {})) for f in sorted(out.glob('*-short-*.mp4'), key=num)]
 
 
-def hashtags(root):
+def profile(root):
     ch = Path(root) / '_channel' / 'channel.json'
-    p = json.loads(ch.read_text(encoding='utf-8')) if ch.exists() else {}
+    return json.loads(ch.read_text(encoding='utf-8')) if ch.exists() else {}
+
+
+def hashtags(root):
+    p = profile(root)
     return p.get('instagram', {}).get('hashtags') or p.get('youtube', {}).get('hashtags') or ['#almanca']
 
 
@@ -473,14 +493,20 @@ def post_next(lesson, dry=False, force=False, log=print):
 
 
 def daily(root, log=print):
-    """Watcher step: at most one Reel a day, after POST_TIME, oldest lesson first."""
+    """Watcher step: at most one Reel a day, after POST_TIME, oldest lesson first, not before channel.json's
+    "instagram": {"start": "YYYY-MM-DD"} (a new account should be used by hand for a few days first)."""
     if not TOKEN.exists():
         return None
     now = datetime.now(ISTANBUL)
     hh, mm = map(int, POST_TIME.split(':'))
     last = last_post(root)
-    if (now.hour, now.minute) < (hh, mm) or (last and datetime.now(timezone.utc) - last < GAP):
+    start = profile(root).get('instagram', {}).get('start')
+    if (now.hour, now.minute) < (hh, mm) or (last and datetime.now(timezone.utc) - last < GAP) or \
+            (start and now.strftime('%Y-%m-%d') < start):
         return None
+    warn = renew_warning()
+    if warn:
+        log(warn)
     lessons = sorted((p.parent.parent for p in Path(root).glob('*/*/youtube.json') if not p.parent.parent.name.startswith('_')),
                      key=lambda l: next(l.glob('*/youtube.json')).stat().st_mtime)
     for lesson in lessons:
