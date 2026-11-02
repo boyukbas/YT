@@ -179,15 +179,13 @@ def highlights(out):
 
 
 def face_avatar(cut, logo, out):
-    """Option to test: Sinem's face as the profile picture, the TR-DE mark as a badge (shows as a circle)."""
+    """Option to test: Sinem's face as the profile picture, the TR-DE mark as a badge.
+    Square JPG (what Instagram accepts); YouTube/Instagram/Facebook crop it to a circle themselves."""
     W = 1080
     cv = canvas(W, W, (140, 120, 940, 920))
     person(cv, cut, find_face(cut), 340, W // 2 + 40, 300, fade=400)
     cv.alpha_composite(Image.open(logo).convert('RGBA').resize((300, 300), Image.LANCZOS), (110, 640))
-    m = Image.new('L', (W, W), 0)
-    ImageDraw.Draw(m).ellipse((0, 0, W, W), fill=255)
-    cv.putalpha(m)
-    cv.save(out / 'profile-picture-face-option.png')
+    cv.convert('RGB').save(out / 'profile-picture-face-option.jpg', quality=92)
 
 
 def watermark(logo, out):

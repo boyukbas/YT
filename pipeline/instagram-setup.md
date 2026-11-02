@@ -19,7 +19,7 @@ Use a new email address or phone number for the account. Then fill in:
 |---|---|
 | Username | `almancadilatolyesi` |
 | Name (searchable!) | `Almanca Dil Atölyesi • Almanca Öğren` |
-| Profile picture | `_channel/instagram/profile-picture.png` (TR/DE logo, same as YouTube) |
+| Profile picture | `_channel/instagram/profile-picture.jpg` (TR/DE logo, same as YouTube; Instagram takes JPG) |
 | Bio | see below |
 | Link | `https://www.youtube.com/@sinembb` (Edit profile → Links → Add external link, title "YouTube dersleri") |
 
