@@ -29,4 +29,4 @@ YÜKLEME
 10. Klipleri Drive'da yeni bir klasöre koy: SINEM-YouTube / <ders adı>. Yaklaşık yarım saat sonra
     "Output" klasöründe video, Shorts, kapak resimleri ve YouTube metinleri hazır olur.
 11. Hazır dosyaları YouTube uygulamasından yükle (başlık önemli değil, gizli olabilir); başlık, açıklama,
-    kapak, altyazı ve yayın saati otomatik doldurulur. Instagram ve Facebook paylaşımları da otomatik.
+    kapak, altyazı ve yayın saati otomatik doldurulur. Instagram paylaşımları da otomatik.

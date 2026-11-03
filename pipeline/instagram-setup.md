@@ -1,7 +1,12 @@
-# Instagram + Facebook setup: Almanca Dil Atölyesi
+# Instagram setup: Almanca Dil Atölyesi
 
-Goal: the PC posts each lesson's Shorts as Reels on **Instagram and the Facebook Page**, **one a day after 20:00
-(Istanbul)**, each with its own cover and caption. You set it up once (steps 1–5). After that nothing is needed per video.
+Goal: the PC posts each lesson's Shorts as Reels on **Instagram**, **one a day after 20:00 (Istanbul)**, each with its
+own cover and caption. You set it up once (steps 1–5). After that nothing is needed per video.
+
+**Facebook (2026-11-03):** the PC no longer posts on Facebook (the Page got few views and was deleted; Instagram does
+well). Meta still needs a Facebook Page linked to the Instagram account: the PC's key reaches Instagram *through* the
+Page. Deleting the Page broke the key ("Page that is not accessible"). Keep a Page linked (it can stay empty), or
+posting stops.
 
 Everything prepared is in Drive: `SINEM-YouTube/_channel/instagram/` (profile picture, this guide) and, per lesson,
 `Output/cover-short-N.jpg` + `Output/instagram.md` (captions, also handy for posting by hand).
@@ -84,12 +89,11 @@ If it says "No Instagram account linked", do the linking in step 2 and make a ne
 
 - **How the video gets there:** Instagram downloads the video + cover from a temporary, random Cloudflare address
   that the PC opens for 2–3 minutes and closes right after (only those two files answer; tested 2026-11-02: link up in
-  ~70 s, Instagram done ~40 s later). Its direct upload refuses Page keys. The Facebook Page gets a direct upload.
+  ~70 s, Instagram done ~40 s later). Its direct upload refuses Page keys.
 - **The watcher:** Task Scheduler task "YT Easy mode watcher" runs every 10 minutes (also does YouTube and new
-  lessons). After 20:00, if nothing went out in the last 20 hours, it posts the next Reel: first Instagram, then the
-  same Reel on the Page (with the clickable YouTube link of the full lesson). Oldest lesson first, in Short order.
-  If the Page part fails, it retries the next day before moving on. The **long video** goes on the Page too (its
-  YouTube title + description, chunked upload): between 12:00 and 17:00, once it is public on YouTube. Nothing is posted until step 4 is done, and not
+  lessons). After 20:00, if nothing went out in the last 20 hours, it posts the next Reel on Instagram. Oldest lesson
+  first, in Short order. (Posting the Reels and the long video on the Page too is built in but switched off:
+  `FACEBOOK_PAGE` in `instagram.py`.) Nothing is posted until step 4 is done, and not
   before the start date in `_channel/channel.json` → `"instagram": {"start": "2026-11-05"}` (change or delete it to
   start earlier).
 - **Renewal:** the key itself never expires, but Meta stops its data access 90 days after your last login to the app
@@ -111,6 +115,6 @@ through a temporary Cloudflare link. New apps can no longer pick it.)
 - **Music:** the Reels carry our own background music from YouTube's Audio Library. That's fine on Instagram as
   well; just never add Instagram's music on top by hand to a Reel that was posted through the API.
 - **Long video:** 16:9 and 6+ minutes doesn't work on Instagram; the Reels point to YouTube instead ("link profilde").
-  The Facebook Page does get it (see the watcher above).
-- **Profile art:** `_channel/brand/` has the Facebook cover, Instagram highlight covers and the YouTube banner.
+
+- **Profile art:** `_channel/brand/` has the Instagram highlight covers and the YouTube banner (and a Facebook cover).
 - **Not possible by API:** Instagram's own music, collaborators via invite, editing the cover after posting.

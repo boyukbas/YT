@@ -16,8 +16,9 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
 - `pipeline/` — **Easy mode on the home PC** (Python): a lesson folder in Google Drive (`J:\My Drive\SINEM-YouTube\<lesson>`)
   in → finished video, caption tracks, 3 thumbnails, YouTube texts out. See `pipeline/README.md`. Decided 2026-10-31:
   Sinem's channel only; the PC is the worker; she uploads in the YouTube app and `youtube.py` fills in the details.
-  Max 3 Shorts per lesson, published one a day (19:00); Instagram + Facebook Page Reels one a day (20:00) via
-  `instagram.py` (setup: `pipeline/instagram-setup.md`; Meta app "Almanca Dil Atölyesi", Facebook-login mode).
+  Max 3 Shorts per lesson, published one a day (19:00); Instagram Reels one a day (20:00) via
+  `instagram.py` (setup: `pipeline/instagram-setup.md`; Meta app "Almanca Dil Atölyesi", Facebook-login mode). No Facebook
+  posts since 2026-11-03 (Page did poorly, Instagram well): `FACEBOOK_PAGE = False`; the key still needs a linked Page.
   Watcher: Task Scheduler "YT Easy mode watcher" every 10 min (`pipeline/watch.cmd`, log `D:\YT\easy-work\watch.log`).
   Google Drive's drive letter can change after a restart (J: → G: on 2026-11-03); `watch.cmd` looks for
   `<letter>:\My Drive\SINEM-YouTube` on every letter, so use whatever letter has it in manual commands too.

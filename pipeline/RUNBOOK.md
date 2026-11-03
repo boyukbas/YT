@@ -52,8 +52,8 @@ Short message, in English, with what was verified:
 ## 4. After the upload (automatic, check next day)
 - STATUS.txt "YouTube:" lines show each video's link and what was set. Quota: ~900 units per Short, 10,000 a day;
   "quota used up" → it resets at 11:00 Istanbul (winter) / 10:00 (summer); the watcher retries by itself.
-- Instagram + Facebook Page (`instagram.py`, log `D:\YT\easy-work\instagram.log`): one Reel a day after 20:00 (same Reel
-  on the Page), the long video on the Page between 12:00 and 17:00 once it is public on YouTube. Plan: `Output\instagram.md`.
+- Instagram (`instagram.py`, log `D:\YT\easy-work\instagram.log`): one Reel a day after 20:00. Nothing goes to Facebook
+  (Page deleted 2026-11-03). Plan: `Output\instagram.md`.
   `python -I instagram.py check` shows the token; Meta's data access needs a renewal every 90 days (next: 2027-01-31,
   steps in `instagram-setup.md`).
 

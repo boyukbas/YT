@@ -1,8 +1,9 @@
-"""Instagram (+ Facebook Page): the lesson's Shorts as Reels, with their own cover and caption, posted one a day
+"""Instagram: the lesson's Shorts as Reels, with their own cover and caption, posted one a day
 (see instagram-setup.md for the one-time setup).
 
   python instagram.py fb-token                      Facebook-login mode: app ID + secret + a Graph API Explorer token →
-                                                    a Page token that doesn't expire; posts to Instagram AND the Page
+                                                    a Page token that doesn't expire (the Page only links
+                                                    the app to Instagram; nothing is posted there)
   python instagram.py token                         Instagram-login mode: paste the token from the app dashboard
   python instagram.py check                         read-only: account, posts left in the 24 h limit
   python instagram.py prepare "<lesson>"            covers (cover-short-N.jpg) + captions (instagram.md); posts nothing
@@ -13,8 +14,8 @@
 
 Instagram downloads the video + cover from a public URL (its direct upload refuses Page tokens), so while one Reel is
 being posted, the PC serves just those two files under a random path through a temporary Cloudflare quick tunnel
-(cloudflared, no account), and closes it as soon as Instagram has them. In Facebook-login mode the Page then gets the
-same Reel by direct upload (rupload.facebook.com), with the lesson's YouTube link in the text (links work there).
+(cloudflared, no account), and closes it as soon as Instagram has them. Posting to the Facebook Page as well
+(FACEBOOK_PAGE) is off since 2026-11-03: the Page got few views and was deleted; Instagram does well.
 Token: %USERPROFILE%\\.shorts-pipeline\\instagram.json (Page token: no expiry; Instagram token: 60 days, refreshed
 here every week). Record: <lesson>/Output/instagram-posted.json."""
 import argparse, getpass, http.server, json, re, secrets, shutil, subprocess, sys, tempfile, threading, time
@@ -39,6 +40,7 @@ ISTANBUL = timezone(timedelta(hours=3))
 POSTED = 'instagram-posted.json'
 POST_TIME = '20:00'                                      # Istanbul; the daily Reel goes out after this time
 GAP = timedelta(hours=20)                                # at most one Reel per day
+FACEBOOK_PAGE = False                                    # also post Reels + long videos to the Page (off: deleted 2026-11-03)
 LONG_HOURS = (12, 17)                                    # Facebook long videos: from 12:00, last start 16:59
 MAX_TAGS = 5                                             # Instagram shows few hashtags; more looks like spam
 SAVE_LINE = '💾 Kaydet, sonra tekrar et!'
@@ -177,9 +179,10 @@ def check():
     t = saved()
     if t.get('mode') == 'facebook':
         ig = call('GET', t['user_id'], fields='username,media_count,followers_count')
-        page = call('GET', t['page_id'], fields='name,followers_count')
         print(f"Instagram: @{ig.get('username')}, {ig.get('media_count', 0)} posts, {ig.get('followers_count', 0)} followers")
-        print(f"Facebook Page: {page.get('name')}, {page.get('followers_count', 0)} followers")
+        if FACEBOOK_PAGE:
+            page = call('GET', t['page_id'], fields='name,followers_count')
+            print(f"Facebook Page: {page.get('name')}, {page.get('followers_count', 0)} followers")
         me = {'user_id': t['user_id'], 'username': ig.get('username')}
     else:
         me = call('GET', 'me', fields='user_id,username,account_type,media_count')
@@ -493,7 +496,7 @@ def post_next(lesson, dry=False, force=False, log=print):
     """Post the lesson's next Reel. Returns a one-line summary, or None when it has none left."""
     lesson, out, data = lesson_files(lesson)
     posted = load(out)
-    fb = fb_mode()
+    fb = fb_mode() and FACEBOOK_PAGE
     done = lambda r: bool(r) and 'id' in r and (not fb or 'facebook' in r)
     todo = [(m, sh) for m, sh in reels(out, data) if not done(posted.get(m.name))]
     if not todo:
@@ -537,7 +540,7 @@ def post_next(lesson, dry=False, force=False, log=print):
 def daily(root, log=print):
     """Watcher step: at most one Reel a day, after POST_TIME, oldest lesson first, not before channel.json's
     "instagram": {"start": "YYYY-MM-DD"} (a new account should be used by hand for a few days first).
-    Facebook-login mode also puts each lesson's long video on the Page once it is public on YouTube: one a day, between
+    With FACEBOOK_PAGE on, Facebook-login mode also puts each lesson's long video on the Page once it is public on YouTube: one a day, between
     LONG_HOURS, so it never lands within 3 hours of the evening Reel."""
     if not TOKEN.exists():
         return None
@@ -547,7 +550,7 @@ def daily(root, log=print):
         return None
     lessons = sorted((p.parent.parent for p in Path(root).glob('*/*/youtube.json') if not p.parent.parent.name.startswith('_')),
                      key=lambda l: next(l.glob('*/youtube.json')).stat().st_mtime)
-    if fb_mode() and LONG_HOURS[0] <= now.hour < LONG_HOURS[1]:
+    if fb_mode() and FACEBOOK_PAGE and LONG_HOURS[0] <= now.hour < LONG_HOURS[1]:
         longs = [datetime.fromisoformat(r['long']['posted_utc']) for l in lessons for o in l.glob(f'*/{POSTED}')
                  for r in [json.loads(o.read_text(encoding='utf-8')).get('_facebook', {})] if 'long' in r]
         if not longs or datetime.now(timezone.utc) - max(longs) > GAP:

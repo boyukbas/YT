@@ -111,7 +111,7 @@ def main(lesson, root=None):
         say(False, f'no QA report at {rep}')
     print(f"  look   {', '.join(p.name for p in sorted(out.glob('check-frames-*.jpg')))}")
 
-    print('Instagram / Facebook')
+    print('Instagram')
     for m in shorts:
         n = m.stem.split('-short')[-1]
         say((out / f'cover-short{n}.jpg').exists(), f'cover-short{n}.jpg')

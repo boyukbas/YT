@@ -47,9 +47,9 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
 
 **Instagram** (`instagram.py`, setup in `instagram-setup.md`): every Short also gets `cover-short-N.jpg` (its own photo +
 keywords, text inside the 3:4 grid crop) and a caption in `instagram.md`; the watcher posts one Reel a day after 20:00
-to Instagram and the same Reel to the Facebook Page (Facebook-login mode, `instagram.py fb-token`: Page token without
-expiry), and the long video on the Page between 12:00 and 17:00 once it is public on YouTube (chunked upload). Instagram fetches video + cover through a temporary Cloudflare quick tunnel (its direct upload refuses Page
-tokens); the Page gets a direct upload (rupload.facebook.com).
+to Instagram (Facebook-login mode, `instagram.py fb-token`: Page token without expiry; the Page must stay linked to
+Instagram, but nothing is posted there since 2026-11-03: `FACEBOOK_PAGE = False`). Instagram fetches video + cover
+through a temporary Cloudflare quick tunnel (its direct upload refuses Page tokens).
 
 **Shorts:** at most 3 (`shorts_max` in channel.json / settings.json), the strongest self-contained parts (Claude picks
 them in the subtitle step: `shorts` in the answer, each with a `kind`: mistake / exam / life / rule; 20–45 s
