@@ -21,6 +21,9 @@ looks different, follow its wording.
    Instagram → Customize → API setup with Unified login**. If it asks for a business portfolio, pick the one from 1.
 3. **Create configuration**: permissions `instagram_basic` and `instagram_content_publish` (add `business_management`
    if offered; skip the messaging ones), asset: the Instagram account → Save. Copy the **Configuration ID**.
+   (Done 2026-11-03: "Instagram API (unified login)", system-user key, expiration "Never".)
+   Below it, **Redirect URL → Register a new redirect URL**: `https://boyukbas.github.io/YT/ig-login.html` → **Save**.
+   (Meta only answers to registered https addresses; that page of the web app hands the answer on to the PC.)
 4. **App settings → Basic**: App ID and App secret (as in step 4.6 below).
 5. On the PC, in a terminal:
 
@@ -31,8 +34,7 @@ looks different, follow its wording.
    It asks the App ID, the App secret (not shown) and the Configuration ID, then opens Meta's login in the browser:
    continue (with Instagram or Facebook), pick **almancadilatolyesi**, allow. The tab then says "Done". The PC window
    prints the account, the key type and whether it expires, then the account check.
-   - "URL blocked" / redirect error in the browser: the app → **Facebook Login for Business → Settings → Valid OAuth
-     Redirect URIs** → add `http://localhost:8765/` → Save → run it again.
+   - "URL blocked" / redirect error in the browser: the redirect URL from 3 isn't saved (exactly, with `.html`).
    - "reaches no Instagram account": the account wasn't picked in the login, or `instagram_content_publish` isn't in
      the configuration.
 

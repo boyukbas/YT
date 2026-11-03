@@ -172,11 +172,13 @@ def save_fb_token():
     check()
 
 
-REDIRECT = 'http://localhost:8765/'                      # Meta allows localhost redirects for apps in development mode
+REDIRECT = 'https://boyukbas.github.io/YT/ig-login.html'  # registered in the app; the page hands the answer on to LOCAL
+LOCAL = 8765
 
 
 def browser_login(app_id, config_id):
-    """Meta's login dialog in the browser; its answer comes back to a one-shot server on localhost. Returns the code."""
+    """Meta's login dialog in the browser. Meta only sends its answer to a registered https address (REDIRECT, a page of
+    the web app), which forwards it to a one-shot server here on localhost:LOCAL. Returns the code."""
     from urllib.parse import parse_qs, urlencode, urlparse
     state, got = secrets.token_urlsafe(16), {}
 
@@ -195,7 +197,7 @@ def browser_login(app_id, config_id):
                 'Meta said no: ' + got.get('error_description', 'see the PC window')
             self.wfile.write(f'<h2>{msg}</h2>'.encode())
 
-    srv = http.server.HTTPServer(('127.0.0.1', 8765), Back)
+    srv = http.server.HTTPServer(('127.0.0.1', LOCAL), Back)
     srv.timeout = 5
     url = 'https://www.facebook.com/v26.0/dialog/oauth?' + urlencode({
         'client_id': app_id, 'config_id': config_id, 'redirect_uri': REDIRECT, 'response_type': 'code', 'state': state})
