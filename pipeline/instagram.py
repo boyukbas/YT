@@ -1,10 +1,12 @@
 """Instagram: the lesson's Shorts as Reels, with their own cover and caption, posted one a day
 (see instagram-setup.md for the one-time setup).
 
+  python instagram.py system-token                  the key in use (2026-11-03): paste a system user's token from
+                                                    Business settings; the Instagram account must be assigned to it
   python instagram.py fb-token                      Facebook-login mode: app ID + secret + a Graph API Explorer token →
                                                     a Page token that doesn't expire (the Page only links
                                                     the app to Instagram; nothing is posted there)
-  python instagram.py unified-token                 Unified-login mode (no Facebook Page needed): app ID + secret +
+  python instagram.py unified-token                 Unified-login mode: app ID + secret +
                                                     the login configuration's ID → log in in the browser → a key
                                                     owned by the business portfolio
   python instagram.py token                         Instagram-login mode: paste the token from the app dashboard
@@ -267,6 +269,37 @@ def save_unified_token(app_id='', config_id=''):
           ('never expires' if not exp else f'expires {datetime.fromtimestamp(exp):%Y-%m-%d}'))
     if 'instagram_content_publish' not in dbg.get('scopes', []):
         print('WARNING: instagram_content_publish is missing: add it to the configuration and run this again.')
+    check()
+
+
+def save_system_token():
+    """The route that works (2026-11-03): a system user's key from Business settings → System users → Generate token,
+    with the Instagram account assigned to that system user. Used on graph.facebook.com like a Unified-login key."""
+    tok = getpass.getpass('System user token (Business settings → System users → Generate token; not shown): ').strip()
+    if not tok:
+        raise SystemExit('No token given.')
+    auth = {'Authorization': f'Bearer {tok}'}
+    try:
+        me = requests.get(f'{FB_API}/me', timeout=30, headers=auth, params={'fields': 'id,name'}).json()
+        accounts = requests.get(f'{FB_API}/me/assigned_instagram_accounts', timeout=30, headers=auth,
+                                params={'fields': 'id,username'}).json().get('data', [])
+        scopes = [p['permission'] for p in requests.get(f'{FB_API}/me/permissions', timeout=30, headers=auth).json()
+                  .get('data', []) if p.get('status') == 'granted']
+    except requests.RequestException as e:
+        raise SystemExit(f'Meta unreachable: {type(e).__name__}') from None
+    if 'error' in me:
+        raise SystemExit(f"Meta refused the token: {me['error'].get('message')}")
+    if not accounts:
+        raise SystemExit(f"System user '{me.get('name')}' has no Instagram account: Business settings → System users → "
+                         'Assign assets → Instagram profiles → almancadilatolyesi (full control), then try again.')
+    ig = next((a for a in accounts if 'almanca' in a['username']), accounts[0])
+    KEYS.mkdir(parents=True, exist_ok=True)
+    TOKEN.write_text(json.dumps({'mode': 'unified', 'token': tok, 'user_id': ig['id'], 'username': ig['username'],
+                                 'expires_at': None, 'data_access_until': None,
+                                 'refreshed': datetime.now(timezone.utc).isoformat()}), encoding='utf-8')
+    print(f"Instagram @{ig['username']} (id {ig['id']}) through system user '{me.get('name')}'")
+    if 'instagram_content_publish' not in scopes:
+        print('WARNING: instagram_content_publish is missing: tick it when generating the token and run this again.')
     check()
 
 
@@ -683,14 +716,16 @@ def daily(root, log=print):
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['fb-token', 'unified-token', 'token', 'check', 'prepare', 'post', 'daily'])
+    ap.add_argument('cmd', choices=['system-token', 'fb-token', 'unified-token', 'token', 'check', 'prepare', 'post', 'daily'])
     ap.add_argument('path', nargs='?')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--force', action='store_true', help='post even if a Reel went out less than 20 h ago')
     ap.add_argument('--app-id', default='', help='unified-token: the Meta app ID (asked if not given)')
     ap.add_argument('--config-id', default='', help='unified-token: the login configuration ID (asked if not given)')
     a = ap.parse_args()
-    if a.cmd == 'fb-token':
+    if a.cmd == 'system-token':
+        save_system_token()
+    elif a.cmd == 'fb-token':
         save_fb_token()
     elif a.cmd == 'unified-token':
         save_unified_token(a.app_id, a.config_id)

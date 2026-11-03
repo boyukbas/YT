@@ -18,8 +18,10 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   Sinem's channel only; the PC is the worker; she uploads in the YouTube app and `youtube.py` fills in the details.
   Max 3 Shorts per lesson, published one a day (19:00); Instagram Reels one a day (20:00) via
   `instagram.py` (setup: `pipeline/instagram-setup.md`; Meta app "Almanca Dil Atölyesi", Facebook-login mode). No Facebook
-  posts since 2026-11-03 (Page did poorly and was deleted, Instagram well): `FACEBOOK_PAGE = False`. Deleting the Page
-  killed the Facebook-login key, so the key now comes from Meta's Unified login (`instagram.py unified-token`, no Page).
+  posts since 2026-11-03 (Page did poorly and was deleted, Instagram well): `FACEBOOK_PAGE = False`. Publishing still
+  needs *a* Page linked to Instagram (a new empty one is; without it media_publish fails "Fatal" 2207085). Key: a
+  system user's token from Business settings (`instagram.py system-token`). Go slowly with Meta logins/keys: a burst of
+  them got the developer account flagged ("API access blocked") on 2026-11-03.
   Watcher: Task Scheduler "YT Easy mode watcher" every 10 min (`pipeline/watch.cmd`, log `D:\YT\easy-work\watch.log`).
   Google Drive's drive letter can change after a restart (J: → G: on 2026-11-03); `watch.cmd` looks for
   `<letter>:\My Drive\SINEM-YouTube` on every letter, so use whatever letter has it in manual commands too.

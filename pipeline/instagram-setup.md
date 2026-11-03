@@ -3,40 +3,37 @@
 Goal: the PC posts each lesson's Shorts as Reels on **Instagram**, **one a day after 20:00 (Istanbul)**, each with its
 own cover and caption. You set it up once (steps 1–5). After that nothing is needed per video.
 
-**Facebook (2026-11-03):** the PC no longer posts on Facebook (the Page got few views and was deleted; Instagram does
-well). The old key (steps 3–4, Facebook login) reached Instagram *through* the Page, so it died with it ("Page that is
-not accessible"). The new key comes from **Meta's Unified login, which needs no Page**: section "Unified login" below.
-Steps 1–2 and 5 still apply; skip the Page parts.
+**Facebook (2026-11-03):** the PC posts nothing on Facebook (`FACEBOOK_PAGE = False`). But **a Facebook Page must stay
+linked to the Instagram account**: after the old Page was deleted, Instagram accepted the video but refused the final
+publish ("Fatal", subcode 2207085) with every key. A new, empty Page "Almanca Dil Atölyesi" was linked the same day
+(Instagram → Edit profile → Facebook → Connect) and posting worked again. Don't delete it; it can stay empty.
 
-## Unified login (no Facebook Page) ~15 min, once
+## The key in use: a system user's token (Business settings) ~5 min
 
-Meta's dashboard calls Facebook login "legacy"; Unified login is its current route. Its key belongs to a **business
-portfolio** (free) and, by developer reports, doesn't expire. Not documented well by Meta yet (Nov 2026): if a screen
-looks different, follow its wording.
+Verified 2026-11-03 (Short 4 of "new" posted with it). Doesn't expire.
 
-1. **Business portfolio with the Instagram account** (PC, Chrome): **business.facebook.com** → if there is no
-   portfolio yet, create one (name: Almanca Dil Atölyesi). **Settings → Accounts → Instagram accounts → Add** → log in
-   as `almancadilatolyesi`.
-2. **developers.facebook.com** → My Apps → **Almanca Dil Atölyesi** → **Use cases → Manage messaging & content on
-   Instagram → Customize → API setup with Unified login**. If it asks for a business portfolio, pick the one from 1.
-3. **Create configuration**: permissions `instagram_basic` and `instagram_content_publish` (add `business_management`
-   if offered; skip the messaging ones), asset: the Instagram account → Save. Copy the **Configuration ID**.
-   (Done 2026-11-03: "Instagram API (unified login)", system-user key, expiration "Never".)
-   Below it, **Redirect URL → Register a new redirect URL**: `https://boyukbas.github.io/YT/ig-login.html` → **Save**.
-   (Meta only answers to registered https addresses; that page of the web app hands the answer on to the PC.)
-4. **App settings → Basic**: App ID and App secret (as in step 4.6 below).
-5. On the PC, in a terminal:
+1. **business.facebook.com → Settings** (portfolio "Almanca Dil Atölyesi"). **Instagram profiles**: `@almancadilatolyesi`
+   is owned by the portfolio, and under **Connected assets** the Facebook Page is listed.
+2. **Users → System users** → the system user (now: **Claude**) → **Assign assets → Instagram profiles →
+   almancadilatolyesi → full control**. (The app "Almanca Dil Atölyesi" must be assigned too.)
+3. **Generate token** → app **Almanca Dil Atölyesi**, expiry **Never**, permissions `instagram_basic`,
+   `instagram_content_publish` (+ `instagram_manage_contents`) → copy it. Don't paste it in a chat, email or Drive.
+4. On the PC, in a terminal:
 
    ```
-   D:\YT\work\venv\Scripts\python D:\code\YT\pipeline\instagram.py unified-token
+   D:\YT\workenv\Scripts\python D:\code\YT\pipeline\instagram.py system-token
    ```
 
-   It asks the App ID, the App secret (not shown) and the Configuration ID, then opens Meta's login in the browser:
-   continue (with Instagram or Facebook), pick **almancadilatolyesi**, allow. The tab then says "Done". The PC window
-   prints the account, the key type and whether it expires, then the account check.
-   - "URL blocked" / redirect error in the browser: the redirect URL from 3 isn't saved (exactly, with `.html`).
-   - "reaches no Instagram account": the account wasn't picked in the login, or `instagram_content_publish` isn't in
-     the configuration.
+   Paste the token (not shown) → it prints the account and the check. "has no Instagram account" = step 2 is missing.
+
+**Go slowly with Meta.** On 2026-11-03 many logins, keys and Page changes within a few hours got the developer account
+flagged ("Account confirmation needed", all keys "API access blocked") until it was confirmed on
+developers.facebook.com. One key change at a time, and don't switch Facebook profiles in the middle of one: a Graph API
+Explorer token dies when you do ("the user logged out").
+
+(The browser routes `unified-token` (Unified login, its configuration and the `ig-login.html` redirect) and `fb-token`
+(Graph API Explorer, steps 3–4 below) also still exist. The Unified-login key lost the Instagram account when the new
+Page was linked.)
 
 Everything prepared is in Drive: `SINEM-YouTube/_channel/instagram/` (profile picture, this guide) and, per lesson,
 `Output/cover-short-N.jpg` + `Output/instagram.md` (captions, also handy for posting by hand).
@@ -126,8 +123,8 @@ If it says "No Instagram account linked", do the linking in step 2 and make a ne
   `FACEBOOK_PAGE` in `instagram.py`.) Nothing is posted until step 4 is done, and not
   before the start date in `_channel/channel.json` → `"instagram": {"start": "2026-11-05"}` (change or delete it to
   start earlier).
-- **Renewal:** the key itself never expires, but Meta stops its data access 90 days after your last login to the app
-  (now: 2027-01-31). Two weeks before, the log says so: repeat step 4 (new token → `fb-token`).
+- **Renewal:** the system user's key never expires. If it stops working, generate a new one (section "The key in
+  use") and run `system-token`.
 
 Check any time: `instagram.py check` (accounts, posts used of the 24 h limit), `instagram.md` in the lesson's Output
 shows which Reels went out with their links, and `D:\YT\easy-work\instagram.log` has every post or problem.
