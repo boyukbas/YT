@@ -47,9 +47,10 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
 
 **Instagram** (`instagram.py`, setup in `instagram-setup.md`): every Short also gets `cover-short-N.jpg` (its own photo +
 keywords, text inside the 3:4 grid crop) and a caption in `instagram.md`; the watcher posts one Reel a day after 20:00
-to Instagram (Facebook-login mode, `instagram.py fb-token`: Page token without expiry; the Page must stay linked to
-Instagram, but nothing is posted there since 2026-11-03: `FACEBOOK_PAGE = False`). Instagram fetches video + cover
-through a temporary Cloudflare quick tunnel (its direct upload refuses Page tokens).
+to Instagram (key from Meta's Unified login, `instagram.py unified-token`: no Facebook Page needed, used on
+graph.facebook.com; the older Facebook-login key `fb-token` needed a Page, and the Page was deleted 2026-11-03; nothing
+is posted on Facebook: `FACEBOOK_PAGE = False`). Instagram fetches video + cover through a temporary Cloudflare quick
+tunnel (its direct upload refuses Page tokens).
 
 **Shorts:** at most 3 (`shorts_max` in channel.json / settings.json), the strongest self-contained parts (Claude picks
 them in the subtitle step: `shorts` in the answer, each with a `kind`: mistake / exam / life / rule; 20–45 s

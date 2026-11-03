@@ -4,9 +4,37 @@ Goal: the PC posts each lesson's Shorts as Reels on **Instagram**, **one a day a
 own cover and caption. You set it up once (steps 1–5). After that nothing is needed per video.
 
 **Facebook (2026-11-03):** the PC no longer posts on Facebook (the Page got few views and was deleted; Instagram does
-well). Meta still needs a Facebook Page linked to the Instagram account: the PC's key reaches Instagram *through* the
-Page. Deleting the Page broke the key ("Page that is not accessible"). Keep a Page linked (it can stay empty), or
-posting stops.
+well). The old key (steps 3–4, Facebook login) reached Instagram *through* the Page, so it died with it ("Page that is
+not accessible"). The new key comes from **Meta's Unified login, which needs no Page**: section "Unified login" below.
+Steps 1–2 and 5 still apply; skip the Page parts.
+
+## Unified login (no Facebook Page) ~15 min, once
+
+Meta's dashboard calls Facebook login "legacy"; Unified login is its current route. Its key belongs to a **business
+portfolio** (free) and, by developer reports, doesn't expire. Not documented well by Meta yet (Nov 2026): if a screen
+looks different, follow its wording.
+
+1. **Business portfolio with the Instagram account** (PC, Chrome): **business.facebook.com** → if there is no
+   portfolio yet, create one (name: Almanca Dil Atölyesi). **Settings → Accounts → Instagram accounts → Add** → log in
+   as `almancadilatolyesi`.
+2. **developers.facebook.com** → My Apps → **Almanca Dil Atölyesi** → **Use cases → Manage messaging & content on
+   Instagram → Customize → API setup with Unified login**. If it asks for a business portfolio, pick the one from 1.
+3. **Create configuration**: permissions `instagram_basic` and `instagram_content_publish` (add `business_management`
+   if offered; skip the messaging ones), asset: the Instagram account → Save. Copy the **Configuration ID**.
+4. **App settings → Basic**: App ID and App secret (as in step 4.6 below).
+5. On the PC, in a terminal:
+
+   ```
+   D:\YT\work\venv\Scripts\python D:\code\YT\pipeline\instagram.py unified-token
+   ```
+
+   It asks the App ID, the App secret (not shown) and the Configuration ID, then opens Meta's login in the browser:
+   continue (with Instagram or Facebook), pick **almancadilatolyesi**, allow. The tab then says "Done". The PC window
+   prints the account, the key type and whether it expires, then the account check.
+   - "URL blocked" / redirect error in the browser: the app → **Facebook Login for Business → Settings → Valid OAuth
+     Redirect URIs** → add `http://localhost:8765/` → Save → run it again.
+   - "reaches no Instagram account": the account wasn't picked in the login, or `instagram_content_publish` isn't in
+     the configuration.
 
 Everything prepared is in Drive: `SINEM-YouTube/_channel/instagram/` (profile picture, this guide) and, per lesson,
 `Output/cover-short-N.jpg` + `Output/instagram.md` (captions, also handy for posting by hand).

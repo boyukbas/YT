@@ -4,6 +4,9 @@
   python instagram.py fb-token                      Facebook-login mode: app ID + secret + a Graph API Explorer token →
                                                     a Page token that doesn't expire (the Page only links
                                                     the app to Instagram; nothing is posted there)
+  python instagram.py unified-token                 Unified-login mode (no Facebook Page needed): app ID + secret +
+                                                    the login configuration's ID → log in in the browser → a key
+                                                    owned by the business portfolio
   python instagram.py token                         Instagram-login mode: paste the token from the app dashboard
   python instagram.py check                         read-only: account, posts left in the 24 h limit
   python instagram.py prepare "<lesson>"            covers (cover-short-N.jpg) + captions (instagram.md); posts nothing
@@ -16,9 +19,9 @@ Instagram downloads the video + cover from a public URL (its direct upload refus
 being posted, the PC serves just those two files under a random path through a temporary Cloudflare quick tunnel
 (cloudflared, no account), and closes it as soon as Instagram has them. Posting to the Facebook Page as well
 (FACEBOOK_PAGE) is off since 2026-11-03: the Page got few views and was deleted; Instagram does well.
-Token: %USERPROFILE%\\.shorts-pipeline\\instagram.json (Page token: no expiry; Instagram token: 60 days, refreshed
+Token: %USERPROFILE%\\.shorts-pipeline\\instagram.json (Page / Unified-login key: no expiry; Instagram token: 60 days, refreshed
 here every week). Record: <lesson>/Output/instagram-posted.json."""
-import argparse, getpass, http.server, json, re, secrets, shutil, subprocess, sys, tempfile, threading, time
+import argparse, getpass, http.server, json, re, secrets, shutil, subprocess, sys, tempfile, threading, time, webbrowser
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
@@ -57,13 +60,16 @@ def saved():
 
 
 def fb_mode():
-    return TOKEN.exists() and saved().get('mode') == 'facebook'
+    """Keys from a Facebook or Unified login: they work on graph.facebook.com (graph.instagram.com refuses them)."""
+    return TOKEN.exists() and saved().get('mode') in ('facebook', 'unified')
 
 
 def token():
     t = saved()
     if t.get('mode') == 'facebook':
         return t['page_token']
+    if t.get('mode') == 'unified':
+        return t['token']
     if datetime.now(timezone.utc) - datetime.fromisoformat(t['refreshed']) > timedelta(days=7):
         r = requests.get('https://graph.instagram.com/refresh_access_token',
                          params={'grant_type': 'ig_refresh_token', 'access_token': t['token']}, timeout=30)
@@ -166,21 +172,115 @@ def save_fb_token():
     check()
 
 
+REDIRECT = 'http://localhost:8765/'                      # Meta allows localhost redirects for apps in development mode
+
+
+def browser_login(app_id, config_id):
+    """Meta's login dialog in the browser; its answer comes back to a one-shot server on localhost. Returns the code."""
+    from urllib.parse import parse_qs, urlencode, urlparse
+    state, got = secrets.token_urlsafe(16), {}
+
+    class Back(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            q = {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+            if q.get('state') == state:
+                got.update(q)
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            msg = 'Done: close this tab and go back to the PC window.' if 'code' in got else \
+                'Meta said no: ' + got.get('error_description', 'see the PC window')
+            self.wfile.write(f'<h2>{msg}</h2>'.encode())
+
+    srv = http.server.HTTPServer(('127.0.0.1', 8765), Back)
+    srv.timeout = 5
+    url = 'https://www.facebook.com/v26.0/dialog/oauth?' + urlencode({
+        'client_id': app_id, 'config_id': config_id, 'redirect_uri': REDIRECT, 'response_type': 'code', 'state': state})
+    print("Opening Meta's login in the browser (if nothing opens, copy this address into it):\n" + url)
+    webbrowser.open(url)
+    end = time.time() + 600
+    while not got and time.time() < end:
+        srv.handle_request()
+    srv.server_close()
+    if 'code' not in got:
+        raise SystemExit(f"No login: {got.get('error_description') or got.get('error') or 'timed out after 10 min'}")
+    return got['code']
+
+
+def save_unified_token():
+    """Unified-login mode (no Facebook Page): the app's login configuration → browser login → a key owned by the
+    business portfolio (reported as a "system user" key without expiry), used on graph.facebook.com.
+    The app secret and the login code are used once here and not stored."""
+    app_id = input('App ID (Meta app → App settings → Basic): ').strip()
+    secret = getpass.getpass('App secret (same page → Show; it is not shown here): ').strip()
+    config_id = input('Configuration ID (Use cases → Instagram → API setup with Unified login): ').strip()
+    if not (app_id and secret and config_id):
+        raise SystemExit('App ID, app secret and configuration ID are all needed.')
+    code = browser_login(app_id, config_id)
+    app = f'{app_id}|{secret}'
+    debug = lambda tok: requests.get(f'{FB_API}/debug_token', timeout=30,
+                                     params={'input_token': tok, 'access_token': app}).json().get('data', {})
+    try:
+        r = requests.get(f'{FB_API}/oauth/access_token', timeout=30, params={
+            'client_id': app_id, 'client_secret': secret, 'redirect_uri': REDIRECT, 'code': code}).json()
+        tok = r.get('access_token')
+        if not tok:
+            raise SystemExit(f"Token exchange failed: {r.get('error', {}).get('message', r)}")
+        dbg = debug(tok)
+        if dbg.get('type') == 'USER' and dbg.get('expires_at'):            # a person's key: make it long-lived (60 days)
+            long = requests.get(f'{FB_API}/oauth/access_token', timeout=30, params={
+                'grant_type': 'fb_exchange_token', 'client_id': app_id, 'client_secret': secret,
+                'fb_exchange_token': tok}).json().get('access_token')
+            if long:
+                tok, dbg = long, debug(long)
+        auth = {'Authorization': f'Bearer {tok}'}
+        ids = [i for g in dbg.get('granular_scopes', []) if g.get('scope') == 'instagram_content_publish'
+               for i in g.get('target_ids', [])]
+        if not ids:                                                         # fallback: the accounts given to the key
+            ids = [a['id'] for a in requests.get(f'{FB_API}/me/assigned_instagram_accounts', timeout=30, headers=auth,
+                                                 params={'fields': 'id'}).json().get('data', [])]
+        accounts = [requests.get(f'{FB_API}/{i}', timeout=30, headers=auth, params={'fields': 'id,username'}).json()
+                    for i in ids]
+    except requests.RequestException as e:
+        raise SystemExit(f'Meta unreachable: {type(e).__name__}') from None
+    accounts = [a for a in accounts if 'username' in a]
+    if not accounts:
+        raise SystemExit(f"The key reaches no Instagram account (permissions: {', '.join(dbg.get('scopes', []))}). "
+                         'Pick the Instagram account in the login, and tick instagram_content_publish in the configuration.')
+    ig = next((a for a in accounts if 'almanca' in a['username']), accounts[0])
+    KEYS.mkdir(parents=True, exist_ok=True)
+    TOKEN.write_text(json.dumps({'mode': 'unified', 'token': tok, 'user_id': ig['id'], 'username': ig['username'],
+                                 'expires_at': dbg.get('expires_at') or None,
+                                 'data_access_until': dbg.get('data_access_expires_at') or None,
+                                 'refreshed': datetime.now(timezone.utc).isoformat()}), encoding='utf-8')
+    exp = dbg.get('expires_at')
+    print(f"Instagram @{ig['username']} (id {ig['id']}), key type {dbg.get('type')}, " +
+          ('never expires' if not exp else f'expires {datetime.fromtimestamp(exp):%Y-%m-%d}'))
+    if 'instagram_content_publish' not in dbg.get('scopes', []):
+        print('WARNING: instagram_content_publish is missing: add it to the configuration and run this again.')
+    check()
+
+
 def renew_warning():
     """Meta lets a token read data for 90 days after the last login; then fb-token has to be run again."""
-    until = saved().get('data_access_until')
-    if until and datetime.fromtimestamp(until, timezone.utc) - datetime.now(timezone.utc) < timedelta(days=14):
-        return (f"WARNING: Meta access ends {datetime.fromtimestamp(until):%Y-%m-%d}: make a new token in the Graph API "
-                'Explorer and run  instagram.py fb-token  (instagram-setup.md, step 4).')
+    t = saved()
+    for until in (t.get('data_access_until'), t.get('expires_at')):
+        if until and datetime.fromtimestamp(until, timezone.utc) - datetime.now(timezone.utc) < timedelta(days=14):
+            how = 'run  instagram.py unified-token  again' if t.get('mode') == 'unified' else \
+                'make a new token in the Graph API Explorer and run  instagram.py fb-token'
+            return f"WARNING: Meta access ends {datetime.fromtimestamp(until):%Y-%m-%d}: {how} (instagram-setup.md)."
     return None
 
 
 def check():
     t = saved()
-    if t.get('mode') == 'facebook':
+    if t.get('mode') in ('facebook', 'unified'):
         ig = call('GET', t['user_id'], fields='username,media_count,followers_count')
         print(f"Instagram: @{ig.get('username')}, {ig.get('media_count', 0)} posts, {ig.get('followers_count', 0)} followers")
-        if FACEBOOK_PAGE:
+        if FACEBOOK_PAGE and 'page_id' in t:
             page = call('GET', t['page_id'], fields='name,followers_count')
             print(f"Facebook Page: {page.get('name')}, {page.get('followers_count', 0)} followers")
         me = {'user_id': t['user_id'], 'username': ig.get('username')}
@@ -496,7 +596,7 @@ def post_next(lesson, dry=False, force=False, log=print):
     """Post the lesson's next Reel. Returns a one-line summary, or None when it has none left."""
     lesson, out, data = lesson_files(lesson)
     posted = load(out)
-    fb = fb_mode() and FACEBOOK_PAGE
+    fb = fb_mode() and FACEBOOK_PAGE and 'page_id' in saved()
     done = lambda r: bool(r) and 'id' in r and (not fb or 'facebook' in r)
     todo = [(m, sh) for m, sh in reels(out, data) if not done(posted.get(m.name))]
     if not todo:
@@ -550,7 +650,7 @@ def daily(root, log=print):
         return None
     lessons = sorted((p.parent.parent for p in Path(root).glob('*/*/youtube.json') if not p.parent.parent.name.startswith('_')),
                      key=lambda l: next(l.glob('*/youtube.json')).stat().st_mtime)
-    if fb_mode() and FACEBOOK_PAGE and LONG_HOURS[0] <= now.hour < LONG_HOURS[1]:
+    if fb_mode() and FACEBOOK_PAGE and 'page_id' in saved() and LONG_HOURS[0] <= now.hour < LONG_HOURS[1]:
         longs = [datetime.fromisoformat(r['long']['posted_utc']) for l in lessons for o in l.glob(f'*/{POSTED}')
                  for r in [json.loads(o.read_text(encoding='utf-8')).get('_facebook', {})] if 'long' in r]
         if not longs or datetime.now(timezone.utc) - max(longs) > GAP:
@@ -577,13 +677,15 @@ def daily(root, log=print):
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
     ap = argparse.ArgumentParser()
-    ap.add_argument('cmd', choices=['fb-token', 'token', 'check', 'prepare', 'post', 'daily'])
+    ap.add_argument('cmd', choices=['fb-token', 'unified-token', 'token', 'check', 'prepare', 'post', 'daily'])
     ap.add_argument('path', nargs='?')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--force', action='store_true', help='post even if a Reel went out less than 20 h ago')
     a = ap.parse_args()
     if a.cmd == 'fb-token':
         save_fb_token()
+    elif a.cmd == 'unified-token':
+        save_unified_token()
     elif a.cmd == 'token':
         save_token()
     elif a.cmd == 'check':
