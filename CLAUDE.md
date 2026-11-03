@@ -19,6 +19,8 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   Max 3 Shorts per lesson, published one a day (19:00); Instagram + Facebook Page Reels one a day (20:00) via
   `instagram.py` (setup: `pipeline/instagram-setup.md`; Meta app "Almanca Dil Atölyesi", Facebook-login mode).
   Watcher: Task Scheduler "YT Easy mode watcher" every 10 min (`pipeline/watch.cmd`, log `D:\YT\easy-work\watch.log`).
+  Google Drive's drive letter can change after a restart (J: → G: on 2026-11-03); `watch.cmd` looks for
+  `<letter>:\My Drive\SINEM-YouTube` on every letter, so use whatever letter has it in manual commands too.
   YouTube API quota resets at midnight Pacific = 11:00 Istanbul in winter, 10:00 in summer.
   **User says "new video(s)" → follow `pipeline/RUNBOOK.md`** (STATUS → `review.py` rule check → look at frames → report).
 - The iOS workflow ignores `docs/**`, `pipeline/**`, `README.md` and `CLAUDE.md` changes.
