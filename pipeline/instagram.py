@@ -244,12 +244,16 @@ def save_unified_token(app_id='', config_id=''):
         if not ids:                                                         # fallback: the accounts given to the key
             ids = [a['id'] for a in requests.get(f'{FB_API}/me/assigned_instagram_accounts', timeout=30, headers=auth,
                                                  params={'fields': 'id'}).json().get('data', [])]
+        if not ids and TOKEN.exists():                                      # and the account the PC already knows
+            ids = [saved().get('user_id')]
         accounts = [requests.get(f'{FB_API}/{i}', timeout=30, headers=auth, params={'fields': 'id,username'}).json()
                     for i in ids]
     except requests.RequestException as e:
         raise SystemExit(f'Meta unreachable: {type(e).__name__}') from None
     accounts = [a for a in accounts if 'username' in a]
-    if not accounts:
+    if not accounts:                    # keep the key (private folder) so it can be looked at without another login
+        KEYS.mkdir(parents=True, exist_ok=True)
+        (KEYS / 'instagram-pending.json').write_text(json.dumps({'token': tok, 'type': dbg.get('type')}), encoding='utf-8')
         raise SystemExit(f"The key reaches no Instagram account (permissions: {', '.join(dbg.get('scopes', []))}). "
                          'Pick the Instagram account in the login, and tick instagram_content_publish in the configuration.')
     ig = next((a for a in accounts if 'almanca' in a['username']), accounts[0])
