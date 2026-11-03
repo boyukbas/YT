@@ -212,13 +212,13 @@ def browser_login(app_id, config_id):
     return got['code']
 
 
-def save_unified_token():
+def save_unified_token(app_id='', config_id=''):
     """Unified-login mode (no Facebook Page): the app's login configuration → browser login → a key owned by the
     business portfolio (reported as a "system user" key without expiry), used on graph.facebook.com.
     The app secret and the login code are used once here and not stored."""
-    app_id = input('App ID (Meta app → App settings → Basic): ').strip()
-    secret = getpass.getpass('App secret (same page → Show; it is not shown here): ').strip()
-    config_id = input('Configuration ID (Use cases → Instagram → API setup with Unified login): ').strip()
+    app_id = app_id or input('App ID (Meta app → App settings → Basic): ').strip()
+    secret = getpass.getpass('App secret (Meta app → App settings → Basic → Show; it is not shown here): ').strip()
+    config_id = config_id or input('Configuration ID (Use cases → Instagram → API setup with Unified login): ').strip()
     if not (app_id and secret and config_id):
         raise SystemExit('App ID, app secret and configuration ID are all needed.')
     code = browser_login(app_id, config_id)
@@ -683,11 +683,13 @@ if __name__ == '__main__':
     ap.add_argument('path', nargs='?')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--force', action='store_true', help='post even if a Reel went out less than 20 h ago')
+    ap.add_argument('--app-id', default='', help='unified-token: the Meta app ID (asked if not given)')
+    ap.add_argument('--config-id', default='', help='unified-token: the login configuration ID (asked if not given)')
     a = ap.parse_args()
     if a.cmd == 'fb-token':
         save_fb_token()
     elif a.cmd == 'unified-token':
-        save_unified_token()
+        save_unified_token(a.app_id, a.config_id)
     elif a.cmd == 'token':
         save_token()
     elif a.cmd == 'check':
