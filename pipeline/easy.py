@@ -185,6 +185,13 @@ def process(lesson, root, log_only=False):
     st = Status(out, work)
     st.set('working', f'Starting: {len(videos)} video(s)', inputs=fingerprint(videos), error='', youtube='', youtube_complete=False)
     name = slug(lesson.name)
+    # the same recording in two lesson folders (copied by mistake): stop instead of making the video twice
+    for other in Path(root).iterdir():
+        if other.is_dir() and other.resolve() != lesson.resolve() and not other.name.startswith(('_', '.')):
+            same = {(v.name, v.stat().st_size) for v in lesson_videos(other)} & {(v.name, v.stat().st_size) for v in videos}
+            if same:
+                raise RuntimeError(f'{", ".join(n for n, _ in same)} is also in the lesson "{other.name}". '
+                                   'Put this lesson\'s own recording here (the PC starts again when the clips change).')
 
     # 1. clips
     clips = []
@@ -333,8 +340,10 @@ def process(lesson, root, log_only=False):
     vinfo = ', '.join(f'{v} ({"Short" if sh else "normal video"}, {ts(tl[2])}' + (f', idea: {ideas[v]}' if ideas.get(v) else '') +
                       (f', kind: {kinds[v]}' if kinds.get(v) else '') + ')' for v, tl, sh in specs_info)
     data = llm.ask(work, 'texts', T.build_prompt(profile, lesson.name, ans.get('title_hint', lesson.name), cues, vinfo, len(cand),
-                                                 T.series_numbers(lesson.parent, profile)), images=[sheet])
+                                                 T.series_numbers(lesson.parent, profile, lesson)), images=[sheet])
     data['chapters'] = T.check_chapters(data.get('chapters', []), total) if not specs_info[0][2] else []
+    if not data['chapters']:                         # a Short (or no valid chapters): no chapters block in the text
+        data['descriptions'] = [T.drop_chapters(d) for d in data.get('descriptions', [])]
     for sh in data.get('shorts', []):
         sh['kind'] = kinds.get(sh.get('version'), '')                # for review.py (length rule) and the series
     st.set('working', 'Making thumbnails')

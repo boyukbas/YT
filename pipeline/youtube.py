@@ -261,7 +261,7 @@ def apply_video(yt, vid, out, mp4, w, rec, dry):
 
     # 5. the exercise comment, as the channel, once the video is public
     if w['comment'] and not rec.get('comment'):
-        public = st['privacyStatus'] == 'public'
+        public = st['privacyStatus'] == 'public' or (new_st['privacyStatus'] == 'public' and not dry)   # made public above
         mine = []
         if public:
             try:

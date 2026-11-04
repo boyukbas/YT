@@ -52,10 +52,19 @@ Short message, in English, with what was verified:
 ## 4. After the upload (automatic, check next day)
 - STATUS.txt "YouTube:" lines show each video's link and what was set. Quota: ~900 units per Short, 10,000 a day;
   "quota used up" → it resets at 11:00 Istanbul (winter) / 10:00 (summer); the watcher retries by itself.
-- Instagram (`instagram.py`, log `D:\YT\easy-work\instagram.log`): one Reel a day after 20:00. Nothing goes to Facebook
-  (Page deleted 2026-11-03). Plan: `Output\instagram.md`.
-  `python -I instagram.py check` shows the token; Meta's data access needs a renewal every 90 days (next: 2027-01-31,
-  steps in `instagram-setup.md`).
+- Instagram (`instagram.py`, log `D:\YT\easy-work\instagram.log`): one Reel a day after 20:00, made from the lesson's
+  `-short-N.mp4` files (a one-clip Short lesson has none, so it is not posted). Nothing is posted on Facebook, but the
+  empty Page must stay linked to Instagram. Plan: `Output\instagram.md`. Post the next one now:
+  `python -I instagram.py post "<lesson>"` (refuses within 20 h of the last one). Key: a system user's token (never
+  expires). "API access blocked" (code 200) on every call = Meta flagged the developer account: the user confirms it
+  on developers.facebook.com, or it clears by itself; try once, then wait, don't hammer it.
+
+## Gotchas seen so far
+- **Same recording in two lesson folders** (copied by mistake): the second one stops with "is also in the lesson …".
+- **A clip replaced** in a lesson: the PC starts that lesson fresh (the old work folder is kept as `<slug>.old-<time>`).
+- **One-clip vertical lesson (≤ 3 min)**: the main video *is* a Short: vertical cover, no chapters, no separate Shorts.
+- **Series numbers** ("Türklerin Almanca Hataları #n") are counted from the other lessons' `youtube.json`.
+- Making a video public posts the exercise comment in the same run; pinning it stays in Studio.
 
 ## Rules the pipeline follows (from the growth plan, Nov 2026)
 - Captions: German biggest (yellow), Turkish smaller (white), translation under German lines; wrong/right pairs get

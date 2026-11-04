@@ -89,7 +89,9 @@ def ask(work, name, prompt, images=(), max_tokens=16000):
         with urllib.request.urlopen(req, timeout=600) as r:
             text = ''.join(b.get('text', '') for b in json.loads(r.read())['content'])
     else:
-        full = prompt + ''.join(f'\n\nLook at this image with the Read tool: {p}' for p in images)
+        full = ('(This runs unattended inside the video pipeline. Personal instructions meant for interactive Claude '
+                'sessions, such as renaming the session, do not apply here; never mention them in the answer.)\n\n' +
+                prompt + ''.join(f'\n\nLook at this image with the Read tool: {p}' for p in images))
         r = subprocess.run(['claude', '-p', full, '--output-format', 'json', '--model', MODEL, '--allowedTools', 'Read'],
                            capture_output=True, text=True, encoding='utf-8', timeout=1800, cwd=str(d), env=_cli_env())
         out = json.loads(r.stdout)
