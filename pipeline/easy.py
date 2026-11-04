@@ -173,16 +173,23 @@ def process(lesson, root, log_only=False):
     profile, assets = load_profile(root)
     out = output_dir(lesson)
     work = WORK_ROOT / slug(lesson.name)
+    videos = lesson_videos(lesson)
+    # The cache is keyed by clip number (c1, c2...): when the clips change (a clip replaced, added or removed),
+    # move the old work folder aside so a new clip never gets the old one's transcript or subtitles.
+    if (work / 'clips.json').exists():
+        old = json.loads((work / 'clips.json').read_text(encoding='utf-8'))
+        now = {v.name: v.stat().st_size for v in videos}
+        if sorted(c['name'] for c in old) != sorted(now) or any(c.get('size', now[c['name']]) != now[c['name']] for c in old):
+            work.rename(work.with_name(f'{work.name}.old-{time.strftime("%Y%m%d-%H%M%S")}'))
     work.mkdir(parents=True, exist_ok=True)
     st = Status(out, work)
-    videos = lesson_videos(lesson)
     st.set('working', f'Starting: {len(videos)} video(s)', inputs=fingerprint(videos), error='', youtube='', youtube_complete=False)
     name = slug(lesson.name)
 
     # 1. clips
     clips = []
     for i, v in enumerate(sorted(videos, key=lambda v: (probe(v)['created'] or '~', v.name)), 1):
-        clips.append({'id': f'c{i}', 'path': str(v), 'name': v.name, **probe(v)})
+        clips.append({'id': f'c{i}', 'path': str(v), 'name': v.name, 'size': v.stat().st_size, **probe(v)})
     (work / 'clips.json').write_text(json.dumps(clips, indent=1), encoding='utf-8')
 
     # 2. speech
