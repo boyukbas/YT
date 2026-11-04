@@ -345,10 +345,20 @@ def lesson_files(lesson):
 
 
 def reels(out, data):
-    """[(mp4, short entry)] in Short order."""
+    """[(mp4, short entry)] in Short order. A one-clip Short lesson (no -short-N files; the main video is vertical and
+    at most 3 min) is one Reel itself, with the main video's first title/description (decided 2026-11-04)."""
     num = lambda f: int(re.search(r'-short-(\d+)$', f.stem).group(1))
     by_version = {s['version']: s for s in data.get('shorts', [])}
-    return [(f, by_version.get(f'short-{num(f)}', {})) for f in sorted(out.glob('*-short-*.mp4'), key=num)]
+    found = [(f, by_version.get(f'short-{num(f)}', {})) for f in sorted(out.glob('*-short-*.mp4'), key=num)]
+    if found:
+        return found
+    for f in out.glob('*-video.mp4'):
+        p = probe(f)
+        if p['height'] > p['width'] and p['duration'] <= 180 and data.get('titles'):
+            import texts
+            return [(f, {'version': 'video', 'whole': True, 'title': data['titles'][0],
+                         'description': texts.drop_chapters(data.get('descriptions', [''])[0])})]
+    return []
 
 
 def profile(root):
@@ -369,10 +379,10 @@ def caption(sh, base_tags):
     body = []
     for line in sh.get('description', '').splitlines():
         line = line.strip()
-        if not line or line.startswith('#'):
+        if not line or line.startswith('#') or (sh.get('whole') and line.startswith('🔔')):   # 🔔 = YouTube subscribe
             continue
         body.append(YOUTUBE_LINE if line.startswith('Dersin tamamı') else line)
-    if YOUTUBE_LINE not in body:
+    if YOUTUBE_LINE not in body and not sh.get('whole'):     # a whole one-clip lesson: no "full lesson on YouTube"
         body.append(YOUTUBE_LINE)
     own = [t for t in re.findall(r'#\w+', sh.get('description', '')) if t.lower() != '#shorts']
     tags = list(dict.fromkeys(t.lower() for t in base_tags + own))[:MAX_TAGS]
@@ -393,6 +403,8 @@ def fb_caption(cap, out):
 
 
 def cover_path(mp4):
+    if mp4.stem.endswith('-video'):                        # a one-clip Short lesson: its vertical YouTube cover
+        return mp4.with_name('thumbnail-short.jpg')
     return mp4.with_name('cover-' + re.search(r'short-\d+$', mp4.stem).group(0) + '.jpg')      # cover-short-N.jpg
 
 
@@ -430,7 +442,7 @@ def write_md(lesson, out, data):
         state = f"posted {p['posted']}: {p.get('permalink', '')}" if 'id' in p else 'not posted yet'
         if 'facebook' in p:
             state += f"; Facebook: {p['facebook']['permalink']}"
-        L += [f'## Short {mp4.stem.rsplit("-", 1)[1]} ({state})',
+        L += [(f'## The lesson video ({state})' if sh.get('whole') else f'## Short {mp4.stem.rsplit("-", 1)[1]} ({state})'),
               f'Video `{mp4.name}` · cover `{cover_path(mp4).name}`', '', '```', caption(sh, tags), '```', '']
     (out / 'instagram.md').write_text('\n'.join(L), encoding='utf-8')
 

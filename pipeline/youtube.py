@@ -14,7 +14,7 @@ Choices in <lesson>/settings.json: {"title": 1-3, "description": 1-2, "thumbnail
 "public": true (make the main video public once filled in; same as --public),
 "shorts_time": "19:00", "shorts_every": 1 (Shorts are never published together: each private Short is scheduled
 for the next free day across all lessons, at this Istanbul time; upload Shorts as Private),
-"shorts_playlist": "<name>" (an existing playlist; the Shorts go in it in their order)}.
+"shorts_playlist": "<name>" (the Shorts go in it in their order)}. A playlist that doesn't exist yet is created (public).
 Quota: 10,000 units a day; a Short with two caption tracks costs ~900, so a lesson with many Shorts can need two days
 (it resumes where it stopped). The quota resets at midnight Pacific time (11:00 Istanbul in winter, 10:00 in summer).
 
@@ -241,12 +241,17 @@ def apply_video(yt, vid, out, mp4, w, rec, dry):
             rec[f'captions_{lang}'] = sha(srt)
         done.append(f'{lang.upper()} captions ({"replaced" if old else "added"})')
 
-    # 4. playlist (only an existing one: new playlists show on the channel page, so they're made by hand)
+    # 4. playlist; a missing one is created (public, 50 units), decided 2026-11-04
     if w['playlist'] and not rec.get('playlist'):
         pls = yt.playlists().list(part='snippet', mine=True, maxResults=50).execute()['items']
         pl = next((p for p in pls if p['snippet']['title'].casefold() == w['playlist'].casefold()), None)
+        if not pl and not dry:
+            pl = yt.playlists().insert(part='snippet,status', body={
+                'snippet': {'title': w['playlist'][:150], 'defaultLanguage': w['defaultLanguage']},
+                'status': {'privacyStatus': 'public'}}).execute()
+            done.append(f"new playlist {pl['snippet']['title']}")
         if not pl:
-            problems.append(f"playlist \"{w['playlist']}\" doesn't exist; not created")
+            done.append(f"new playlist {w['playlist']}")
         elif yt.playlistItems().list(part='id', playlistId=pl['id'], videoId=vid).execute()['items']:
             rec['playlist'] = pl['id']
         else:
