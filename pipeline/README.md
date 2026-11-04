@@ -8,6 +8,7 @@ everything YouTube needs, and writes it back to the same folder.
 J:\My Drive\SINEM-YouTube\
   _channel\            channel profile (set once): channel.json, logo.png, subscribe.png, fonts\, music\, terms.txt, brand.png,
                        brand\ (banner, Facebook cover, Instagram highlights: brandkit.py), CEKIM-REHBERI.txt (filming guide)
+  STATUS.txt           the whole channel on one page for the phone (overview.py; rewritten by the PC)
   <lesson>\            raw clips (.mov/.mp4), optional settings.json  ({"short": false} = no Short version)
     Output\            results (or "Output (Easy)" if an Output folder made elsewhere exists)
 ```

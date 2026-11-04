@@ -104,3 +104,7 @@ class Status:
             lines += ['', 'YouTube:'] + ['  ' + p for p in self.data['youtube'].split(' | ')]
         (self.out / 'STATUS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
         self.log(f'[{state}] {step}')
+        if Status.after_set:                           # the channel's overview page (overview.py), set by easy.py
+            Status.after_set(self.out)
+
+    after_set = None

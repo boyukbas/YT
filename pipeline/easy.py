@@ -411,6 +411,8 @@ def watch(root, once):
                 if lesson.is_dir() and not lesson.name.startswith(('_', '.')):
                     youtube_step(lesson)
             instagram_step(root)
+            import overview                                    # (imports easy: not at the top)
+            overview.write(root, idle=True)                    # SINEM-YouTube/STATUS.txt for the phone
             if once:
                 break
             time.sleep(600)
@@ -476,6 +478,8 @@ if __name__ == '__main__':
     ap.add_argument('--once', action='store_true')
     ap.add_argument('--root', help='channel root (default: parent of the lesson)')
     a = ap.parse_args()
+    import overview
+    Status.after_set = overview.hook                   # every status change also refreshes SINEM-YouTube/STATUS.txt
     if a.cmd == 'run':
         safe_process(Path(a.path), a.root or Path(a.path).parent)
     else:

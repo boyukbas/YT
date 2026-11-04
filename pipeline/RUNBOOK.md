@@ -5,7 +5,10 @@ Paths: lessons in `J:\My Drive\SINEM-YouTube\<lesson>`, work files in `D:\YT\eas
 `D:\YT\work\venv\Scripts\python -I` (run from `D:\code\YT\pipeline`).
 
 ## 1. Where is it? (1 minute)
+The whole channel on one page: `SINEM-YouTube\STATUS.txt` (`overview.py`; the user reads it in the Drive app on the
+phone). Rewritten by the watcher every run and on every lesson status change; it calls no API.
 ```
+type "J:\My Drive\SINEM-YouTube\STATUS.txt"
 type "J:\My Drive\SINEM-YouTube\<lesson>\Output\STATUS.txt"
 powershell Get-Content D:\YT\easy-work\watch.log -Tail 30
 ```

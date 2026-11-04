@@ -23,6 +23,7 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   system user's token from Business settings (`instagram.py system-token`). Go slowly with Meta logins/keys: a burst of
   them got the developer account flagged ("API access blocked") on 2026-11-03.
   Watcher: Task Scheduler "YT Easy mode watcher" every 10 min (`pipeline/watch.cmd`, log `D:\YT\easy-work\watch.log`).
+  Status page for the phone: `SINEM-YouTube\STATUS.txt` (`pipeline/overview.py`), rewritten every run and on each status change.
   Google Drive's drive letter can change after a restart (J: → G: on 2026-11-03); `watch.cmd` looks for
   `<letter>:\My Drive\SINEM-YouTube` on every letter, so use whatever letter has it in manual commands too.
   YouTube API quota resets at midnight Pacific = 11:00 Istanbul in winter, 10:00 in summer.
