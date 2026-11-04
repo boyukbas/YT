@@ -24,6 +24,11 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   them got the developer account flagged ("API access blocked") on 2026-11-03.
   Watcher: Task Scheduler "YT Easy mode watcher" every 10 min (`pipeline/watch.cmd`, log `D:\YT\easy-work\watch.log`).
   Status page for the phone: `SINEM-YouTube\STATUS.txt` (`pipeline/overview.py`), rewritten every run and on each status change.
+  Public status page: https://boyukbas.github.io/YT/status.html (`docs/status.html`). The PC (`pipeline/public.py`)
+  force-pushes `status.json` to the repo's `status` branch (clone `D:\YT\status-site`, never main) when it changes and
+  hourly with YouTube view counts; lesson names masked to 2 letters, no unpublished titles/errors. The page reads
+  `raw.githubusercontent.com/boyukbas/YT/refs/heads/status/status.json` (the short `/status/` form 404s).
+  Lesson Output folders hold only the finished videos; everything else is in `Output/extras/` (`tools.extras()`).
   Google Drive's drive letter can change after a restart (J: → G: on 2026-11-03); `watch.cmd` looks for
   `<letter>:\My Drive\SINEM-YouTube` on every letter, so use whatever letter has it in manual commands too.
   YouTube API quota resets at midnight Pacific = 11:00 Istanbul in winter, 10:00 in summer.
@@ -58,7 +63,8 @@ looped images from the Drive mount `J:` (it stalls) — the pipeline renders fro
 | `claude.js` / `openai.js` | Optional APIs with the user's own keys (stored only in localStorage, never logged) |
 | `store.js` | IndexedDB projects + files (`<id>`, `<id>:bg`, `<id>:slides`) |
 | `log.js` | On-device diagnostics log, `APP_VERSION` |
-| `coi.js` | Service worker: adds COOP/COEP headers (multi-threaded WASM) + offline cache |
+| `coi.js` | Service worker: adds COOP/COEP headers (multi-threaded WASM) + offline cache (not on `status.html`: it shows YouTube thumbnails) |
+| `status.html` | Public channel status page (data from the `status` branch, pushed by `pipeline/public.py`) |
 | `lib/` | Self-hosted libraries (see below) |
 | `brand/` | Built-in channel logos (256 px for the app, 900 px for the channel picture) |
 

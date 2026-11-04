@@ -7,6 +7,9 @@ Paths: lessons in `J:\My Drive\SINEM-YouTube\<lesson>`, work files in `D:\YT\eas
 ## 1. Where is it? (1 minute)
 The whole channel on one page: `SINEM-YouTube\STATUS.txt` (`overview.py`; the user reads it in the Drive app on the
 phone). Rewritten by the watcher every run and on every lesson status change; it calls no API.
+The public page https://boyukbas.github.io/YT/status.html shows the same per video (lesson names masked); the watcher
+pushes its data with `public.py` (to the repo's `status` branch, hourly with view counts). Check it by hand:
+`python -I public.py "J:\My Drive\SINEM-YouTube"` (prints the JSON; add `--push` to publish now).
 ```
 type "J:\My Drive\SINEM-YouTube\STATUS.txt"
 type "J:\My Drive\SINEM-YouTube\<lesson>\Output\extras\STATUS.txt"
