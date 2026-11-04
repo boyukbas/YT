@@ -392,7 +392,7 @@ def changed(lesson):
         return True
     s = json.loads(st.read_text(encoding='utf-8'))
     if s.get('state') == 'failed' and s.get('inputs') == fingerprint(videos):
-        return False                          # don't retry the same failure every 10 minutes
+        return retry_marker(lesson).exists()  # don't retry the same failure every 10 minutes (unless asked to)
     return s.get('inputs') != fingerprint(videos)
 
 
@@ -415,8 +415,6 @@ def watch(root, once):
             instagram_step(root)
             import overview                                    # (imports easy: not at the top)
             overview.write(root, idle=True)                    # SINEM-YouTube/STATUS.txt for the phone
-            import public
-            public.update(root)                                # the public page (docs/status.html), via the status branch
             if once:
                 break
             time.sleep(600)
@@ -461,7 +459,13 @@ def instagram_step(root):
             f.write(f"{time.strftime('%Y-%m-%d %H:%M')} {r}\n")
 
 
+def retry_marker(lesson):
+    """Set by the dashboard's Retry button: the watcher runs a stopped lesson again even though its clips are the same."""
+    return WORK_ROOT / slug(lesson.name) / 'retry'
+
+
 def safe_process(lesson, root):
+    retry_marker(lesson).unlink(missing_ok=True)
     try:
         process(lesson, root)
     except llm.Pending as p:

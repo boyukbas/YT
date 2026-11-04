@@ -23,7 +23,7 @@ being posted, the PC serves just those two files under a random path through a t
 (FACEBOOK_PAGE) is off since 2026-11-03: the Page got few views and was deleted; Instagram does well.
 Token: %USERPROFILE%\\.shorts-pipeline\\instagram.json (Page / Unified-login key: no expiry; Instagram token: 60 days, refreshed
 here every week). Record: <lesson>/Output/extras/instagram-posted.json."""
-import argparse, getpass, http.server, json, re, secrets, shutil, subprocess, sys, tempfile, threading, time, webbrowser
+import argparse, getpass, http.server, json, os, re, secrets, shutil, subprocess, sys, tempfile, threading, time, webbrowser
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
@@ -51,6 +51,32 @@ MAX_TAGS = 5                                             # Instagram shows few h
 SAVE_LINE = '💾 Kaydet, sonra tekrar et!'
 YOUTUBE_LINE = "▶️ Dersin tamamı YouTube'da: Almanca Dil Atölyesi (link profilde)"
 CHANNEL = 'https://www.youtube.com/@sinembb'
+WORK = Path(os.environ.get('PIPELINE_WORK', r'D:\YT\easy-work'))
+PAUSED = WORK / 'instagram-paused'                       # exists = no daily Reels (the dashboard's Pause button)
+POSTING = WORK / 'instagram-posting.lock'                # one poster at a time (watcher or dashboard)
+
+
+class Posting:
+    """Lock so the watcher's daily step and the dashboard's "post now" never post at the same time.
+    A lock older than 30 min is left over from a crash and is taken over."""
+    def __enter__(self):
+        WORK.mkdir(parents=True, exist_ok=True)
+        if POSTING.exists() and time.time() - POSTING.stat().st_mtime > 1800:
+            POSTING.unlink(missing_ok=True)
+        try:
+            fd = os.open(POSTING, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            raise Busy('a Reel is being posted right now') from None
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+        return self
+
+    def __exit__(self, *exc):
+        POSTING.unlink(missing_ok=True)
+
+
+class Busy(RuntimeError):
+    pass
 
 
 # ---------- token + API ----------
@@ -693,14 +719,13 @@ def daily(root, log=print):
     "instagram": {"start": "YYYY-MM-DD"} (a new account should be used by hand for a few days first).
     With FACEBOOK_PAGE on, Facebook-login mode also puts each lesson's long video on the Page once it is public on YouTube: one a day, between
     LONG_HOURS, so it never lands within 3 hours of the evening Reel."""
-    if not TOKEN.exists():
+    if not TOKEN.exists() or PAUSED.exists():
         return None
     now = datetime.now(ISTANBUL)
     start = profile(root).get('instagram', {}).get('start')
     if start and now.strftime('%Y-%m-%d') < start:
         return None
-    lessons = [l for l, _, p in sorted(records(root, 'youtube.json'), key=lambda r: r[2].stat().st_mtime)
-               if not l.name.startswith('_')]
+    lessons = queue(root)
     if fb_mode() and FACEBOOK_PAGE and 'page_id' in saved() and LONG_HOURS[0] <= now.hour < LONG_HOURS[1]:
         longs = [datetime.fromisoformat(r['long']['posted_utc']) for l in lessons for o in l.glob(f'*/{EXTRAS}/{POSTED}')
                  for r in [json.loads(o.read_text(encoding='utf-8')).get('_facebook', {})] if 'long' in r]
@@ -717,12 +742,56 @@ def daily(root, log=print):
     warn = renew_warning()
     if warn:
         log(warn)
-    for lesson in lessons:
-        r = post_next(lesson, log=log)
-        if r:
-            log(r)
-            return r
+    try:
+        with Posting():
+            for lesson in lessons:
+                r = post_next(lesson, log=log)
+                if r:
+                    log(r)
+                    return r
+    except Busy:
+        return None                                       # the dashboard is posting one right now
     return None
+
+
+def queue(root):
+    """Lessons in Reel order: oldest finished lesson first."""
+    return [l for l, _, p in sorted(records(root, 'youtube.json'), key=lambda r: r[2].stat().st_mtime)
+            if not l.name.startswith('_')]
+
+
+def next_reel(root):
+    """(lesson, mp4) of the Reel the next daily run would post, or None."""
+    fb = fb_mode() and FACEBOOK_PAGE and 'page_id' in saved()
+    for lesson in queue(root):
+        try:
+            _, out, data = lesson_files(lesson)
+        except Exception:
+            continue
+        posted = load(out)
+        for m, _ in reels(out, data):
+            r = posted.get(m.name)
+            if not (r and 'id' in r and (not fb or 'facebook' in r)):
+                return lesson, m
+    return None
+
+
+def post_now(root, log=print):
+    """The dashboard's "Post next Reel now": the daily step without waiting for POST_TIME (or a pause), but still at
+    most one Reel per 20 h. Returns a one-line result."""
+    if not TOKEN.exists():
+        return 'Instagram is not set up on this PC.'
+    last = last_post(root)
+    if last and datetime.now(timezone.utc) - last < GAP:
+        wait = GAP - (datetime.now(timezone.utc) - last)
+        return (f'Not posted: the last Reel went out {(datetime.now(timezone.utc) - last).seconds // 3600} h ago '
+                f'(one a day). Possible again in {wait.seconds // 3600} h {wait.seconds % 3600 // 60} min.')
+    with Posting():
+        for lesson in queue(root):
+            r = post_next(lesson, log=log)
+            if r:
+                return r
+    return 'Nothing left to post: every finished lesson is on Instagram.'
 
 
 if __name__ == '__main__':

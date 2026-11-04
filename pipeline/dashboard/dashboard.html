@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Channel Dashboard</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#141a26">
+<link rel="icon" href="/logo.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #141a26; --panel: #1d2434; --line: #2d3549; --text: #eef1f6; --muted: #9aa4b7;
+  --yellow: #ffd21a; --red: #e30a17; --green: #4fd18b; --blue: #7cb3ff; --orange: #ffa94d;
+  --font: "Bricolage Grotesque", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font: 400 15px/1.45 var(--font); -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 20px 16px 48px; }
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+header img { width: 44px; height: 44px; border-radius: 50%; background: #fff; }
+header .who { margin-left: auto; text-align: right; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+h1 { font-size: 21px; font-weight: 800; letter-spacing: -0.02em; margin: 0; }
+h2 { font-size: 15px; font-weight: 800; margin: 0 0 8px; }
+.sub { color: var(--muted); font-size: 13px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.stat, .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.stat b { display: block; font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 12px; }
+.panel { margin-bottom: 14px; }
+.panel p { margin: 2px 0; font-size: 14px; }
+.panel .muted { color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+button { font: 700 14px var(--font); border-radius: 10px; padding: 9px 14px; cursor: pointer; border: 1px solid var(--line);
+  background: var(--line); color: var(--text); }
+button.primary { background: var(--yellow); color: #15171c; border-color: var(--yellow); }
+button.danger { background: transparent; color: #ff7a6b; border-color: #ff7a6b; }
+button:disabled { opacity: .45; cursor: default; }
+.msg { margin-top: 8px; font-size: 13px; color: var(--yellow); min-height: 1em; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.filters button { border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600; background: var(--panel); }
+.filters button[aria-pressed="true"] { background: var(--yellow); color: #15171c; border-color: var(--yellow); }
+.day { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+  margin: 18px 0 8px; }
+.card { display: grid; grid-template-columns: 112px 1fr; gap: 12px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 12px; padding: 10px; margin-bottom: 8px; }
+.thumb { width: 112px; height: 63px; border-radius: 8px; background: #0f1420 center/cover no-repeat;
+  display: grid; place-items: center; color: var(--muted); font-size: 12px; overflow: hidden; }
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 2px; }
+.chip { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--line); white-space: nowrap; }
+.st-public { background: rgba(79,209,139,.16); color: var(--green); }
+.st-scheduled { background: rgba(124,179,255,.16); color: var(--blue); }
+.st-ready, .st-uploaded { background: rgba(255,210,26,.16); color: var(--yellow); }
+.st-making, .st-new, .st-waiting { background: rgba(255,169,77,.16); color: var(--orange); }
+.st-stopped { background: rgba(227,10,23,.2); color: #ff7a6b; }
+.when { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.title { font-weight: 600; overflow-wrap: anywhere; }
+.title a { text-decoration: none; }
+.title a:hover { text-decoration: underline; }
+.meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 2px; }
+.meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+.err { color: #ff9a8f; font-size: 13px; margin-top: 4px; overflow-wrap: anywhere; }
+.card button { margin-top: 8px; padding: 6px 12px; font-size: 13px; }
+.empty, .error { color: var(--muted); text-align: center; padding: 32px 0; }
+footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: center; }
+@media (max-width: 420px) {
+  .card { grid-template-columns: 84px 1fr; }
+  .thumb { width: 84px; height: 48px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="/logo.png" alt="">
+    <div>
+      <h1 id="name">Almanca Dil Atölyesi</h1>
+      <div class="sub" id="updated">Loading…</div>
+    </div>
+    <div class="who"><span id="me"></span><br><a href="/cdn-cgi/access/logout">Sign out</a></div>
+  </header>
+  <div class="stats" id="stats"></div>
+  <section class="panel" id="ig" hidden>
+    <h2>Instagram Reels</h2>
+    <div id="igInfo"></div>
+    <div class="row">
+      <button class="primary" id="reelNow">Post next Reel now</button>
+      <button id="pause">Pause daily Reels</button>
+    </div>
+    <div class="msg" id="igMsg" role="status"></div>
+  </section>
+  <div class="filters" id="filters"></div>
+  <div id="list"><div class="empty">Loading…</div></div>
+  <footer>Private: only signed-in, allowed accounts. Views refresh about once an hour.
+    <a href="https://www.youtube.com/@sinembb">YouTube channel</a></footer>
+</div>
+<script src="/dashboard.js"></script>
+</body>
+</html>

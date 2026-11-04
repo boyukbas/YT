@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8765", "--directory", "docs"],
       "port": 8765
+    },
+    {
+      "name": "dashboard-dev",
+      "runtimeExecutable": "D:\\YT\\work\\venv\\Scripts\\python.exe",
+      "runtimeArgs": ["-I", "pipeline/dashboard.py", "serve", "--dev", "--port", "8791"],
+      "port": 8791
     }
   ]
 }

@@ -7,9 +7,9 @@ Paths: lessons in `J:\My Drive\SINEM-YouTube\<lesson>`, work files in `D:\YT\eas
 ## 1. Where is it? (1 minute)
 The whole channel on one page: `SINEM-YouTube\STATUS.txt` (`overview.py`; the user reads it in the Drive app on the
 phone). Rewritten by the watcher every run and on every lesson status change; it calls no API.
-The public page https://boyukbas.github.io/YT/status.html shows the same per video (lesson names masked); the watcher
-pushes its data with `public.py` (to the repo's `status` branch, hourly with view counts). Check it by hand:
-`python -I public.py "J:\My Drive\SINEM-YouTube"` (prints the JSON; add `--push` to publish now).
+The private dashboard https://yt.boyukbas.com (Google login, the user + Sinem) shows the same per video with views,
+and has buttons: post next Reel now, pause/resume daily Reels, retry a stopped lesson (`dashboard.py`; button presses
+in `D:\YT\easy-work\dashboard.log`). Its data by hand: `python -I dashboard.py json "J:\My Drive\SINEM-YouTube"`.
 ```
 type "J:\My Drive\SINEM-YouTube\STATUS.txt"
 type "J:\My Drive\SINEM-YouTube\<lesson>\Output\extras\STATUS.txt"

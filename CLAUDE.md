@@ -24,10 +24,12 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   them got the developer account flagged ("API access blocked") on 2026-11-03.
   Watcher: Task Scheduler "YT Easy mode watcher" every 10 min (`pipeline/watch.cmd`, log `D:\YT\easy-work\watch.log`).
   Status page for the phone: `SINEM-YouTube\STATUS.txt` (`pipeline/overview.py`), rewritten every run and on each status change.
-  Public status page: https://boyukbas.github.io/YT/status.html (`docs/status.html`). The PC (`pipeline/public.py`)
-  force-pushes `status.json` to the repo's `status` branch (clone `D:\YT\status-site`, never main) when it changes and
-  hourly with YouTube view counts; lesson names masked to 2 letters, no unpublished titles/errors. The page reads
-  `raw.githubusercontent.com/boyukbas/YT/refs/heads/status/status.json` (the short `/status/` form 404s).
+  Private dashboard: https://yt.boyukbas.com (`pipeline/dashboard.py` + `pipeline/dashboard/`), served by the PC on
+  127.0.0.1:8790 through a Cloudflare named tunnel, behind Cloudflare Access (Google login; the user + Sinem only).
+  The server re-checks Access's signed token (aud, team, email) on every request; settings (team, aud, emails) live in
+  `D:\YT\easy-work\dashboard.json`, never in this public repo. Buttons: post next Reel now (20 h rule kept), pause/resume
+  daily Reels (`D:\YT\easy-work\instagram-paused`), retry a stopped lesson; each press logged in `dashboard.log`.
+  (The public GitHub status page of 2026-11-04 was removed the same day: too much info in public.)
   Lesson Output folders hold only the finished videos; everything else is in `Output/extras/` (`tools.extras()`).
   Google Drive's drive letter can change after a restart (J: → G: on 2026-11-03); `watch.cmd` looks for
   `<letter>:\My Drive\SINEM-YouTube` on every letter, so use whatever letter has it in manual commands too.
@@ -63,8 +65,7 @@ looped images from the Drive mount `J:` (it stalls) — the pipeline renders fro
 | `claude.js` / `openai.js` | Optional APIs with the user's own keys (stored only in localStorage, never logged) |
 | `store.js` | IndexedDB projects + files (`<id>`, `<id>:bg`, `<id>:slides`) |
 | `log.js` | On-device diagnostics log, `APP_VERSION` |
-| `coi.js` | Service worker: adds COOP/COEP headers (multi-threaded WASM) + offline cache (not on `status.html`: it shows YouTube thumbnails) |
-| `status.html` | Public channel status page (data from the `status` branch, pushed by `pipeline/public.py`) |
+| `coi.js` | Service worker: adds COOP/COEP headers (multi-threaded WASM) + offline cache |
 | `lib/` | Self-hosted libraries (see below) |
 | `brand/` | Built-in channel logos (256 px for the app, 900 px for the channel picture) |
 

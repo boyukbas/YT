@@ -2,8 +2,8 @@
 // 1. Adds the headers that let Whisper use several CPU cores (GitHub Pages can't send them).
 // 2. Keeps the app on the device so it opens and works offline (the speech model itself is
 //    cached separately by the speech library after its first download).
-const CACHE = 'shorts-editor-v15';
-const SHELL = ['./', 'index.html', 'status.html','app.js', 'core.js', 'render.js', 'store.js', 'worker.js', 'coi.js',
+const CACHE = 'shorts-editor-v16';
+const SHELL = ['./', 'index.html', 'app.js', 'core.js', 'render.js', 'store.js', 'worker.js', 'coi.js',
   'log.js', 'download.js', 'claude.js', 'openai.js', 'publish.js', 'merge.js', 'layers.js', 'slides.js', 'audio.js', 'brand/logo-trde.png', 'brand/logo-umlaut.png', 'brand/logo-ada.png', 'manifest.webmanifest', 'icon.svg', 'icon-180.png', 'icon-192.png', 'icon-512.png',
   'lib/transformers.min.js', 'lib/mediabunny.min.mjs'];
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
@@ -54,8 +54,7 @@ if (typeof window === 'undefined') {
     if (url.origin === self.location.origin) {
       // Big engine files rarely change: cache first. App files: fresh when online, cached when not.
       const strategy = url.pathname.includes('/lib/') ? cacheFirst : networkFirst;
-      // The status page shows YouTube thumbnails, which the isolation headers would block; it needs no WASM threads.
-      e.respondWith(strategy(req).then(url.pathname.endsWith('/status.html') ? (r) => r : withHeaders));
+      e.respondWith(strategy(req).then(withHeaders));
     } else if (FONT_HOSTS.includes(url.hostname)) {
       e.respondWith(cacheFirst(req));
     }
