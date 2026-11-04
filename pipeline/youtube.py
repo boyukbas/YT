@@ -20,7 +20,7 @@ Quota: 10,000 units a day; a Short with two caption tracks costs ~900, so a less
 
 Client: %USERPROFILE%\\.shorts-pipeline\\youtube_client.json (Desktop OAuth client, project "shorts0editor").
 Token:  %USERPROFILE%\\.shorts-pipeline\\youtube_token.json (refreshed automatically; delete it to sign in again)."""
-import argparse, hashlib, json, re, sys
+import argparse, hashlib, json, re, sys, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -245,14 +245,16 @@ def apply_video(yt, vid, out, mp4, w, rec, dry):
     if w['playlist'] and not rec.get('playlist'):
         pls = yt.playlists().list(part='snippet', mine=True, maxResults=50).execute()['items']
         pl = next((p for p in pls if p['snippet']['title'].casefold() == w['playlist'].casefold()), None)
-        if not pl and not dry:
+        new = not pl
+        if new and not dry:
             pl = yt.playlists().insert(part='snippet,status', body={
                 'snippet': {'title': w['playlist'][:150], 'defaultLanguage': w['defaultLanguage']},
                 'status': {'privacyStatus': 'public'}}).execute()
             done.append(f"new playlist {pl['snippet']['title']}")
+            time.sleep(10)                                # a brand-new playlist answers 404 for a few seconds
         if not pl:
             done.append(f"new playlist {w['playlist']}")
-        elif yt.playlistItems().list(part='id', playlistId=pl['id'], videoId=vid).execute()['items']:
+        elif not new and yt.playlistItems().list(part='id', playlistId=pl['id'], videoId=vid).execute()['items']:
             rec['playlist'] = pl['id']
         else:
             body = {'playlistId': pl['id'], 'resourceId': {'kind': 'youtube#video', 'videoId': vid}}
