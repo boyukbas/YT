@@ -131,7 +131,7 @@ def candidates(segs, inter_path, model, work, n=12):
 
 
 def series_numbers(root, profile, lesson=None):
-    """{kind: 'Türklerin Almanca Hataları #4'}: each series' next number, counted over the other lessons: each Short
+    """{kind: 'Almanca'da Sık Yapılan Hatalar #4'}: each series' next number, counted over the other lessons: each Short
     title in the series, plus a lesson whose main video is in it (a one-clip Short lesson; any of its title options)."""
     names = profile['youtube'].get('series', {})
     datas = [json.loads(p.read_text(encoding='utf-8')) for p in Path(root).glob('*/*/youtube.json')

@@ -65,14 +65,14 @@ Short message, in English, with what was verified:
 - **One-clip vertical lesson (≤ 3 min)**: the main video *is* a Short: vertical cover, no chapters, no separate Shorts;
   on Instagram it is one Reel.
 - **Playlists** named in `youtube.json` that don't exist yet are created (public) when the video is filled in.
-- **Series numbers** ("Türklerin Almanca Hataları #n") are counted from the other lessons' `youtube.json`.
+- **Series numbers** ("Almanca'da Sık Yapılan Hatalar #n") are counted from the other lessons' `youtube.json`.
 - Making a video public posts the exercise comment in the same run; pinning it stays in Studio.
 
 ## Rules the pipeline follows (from the growth plan, Nov 2026)
 - Captions: German biggest (yellow), Turkish smaller (white), translation under German lines; wrong/right pairs get
   ✘ red / ✔ green (`mark` in the cues). Long videos prefer the top, Shorts the bottom; never on eyes/nose/mouth.
 - Shorts: one point each, hook in the first second, Turkish explanation, 20–45 s best, 60 s max, loop ending.
-  Kinds: `mistake` (series "Türklerin Almanca Hataları #n"), `exam`, `life` ("Almanya'da Hayat #n"), `rule`.
+  Kinds: `mistake` (series "Almanca'da Sık Yapılan Hatalar #n"), `exam`, `life` ("Almanya'da Hayat #n"), `rule`.
 - The channel is not tied to one level or exam (decided 2026-11-02): all levels, exams, work and life in Germany.
 - Titles in Turkish, a promise or a mistake, keyword first, never `#`; hashtags only in descriptions, at most 3.
 - One upload a day at 19:00; Sunday: long video first, its teaser Short 3 h later. Max 3 Shorts per lesson.
