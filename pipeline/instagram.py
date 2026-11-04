@@ -798,7 +798,7 @@ def post_now(root, force=False, log=print):
         return f'Not posted: {warn}'
     with Posting():
         for lesson in queue(root):
-            r = post_next(lesson, log=log)
+            r = post_next(lesson, force=force, log=log)    # force goes on: post_next checks the 20 h gap too
             if r:
                 return r
     return 'Nothing left to post: every finished lesson is on Instagram.'
