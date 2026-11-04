@@ -3,7 +3,7 @@
 Every lesson (newest first) with its state, YouTube (uploaded / scheduled / public, with links), Instagram (Reels
 posted / queued), what goes out next, and what the PC is doing. Built only from the files the pipeline already keeps
 (status.json, youtube-applied.json, instagram-posted.json, the watcher log); it calls no API.
-Written by the watcher on every run and whenever a lesson's status changes, only when something changed.
+Written by the watcher on every run and whenever a lesson's status changes.
 
   python overview.py "<Drive root>"      write it now and print it
 """
@@ -178,15 +178,11 @@ def build(root, idle=False):
 
 
 def write(root, idle=False):
-    """Write STATUS.txt when its content (apart from the 'Updated' line) changed. Never raises.
+    """Write STATUS.txt (every time: its 'Updated' time also shows the PC is alive; ~1 KB). Never raises.
     idle: called by the watcher at the end of its run (its lock is still there, but nothing is being made)."""
     try:
-        p = Path(root) / NAME
         text = build(root, idle)
-        old = p.read_text(encoding='utf-8') if p.exists() else ''
-        strip = lambda t: t.split('\n', 2)[-1]
-        if strip(old) != strip(text):
-            p.write_text(text, encoding='utf-8')
+        (Path(root) / NAME).write_text(text, encoding='utf-8')
         return text
     except Exception as e:                       # the status page must never stop the pipeline
         print(f'overview: {type(e).__name__}: {e}')
