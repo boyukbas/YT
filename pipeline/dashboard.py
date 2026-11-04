@@ -286,11 +286,15 @@ def act(action, body, email, root):
     if action == 'reel-now':
         if JOBS.get('reel', {}).get('running') or IG.POSTING.exists():
             return 409, 'A Reel is being posted right now.'
+        force = body.get('force') is True
+        warn = IG.too_soon(root)
+        if warn and not force:                           # the page asks "post anyway?" and sends force: true
+            return 428, warn
         JOBS['reel'] = {'running': True, 'by': email, 'at': now_iso(), 'result': 'Posting…'}
 
         def run():
             try:
-                r = IG.post_now(root, log=lambda m: print(m, flush=True))
+                r = IG.post_now(root, force=force, log=lambda m: print(m, flush=True))
             except IG.Busy:
                 r = 'A Reel is being posted right now (by the watcher).'
             except Exception as e:
@@ -300,7 +304,7 @@ def act(action, body, email, root):
             with open(easy.WORK_ROOT / 'instagram.log', 'a', encoding='utf-8') as f:
                 f.write(f"{time.strftime('%Y-%m-%d %H:%M')} dashboard ({email}): {r}\n")
         threading.Thread(target=run, daemon=True).start()
-        log(email, 'reel-now started')
+        log(email, 'reel-now started' + (' (early: confirmed despite the daily rule)' if warn else ''))
         return 202, 'Posting the next Reel… (takes 1–3 minutes)'
     if action in ('pause', 'resume'):
         if action == 'pause':
@@ -416,7 +420,8 @@ class Handler(BaseHTTPRequestHandler):
             code, msg = act(str(body.get('action', '')), body, email, root)
         except Exception as e:
             code, msg = 500, f'{type(e).__name__}: {str(e)[:200]}'
-        self.send(code, {'message': msg} if code < 400 else {'error': msg})
+        self.send(code, {'message': msg} if code < 400 else
+                  {'confirm': msg} if code == 428 else {'error': msg})      # 428: needs "post anyway?"
 
 
 def serve(port, dev=False):

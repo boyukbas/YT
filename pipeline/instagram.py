@@ -776,16 +776,26 @@ def next_reel(root):
     return None
 
 
-def post_now(root, log=print):
-    """The dashboard's "Post next Reel now": the daily step without waiting for POST_TIME (or a pause), but still at
-    most one Reel per 20 h. Returns a one-line result."""
+def too_soon(root):
+    """A warning text when the last Reel went out less than GAP ago (one a day keeps followers from being flooded),
+    else None."""
+    last = last_post(root)
+    if not last or datetime.now(timezone.utc) - last >= GAP:
+        return None
+    ago = datetime.now(timezone.utc) - last
+    wait = GAP - ago
+    return (f'The last Reel went out {ago.seconds // 3600} h {ago.seconds % 3600 // 60} min ago; the daily rule waits '
+            f'{wait.seconds // 3600} h {wait.seconds % 3600 // 60} min more. Two Reels close together can flood followers.')
+
+
+def post_now(root, force=False, log=print):
+    """The dashboard's "Post next Reel now": the daily step without waiting for POST_TIME (or a pause). Within 20 h
+    of the last Reel it only posts with force=True (the dashboard asks for a confirmation first). One-line result."""
     if not TOKEN.exists():
         return 'Instagram is not set up on this PC.'
-    last = last_post(root)
-    if last and datetime.now(timezone.utc) - last < GAP:
-        wait = GAP - (datetime.now(timezone.utc) - last)
-        return (f'Not posted: the last Reel went out {(datetime.now(timezone.utc) - last).seconds // 3600} h ago '
-                f'(one a day). Possible again in {wait.seconds // 3600} h {wait.seconds % 3600 // 60} min.')
+    warn = too_soon(root)
+    if warn and not force:
+        return f'Not posted: {warn}'
     with Posting():
         for lesson in queue(root):
             r = post_next(lesson, log=log)

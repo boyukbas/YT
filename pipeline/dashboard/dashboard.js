@@ -34,6 +34,14 @@ async function action(body, msgEl, confirmText) {
       headers: { 'Content-Type': 'application/json', 'X-Dashboard': '1' }, body: JSON.stringify(body),
     });
     const j = await r.json().catch(() => ({}));
+    if (r.status === 428 && j.confirm) {               // breaks the one-a-day rule: ask, then send again with force
+      busy = false;
+      msgEl.textContent = '';
+      if (confirm(`${j.confirm}\n\nPost anyway?`)) return action({ ...body, force: true }, msgEl);
+      msgEl.textContent = 'Not posted.';
+      await load();
+      return;
+    }
     msgEl.textContent = j.message || j.error || `Error ${r.status}`;
   } catch (e) {
     msgEl.textContent = 'Could not reach the PC. Is it on?';
@@ -110,8 +118,8 @@ function renderInstagram(ig, job) {
   const posting = ig.posting || (job && job.running);
   const now = $('reelNow');
   now.dataset.act = '1';
-  now.disabled = busy || posting || wait || !ig.next;
-  now.textContent = posting ? 'Posting…' : 'Post next Reel now';
+  now.disabled = busy || posting || !ig.next;
+  now.textContent = posting ? 'Posting…' : (wait ? 'Post next Reel now (early)' : 'Post next Reel now');
   now.onclick = () => action({ action: 'reel-now' }, $('igMsg'),
     `Post this Reel on Instagram now?\n\n${ig.next.lesson} · ${ig.next.file}`);
   const p = $('pause');
