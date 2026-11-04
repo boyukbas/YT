@@ -53,7 +53,7 @@ Short message, in English, with what was verified:
 - STATUS.txt "YouTube:" lines show each video's link and what was set. Quota: ~900 units per Short, 10,000 a day;
   "quota used up" → it resets at 11:00 Istanbul (winter) / 10:00 (summer); the watcher retries by itself.
 - Instagram (`instagram.py`, log `D:\YT\easy-work\instagram.log`): one Reel a day after 20:00, made from the lesson's
-  `-short-N.mp4` files (a one-clip Short lesson has none, so it is not posted). Nothing is posted on Facebook, but the
+  `-short-N.mp4` files (a one-clip Short lesson is one Reel itself). Nothing is posted on Facebook, but the
   empty Page must stay linked to Instagram. Plan: `Output\instagram.md`. Post the next one now:
   `python -I instagram.py post "<lesson>"` (refuses within 20 h of the last one). Key: a system user's token (never
   expires). "API access blocked" (code 200) on every call = Meta flagged the developer account: the user confirms it
@@ -62,7 +62,9 @@ Short message, in English, with what was verified:
 ## Gotchas seen so far
 - **Same recording in two lesson folders** (copied by mistake): the second one stops with "is also in the lesson …".
 - **A clip replaced** in a lesson: the PC starts that lesson fresh (the old work folder is kept as `<slug>.old-<time>`).
-- **One-clip vertical lesson (≤ 3 min)**: the main video *is* a Short: vertical cover, no chapters, no separate Shorts.
+- **One-clip vertical lesson (≤ 3 min)**: the main video *is* a Short: vertical cover, no chapters, no separate Shorts;
+  on Instagram it is one Reel.
+- **Playlists** named in `youtube.json` that don't exist yet are created (public) when the video is filled in.
 - **Series numbers** ("Türklerin Almanca Hataları #n") are counted from the other lessons' `youtube.json`.
 - Making a video public posts the exercise comment in the same run; pinning it stays in Studio.
 
