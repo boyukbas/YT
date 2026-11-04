@@ -415,6 +415,8 @@ def watch(root, once):
             instagram_step(root)
             import overview                                    # (imports easy: not at the top)
             overview.write(root, idle=True)                    # SINEM-YouTube/STATUS.txt for the phone
+            import public
+            public.update(root)                                # the public page (docs/status.html), via the status branch
             if once:
                 break
             time.sleep(600)
