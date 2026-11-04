@@ -29,6 +29,10 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   The server re-checks Access's signed token (aud, team, email) on every request; settings (team, aud, emails) live in
   `D:\YT\easy-work\dashboard.json`, never in this public repo. Buttons: post next Reel now (20 h rule kept), pause/resume
   daily Reels (`D:\YT\easy-work\instagram-paused`), retry a stopped lesson; each press logged in `dashboard.log`.
+  Started at logon by Task Scheduler "YT dashboard" (`pipeline/dashboard.cmd`: tunnel `yt-dashboard` with config
+  `D:\YT\easy-work\cloudflared.yml` + server, each restarted 30 s after it stops; logs `tunnel.log`, `dashboard-server.log`).
+  Zero Trust team `frosty-bar-63c8` (Free); boyukbas.com DNS on Cloudflare since 2026-11-04 (Spaceship email forwarding
+  MX/SPF kept). A new allowed email goes in BOTH the Access policy "Me and Sinem" and dashboard.json (then restart the task).
   (The public GitHub status page of 2026-11-04 was removed the same day: too much info in public.)
   Lesson Output folders hold only the finished videos; everything else is in `Output/extras/` (`tools.extras()`).
   Google Drive's drive letter can change after a restart (J: → G: on 2026-11-03); `watch.cmd` looks for
