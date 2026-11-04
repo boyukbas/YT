@@ -21,7 +21,7 @@ KONUŞMA
 9. Sonda bir sonraki dersi söyle: "Sıradaki derste …" (bitiş kartı otomatik eklenir).
 
 SERİLER (konuyu buna göre seçmek işe yarar)
-- Türklerin Almanca Hataları — bir hata, doğrusu, kısa açıklama
+- Almanca'da Sık Yapılan Hatalar — bir hata, doğrusu, kısa açıklama
 - Sınav — Goethe / telc soruları ve hazır cevaplar (hangi seviye olursa)
 - Almanya'da Hayat — Anmeldung, doktor, iş gibi günlük durumlar
 
