@@ -6,7 +6,8 @@
                                                                    and post one Reel a day on Instagram (instagram.py)
 
 Drive layout:  SINEM-YouTube/_channel/channel.json (+ logo, banner, fonts, music/)  ·  SINEM-YouTube/<lesson>/*.mp4|mov
-Results go to <lesson>/Output/ (or "Output (Easy)" when an Output folder made elsewhere already exists).
+Results go to <lesson>/Output/ (or "Output (Easy)" when an Output folder made elsewhere already exists): the finished
+videos there, everything else (thumbnails, captions, texts, covers, records, status) in Output/extras/.
 Optional <lesson>/settings.json, e.g. {"short": false} = no Short version for this lesson.
 Work files stay on the PC in D:\\YT\\easy-work\\<lesson>.
 """
@@ -25,7 +26,7 @@ import render as R
 import speech
 import texts as T
 import thumbnail
-from tools import HERE, Status, VIDEO_EXT, ffmpeg, probe, run, FFMPEG, slug, ts
+from tools import HERE, Status, VIDEO_EXT, extras, ffmpeg, probe, run, FFMPEG, slug, ts
 
 WORK_ROOT = Path(os.environ.get('PIPELINE_WORK', r'D:\YT\easy-work'))
 FACE_MODEL = HERE / 'models' / 'face_detection_yunet_2023mar.onnx'
@@ -61,7 +62,7 @@ def load_profile(root):
 
 def output_dir(lesson):
     out = lesson / 'Output'
-    if out.exists() and not (out / OURS).exists():
+    if out.exists() and not (extras(out) / OURS).exists():
         return lesson / 'Output (Easy)'
     return out
 
@@ -172,6 +173,7 @@ def process(lesson, root, log_only=False):
     lesson = Path(lesson)
     profile, assets = load_profile(root)
     out = output_dir(lesson)
+    x = extras(out)                                   # everything but the finished videos
     work = WORK_ROOT / slug(lesson.name)
     videos = lesson_videos(lesson)
     # The cache is keyed by clip number (c1, c2...): when the clips change (a clip replaced, added or removed),
@@ -323,11 +325,11 @@ def process(lesson, root, log_only=False):
         qa, sheet = qa_check(dst, spec, cues, blks, sides, work, vname)
         report['qa'][vname] = qa
         files[dst.name] = f'{"Short" if spec.short else "video"} {spec.W}x{spec.H}, {ts(total + (10 if outro else 0))}' +             (' (last 10 s: end-screen card)' if outro else '')
-        (out / f'check-frames-{vname}.jpg').write_bytes(sheet.read_bytes())
+        (x / f'check-frames-{vname}.jpg').write_bytes(sheet.read_bytes())
         st.log(f'{vname}: placement {rep}, covered {len(qa["face_covered"])}, {qa["loudness_lufs"]} LUFS')
         for lang in ('tr', 'de'):
             srt = f'{name}-{vname}-subtitles-{lang}.srt'
-            L.write_srt(out / srt, cues, lang)
+            L.write_srt(x / srt, cues, lang)
             files[srt] = f'caption track for the {vname} ({"Turkish" if lang == "tr" else "German"})'
         if vname == 'video':
             segs_main, cues_main, total_main, inter_main = segs, cues, total, inter
@@ -352,19 +354,19 @@ def process(lesson, root, log_only=False):
         frame = next((c for c in cand if c['n'] == th['frame']), cand[0])['file']
         cuts.setdefault(frame, thumbnail.cut_out(frame))
         badge = f'{data.get("level", "")} {profile.get("badge_suffix", "ALMANCA")}'.strip()
-        thumbnail.make(frame, th['words'], th['question'], badge, assets['logo'], out / f'thumbnail-{i}.jpg', cut=cuts[frame],
+        thumbnail.make(frame, th['words'], th['question'], badge, assets['logo'], x / f'thumbnail-{i}.jpg', cut=cuts[frame],
                        palette=profile['palette'])
         files[f'thumbnail-{i}.jpg'] = f'16:9 thumbnail, option {i}'
         if i == 1 and any(v[2] for v in specs_info):
-            thumbnail.make(frame, th['words'], th['question'], badge, assets['logo'], out / 'thumbnail-short.jpg',
+            thumbnail.make(frame, th['words'], th['question'], badge, assets['logo'], x / 'thumbnail-short.jpg',
                            vertical=True, cut=cuts[frame], palette=profile['palette'])
             files['thumbnail-short.jpg'] = 'vertical cover for the Short'
-    for p in out.glob('*_small_preview.jpg'):
+    for p in x.glob('*_small_preview.jpg'):
         p.unlink()
     terms = sorted(set(ans.get('terms', [])))
-    (out / 'terms.txt').write_text('\n'.join(terms) + '\n', encoding='utf-8')
+    (x / 'terms.txt').write_text('\n'.join(terms) + '\n', encoding='utf-8')
     data['notes'] = report['notes'] + data.get('notes', [])
-    T.write(out, name, data, profile, files)
+    T.write(x, name, data, profile, files)
     if any(v[2] for v in specs_info[1:]):                    # Instagram: a cover + caption per Short (posted by the watcher)
         import instagram
         instagram.make_covers(out, data, {c['n']: c['file'] for c in cand}, assets['logo'], profile['palette'], st.log)
@@ -383,9 +385,9 @@ def changed(lesson):
     if time.time() - max(v.stat().st_mtime for v in videos) < 600:
         return False
     out = lesson / 'Output'
-    if out.exists() and not (out / OURS).exists() and not (lesson / 'Output (Easy)').exists():
+    if out.exists() and not (extras(out) / OURS).exists() and not (lesson / 'Output (Easy)').exists():
         return False                          # made elsewhere (by hand): leave it alone
-    st = output_dir(lesson) / OURS
+    st = extras(output_dir(lesson)) / OURS
     if not st.exists():
         return True
     s = json.loads(st.read_text(encoding='utf-8'))
@@ -424,11 +426,11 @@ def youtube_step(lesson):
     """After Sinem uploads the finished video/Shorts in the YouTube app: fill in their details (youtube.py).
     Runs for finished lessons until everything is set (the comment waits until the video is public)."""
     out = output_dir(lesson)
-    p = out / OURS
+    p = extras(out) / OURS
     if not p.exists():
         return
     s = json.loads(p.read_text(encoding='utf-8'))
-    if s.get('state') != 'done' or s.get('youtube_complete') or not (out / 'youtube.json').exists():
+    if s.get('state') != 'done' or s.get('youtube_complete') or not (extras(out) / 'youtube.json').exists():
         return
     import youtube as Y
     if not Y.TOKEN.exists():

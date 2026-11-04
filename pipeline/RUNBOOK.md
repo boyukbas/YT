@@ -9,7 +9,7 @@ The whole channel on one page: `SINEM-YouTube\STATUS.txt` (`overview.py`; the us
 phone). Rewritten by the watcher every run and on every lesson status change; it calls no API.
 ```
 type "J:\My Drive\SINEM-YouTube\STATUS.txt"
-type "J:\My Drive\SINEM-YouTube\<lesson>\Output\STATUS.txt"
+type "J:\My Drive\SINEM-YouTube\<lesson>\Output\extras\STATUS.txt"
 powershell Get-Content D:\YT\easy-work\watch.log -Tail 30
 ```
 - **No Output folder yet**: the watcher waits until the clips haven't changed for 10 minutes (Drive still uploading),
@@ -30,7 +30,8 @@ python -I review.py "J:\My Drive\SINEM-YouTube\<lesson>"
 It checks the channel rules: Shorts ≤ 60 s and at most 3, vertical; main video horizontal; titles
 without `#`; ≤ 3 hashtags per description; chapters, pinned question, playlist; subtitle lines on her face (QA);
 Instagram covers; upcoming publish times one a day and 3 h apart. Then **look** (Read tool) at
-`Output\check-frames-*.jpg`, `thumbnail-1..3.jpg`, `cover-short-*.jpg`, and read `youtube.md`.
+`Output\extras\`: `check-frames-*.jpg`, `thumbnail-1..3.jpg`, `cover-short-*.jpg`, and read `youtube.md`
+(`Output` itself holds only the finished videos; everything else is in `Output\extras`).
 
 Fixes (each step is cached; delete its files in `D:\YT\easy-work\<slug>` and run `easy.py run` again):
 | Problem | Redo |
@@ -57,7 +58,7 @@ Short message, in English, with what was verified:
   "quota used up" → it resets at 11:00 Istanbul (winter) / 10:00 (summer); the watcher retries by itself.
 - Instagram (`instagram.py`, log `D:\YT\easy-work\instagram.log`): one Reel a day after 20:00, made from the lesson's
   `-short-N.mp4` files (a one-clip Short lesson is one Reel itself). Nothing is posted on Facebook, but the
-  empty Page must stay linked to Instagram. Plan: `Output\instagram.md`. Post the next one now:
+  empty Page must stay linked to Instagram. Plan: `Output\extras\instagram.md`. Post the next one now:
   `python -I instagram.py post "<lesson>"` (refuses within 20 h of the last one). Key: a system user's token (never
   expires). "API access blocked" (code 200) on every call = Meta flagged the developer account: the user confirms it
   on developers.facebook.com, or it clears by itself; try once, then wait, don't hammer it.

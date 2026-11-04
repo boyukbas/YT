@@ -8,7 +8,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
-from tools import probe, slug
+from tools import extras, probe, records, slug
 
 WORK_ROOT = Path(r'D:\YT\easy-work')
 problems = []
@@ -26,7 +26,7 @@ def hashtags(text):
 
 def output(lesson):
     for name in ('Output (Easy)', 'Output'):
-        if (lesson / name / 'status.json').exists():
+        if (extras(lesson / name) / 'status.json').exists():
             return lesson / name
     return lesson / 'Output'
 
@@ -35,13 +35,13 @@ def schedule(root):
     """Publish times still ahead, over all lessons: the channel posts at most one upload a day, 3 h apart."""
     now = datetime.utcnow()
     times = []
-    for p in Path(root).glob('*/*/youtube-applied.json'):
+    for les, _, p in records(root, 'youtube-applied.json'):
         for f, r in json.loads(p.read_text(encoding='utf-8')).items():
             t = r.get('publish_at')
             if t and not r.get('public'):
                 t = datetime.fromisoformat(t.replace('Z', ''))
                 if t > now:
-                    times.append((t, f'{p.parent.parent.name}/{f}'))
+                    times.append((t, f'{les.name}/{f}'))
     times.sort()
     for (a, fa), (b, fb) in zip(times, times[1:]):
         say(b - a >= timedelta(hours=3), f'{fa} and {fb} go public {(b - a).total_seconds() / 3600:.1f} h apart')
@@ -54,11 +54,12 @@ def main(lesson, root=None):
     root = Path(root or lesson.parent)
     out = output(lesson)
     print(f'{lesson.name}  ({out})')
-    st = json.loads((out / 'status.json').read_text(encoding='utf-8')) if (out / 'status.json').exists() else {}
+    x = extras(out)                                        # everything but the videos
+    st = json.loads((x / 'status.json').read_text(encoding='utf-8')) if (x / 'status.json').exists() else {}
     if st.get('state') != 'done':
         say(False, f"not finished: {st.get('state', 'not started')} {st.get('step', '')} {st.get('error', '')}".strip())
         return
-    meta = json.loads((out / 'youtube.json').read_text(encoding='utf-8'))
+    meta = json.loads((x / 'youtube.json').read_text(encoding='utf-8'))
     profile = json.loads((root / '_channel' / 'channel.json').read_text(encoding='utf-8'))
     shorts_max = profile.get('shorts_max', 3)
     kinds = {sh['version']: sh.get('kind', '') for sh in meta.get('shorts', [])}
@@ -81,10 +82,10 @@ def main(lesson, root=None):
         say(p['height'] > p['width'] and p['duration'] <= cap,
             f"{m.name}: {p['width']}x{p['height']}, {p['duration']:.0f} s (kind {kind or '-'}, best under {cap} s)")
     for f in ['thumbnail-1.jpg', 'thumbnail-2.jpg', 'thumbnail-3.jpg', 'youtube.md']:
-        say((out / f).exists(), f)
+        say((x / f).exists(), f)
     for m in video + shorts:
         for lang in ('tr', 'de'):
-            say((out / f'{m.stem}-subtitles-{lang}.srt').exists(), f'{m.stem}-subtitles-{lang}.srt')
+            say((x / f'{m.stem}-subtitles-{lang}.srt').exists(), f'{m.stem}-subtitles-{lang}.srt')
 
     print('Texts')
     for t in meta['titles']:
@@ -109,13 +110,13 @@ def main(lesson, root=None):
             say(not q.get('face_covered'), f"{v}: text on her face in {len(q.get('face_covered', []))} line(s)")
     else:
         say(False, f'no QA report at {rep}')
-    print(f"  look   {', '.join(p.name for p in sorted(out.glob('check-frames-*.jpg')))}")
+    print(f"  look   {', '.join(p.name for p in sorted(x.glob('check-frames-*.jpg')))}")
 
     print('Instagram')
     for m in shorts:
         n = m.stem.split('-short')[-1]
-        say((out / f'cover-short{n}.jpg').exists(), f'cover-short{n}.jpg')
-    say((out / 'instagram.md').exists() or not shorts, 'instagram.md')
+        say((x / f'cover-short{n}.jpg').exists(), f'cover-short{n}.jpg')
+    say((x / 'instagram.md').exists() or not shorts, 'instagram.md')
 
     print('Schedule (all lessons)')
     schedule(root)

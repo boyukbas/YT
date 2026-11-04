@@ -7,7 +7,7 @@
 apply finds the upload by its length (an upload made after the render, same duration ±2 s), then sets title, description,
 tags, category, languages, audience, paid-promotion/AI declarations, thumbnail, TR + DE caption tracks, playlist, and
 posts the comment once the video is public (YouTube has no comments on private videos). Safe to run again: every part is
-checked first and done once (record in Output/youtube-applied.json). The API cannot pin the comment, add an end screen
+checked first and done once (record in Output/extras/youtube-applied.json). The API cannot pin the comment, add an end screen
 or make a premiere; those stay in Studio and are listed in STATUS.
 Choices in <lesson>/settings.json: {"title": 1-3, "description": 1-2, "thumbnail": 1-3,
 "publish": "2026-11-05 21:15" (Istanbul time; scheduled publish of a private video), "paid": false, "ai": false,
@@ -32,7 +32,7 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 sys.path.insert(0, str(Path(__file__).parent))
-from tools import probe
+from tools import extras, probe, records
 
 KEYS = Path.home() / '.shorts-pipeline'
 CLIENT, TOKEN = KEYS / 'youtube_client.json', KEYS / 'youtube_token.json'
@@ -117,8 +117,8 @@ def find_upload(yt, mp4, taken):
 def taken_elsewhere(out):
     """Video IDs already filled in for other lessons (siblings of this lesson in the Drive root)."""
     ids = set()
-    for p in out.parent.parent.glob(f'*/*/{APPLIED}'):
-        if p.parent != out:
+    for _, o, p in records(out.parent.parent, APPLIED):
+        if o != out:
             ids |= {r['id'] for r in json.loads(p.read_text(encoding='utf-8')).values()}
     return ids
 
@@ -129,8 +129,8 @@ def next_slot(out, applied, settings, planned=()):
     of a long video going public (then 3 hours after it, like the Sunday teaser).
     Subscribers get a notification per video, so Shorts are spread out instead of published together."""
     recs = list(applied.items())
-    for p in out.parent.parent.glob(f'*/*/{APPLIED}'):
-        if p.parent != out:
+    for _, o, p in records(out.parent.parent, APPLIED):
+        if o != out:
             recs += json.loads(p.read_text(encoding='utf-8')).items()
     when = lambda r: datetime.fromisoformat(r['publish_at'].replace('Z', '+00:00'))
     times = [when(r) for f, r in recs if re.search(r'-short(-\d+)?\.mp4$', f) and r.get('publish_at')] + list(planned)
@@ -213,11 +213,11 @@ def apply_video(yt, vid, out, mp4, w, rec, dry):
         done.append('details (' + ', '.join(diff) + ')')
 
     # 2. thumbnail (50 units); YouTube gives no way to compare, so the file hash is remembered
-    th = out / w['thumbnail'] if w['thumbnail'] else None
-    if th and (out / 'thumbnail-short.jpg').exists():   # a vertical main video (one-clip Short lesson): vertical cover
+    th = extras(out) / w['thumbnail'] if w['thumbnail'] else None
+    if th and (extras(out) / 'thumbnail-short.jpg').exists():   # a vertical main video (one-clip Short lesson): vertical cover
         p = probe(mp4)
         if p['height'] > p['width']:
-            th = out / 'thumbnail-short.jpg'
+            th = extras(out) / 'thumbnail-short.jpg'
     if th and th.exists() and rec.get('thumbnail') != sha(th):
         if not dry:
             yt.thumbnails().set(videoId=vid, media_body=MediaFileUpload(str(th), mimetype='image/jpeg')).execute()
@@ -227,7 +227,7 @@ def apply_video(yt, vid, out, mp4, w, rec, dry):
     # 3. caption tracks (insert 400 / update 450 units), replacing an earlier track in the same language
     tracks = yt.captions().list(part='snippet', videoId=vid).execute()['items']
     for lang in ('tr', 'de'):
-        srt = out / f'{mp4.stem}-subtitles-{lang}.srt'
+        srt = extras(out) / f'{mp4.stem}-subtitles-{lang}.srt'
         if not srt.exists() or rec.get(f'captions_{lang}') == sha(srt):
             continue
         old = next((t for t in tracks if t['snippet']['language'] == lang and t['snippet']['trackKind'] == 'standard'), None)
@@ -296,11 +296,11 @@ def apply(lesson, video_id=None, dry=False, log=print, public=False):
     public: also make them public (the video, and each Short once its details are set).
     Returns (summary, complete), or None while no matching upload exists yet."""
     lesson = Path(lesson)
-    out = next(o for o in (lesson / 'Output (Easy)', lesson / 'Output') if (o / 'youtube.json').exists())
-    data = json.loads((out / 'youtube.json').read_text(encoding='utf-8'))
+    out = next(o for o in (lesson / 'Output (Easy)', lesson / 'Output') if (extras(o) / 'youtube.json').exists())
+    data = json.loads((extras(out) / 'youtube.json').read_text(encoding='utf-8'))
     sp = lesson / 'settings.json'
     settings = json.loads(sp.read_text(encoding='utf-8')) if sp.exists() else {}
-    applied = json.loads((out / APPLIED).read_text(encoding='utf-8')) if (out / APPLIED).exists() else {}
+    applied = json.loads((extras(out) / APPLIED).read_text(encoding='utf-8')) if (extras(out) / APPLIED).exists() else {}
     public = public or bool(settings.get('public'))
     yt = api()
     lines, complete = [], True
@@ -352,7 +352,7 @@ def apply(lesson, video_id=None, dry=False, log=print, public=False):
             rec['complete'] = not waiting
             rec['public'] = rec.get('public') or public
             applied[mp4.name] = rec
-            (out / APPLIED).write_text(json.dumps(applied, ensure_ascii=False, indent=1), encoding='utf-8')
+            (extras(out) / APPLIED).write_text(json.dumps(applied, ensure_ascii=False, indent=1), encoding='utf-8')
         complete &= not waiting
         parts = [f"{'Short' if short else 'Video'} https://youtu.be/{rec['id']}"]
         parts.append(('would set: ' if dry else 'set: ') + ', '.join(done) if done else 'up to date')

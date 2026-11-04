@@ -3,7 +3,7 @@ import json, re
 from pathlib import Path
 import cv2
 from PIL import Image, ImageDraw, ImageFont
-from tools import ts
+from tools import records, ts
 
 PROMPT = """You are the YouTube producer of the channel "{channel}" ({handle}): German lessons for Turkish speakers,
 presented by Sinem. Write everything for this new video in Turkish (German examples stay German).
@@ -134,8 +134,8 @@ def series_numbers(root, profile, lesson=None):
     """{kind: 'Almanca'da Sık Yapılan Hatalar #4'}: each series' next number, counted over the other lessons: each Short
     title in the series, plus a lesson whose main video is in it (a one-clip Short lesson; any of its title options)."""
     names = profile['youtube'].get('series', {})
-    datas = [json.loads(p.read_text(encoding='utf-8')) for p in Path(root).glob('*/*/youtube.json')
-             if lesson is None or p.parent.parent.resolve() != Path(lesson).resolve()]
+    datas = [json.loads(p.read_text(encoding='utf-8')) for l, _, p in records(root, 'youtube.json')
+             if lesson is None or l.resolve() != Path(lesson).resolve()]
     count = lambda n: sum(sum(n in s.get('title', '') for s in d.get('shorts', [])) +
                           any(n in t for t in d.get('titles', [])) for d in datas)
     return {k: f'{n} #{count(n) + 1}' for k, n in names.items() if n}
@@ -144,7 +144,7 @@ def series_numbers(root, profile, lesson=None):
 def drop_chapters(text):
     """Remove a chapters block ("⏱️ Bölümler:" + timestamp lines) from a description (Shorts show no chapters)."""
     text = re.sub(r'\n*[^\n]*(?:⏱|Bölümler)[^\n]*\n(?:\s*\d{1,2}:\d{2}[^\n]*(?:\n|$))+', '\n\n', text)
-    return re.sub(r'\n{3,}', '\n\n', text).strip() + '\n'
+    return re.sub(r'\n{3,}', '\n\n', text).strip()            # no trailing newline: YouTube drops it (no false diff)
 
 
 def build_prompt(profile, lesson, topic, cues, versions, ncand, series=None):

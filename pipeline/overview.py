@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))          # python -I (as the watcher runs it) doesn't add it
 import easy
 import instagram as IG
-from tools import Status
+from tools import Status, extras, records
 
 NAME = 'STATUS.txt'
 ISTANBUL = IG.ISTANBUL
@@ -48,7 +48,7 @@ def lesson_block(lesson, now):
     """(sort key, lines) for one lesson folder, or None when it holds nothing of ours."""
     videos = easy.lesson_videos(lesson)
     out = easy.output_dir(lesson)
-    st = jload(out / 'status.json')
+    st = jload(extras(out) / 'status.json')
     if not videos and not st:
         return None
     L = [f'■ {lesson.name}']
@@ -70,8 +70,8 @@ def lesson_block(lesson, now):
         return key, L
 
     # done: the files are ready; what happened on YouTube and Instagram
-    applied = jload(out / 'youtube-applied.json')
-    data = jload(out / 'youtube.json')
+    applied = jload(extras(out) / 'youtube-applied.json')
+    data = jload(extras(out) / 'youtube.json')
     main = next(iter(sorted(out.glob('*-video.mp4'))), None)
     shorts = sorted(out.glob('*-short-*.mp4'), key=lambda f: int(re.search(r'(\d+)$', f.stem).group(1)))
     if main:
@@ -114,8 +114,8 @@ def next_reel(root, now):
     """(time text, what) of the next Instagram Reel, or None. Same order as instagram.daily()."""
     if not IG.TOKEN.exists():
         return None
-    lessons = sorted((p.parent.parent for p in Path(root).glob('*/*/youtube.json') if not p.parent.parent.name.startswith('_')),
-                     key=lambda l: next(l.glob('*/youtube.json')).stat().st_mtime)
+    lessons = [l for l, _, p in sorted(records(root, 'youtube.json'), key=lambda r: r[2].stat().st_mtime)
+               if not l.name.startswith('_')]
     for lesson in lessons:
         try:
             _, out, data = IG.lesson_files(lesson)
@@ -162,7 +162,7 @@ def build(root, idle=False):
     if r:
         nxt.append(f'  Instagram Reel: {r[0]} · {r[1]}')
     sched = sorted((rec['publish_at'], l.name) for l in root.iterdir() if l.is_dir()
-                   for rec in jload(easy.output_dir(l) / 'youtube-applied.json').values()
+                   for rec in jload(extras(easy.output_dir(l)) / 'youtube-applied.json').values()
                    if isinstance(rec, dict) and rec.get('publish_at') and yt_state(rec, now) != 'public')
     for at, name in sched[:3]:
         nxt.append(f'  YouTube: {when(at)} · {name}')

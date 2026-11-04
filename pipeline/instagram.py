@@ -22,7 +22,7 @@ being posted, the PC serves just those two files under a random path through a t
 (cloudflared, no account), and closes it as soon as Instagram has them. Posting to the Facebook Page as well
 (FACEBOOK_PAGE) is off since 2026-11-03: the Page got few views and was deleted; Instagram does well.
 Token: %USERPROFILE%\\.shorts-pipeline\\instagram.json (Page / Unified-login key: no expiry; Instagram token: 60 days, refreshed
-here every week). Record: <lesson>/Output/instagram-posted.json."""
+here every week). Record: <lesson>/Output/extras/instagram-posted.json."""
 import argparse, getpass, http.server, json, re, secrets, shutil, subprocess, sys, tempfile, threading, time, webbrowser
 from datetime import datetime, timedelta, timezone
 from functools import partial
@@ -31,7 +31,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from tools import probe
+from tools import EXTRAS, extras, probe, records
 
 KEYS = Path.home() / '.shorts-pipeline'
 TOKEN = KEYS / 'instagram.json'
@@ -340,8 +340,8 @@ def check():
 
 def lesson_files(lesson):
     lesson = Path(lesson)
-    out = next(o for o in (lesson / 'Output (Easy)', lesson / 'Output') if (o / 'youtube.json').exists())
-    return lesson, out, json.loads((out / 'youtube.json').read_text(encoding='utf-8'))
+    out = next(o for o in (lesson / 'Output (Easy)', lesson / 'Output') if (extras(o) / 'youtube.json').exists())
+    return lesson, out, json.loads((extras(out) / 'youtube.json').read_text(encoding='utf-8'))
 
 
 def reels(out, data):
@@ -391,7 +391,7 @@ def caption(sh, base_tags):
 
 def youtube_link(out):
     """The full lesson on YouTube (youtube.py's record), else the channel."""
-    p = out / 'youtube-applied.json'
+    p = extras(out) / 'youtube-applied.json'
     recs = json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
     vid = next((r.get('id') for name, r in recs.items() if name.endswith('-video.mp4') and r.get('id')), None)
     return f'https://youtu.be/{vid}' if vid else CHANNEL
@@ -404,8 +404,8 @@ def fb_caption(cap, out):
 
 def cover_path(mp4):
     if mp4.stem.endswith('-video'):                        # a one-clip Short lesson: its vertical YouTube cover
-        return mp4.with_name('thumbnail-short.jpg')
-    return mp4.with_name('cover-' + re.search(r'short-\d+$', mp4.stem).group(0) + '.jpg')      # cover-short-N.jpg
+        return extras(mp4.parent) / 'thumbnail-short.jpg'
+    return extras(mp4.parent) / ('cover-' + re.search(r'short-\d+$', mp4.stem).group(0) + '.jpg')     # cover-short-N.jpg
 
 
 def make_covers(out, data, frames, logo, palette, log=print):
@@ -444,7 +444,7 @@ def write_md(lesson, out, data):
             state += f"; Facebook: {p['facebook']['permalink']}"
         L += [(f'## The lesson video ({state})' if sh.get('whole') else f'## Short {mp4.stem.rsplit("-", 1)[1]} ({state})'),
               f'Video `{mp4.name}` · cover `{cover_path(mp4).name}`', '', '```', caption(sh, tags), '```', '']
-    (out / 'instagram.md').write_text('\n'.join(L), encoding='utf-8')
+    (extras(out) / 'instagram.md').write_text('\n'.join(L), encoding='utf-8')
 
 
 def prepare(lesson, log=print):
@@ -521,12 +521,12 @@ class Share:
 
 
 def load(out):
-    p = out / POSTED
+    p = extras(out) / POSTED
     return json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
 
 
 def last_post(root):
-    times = [datetime.fromisoformat(t) for p in Path(root).glob(f'*/*/{POSTED}')
+    times = [datetime.fromisoformat(t) for _, _, p in records(root, POSTED)
              for r in json.loads(p.read_text(encoding='utf-8')).values()
              for t in (r.get('posted_utc'), r.get('facebook', {}).get('posted_utc')) if t]
     return max(times, default=None)
@@ -607,7 +607,7 @@ def long_video(lesson):
     """(mp4, youtube.json data, YouTube record) of the lesson's long video, when YouTube has it public; else None."""
     lesson, out, data = lesson_files(lesson)
     mp4 = next(out.glob('*-video.mp4'), None)
-    p = out / 'youtube-applied.json'
+    p = extras(out) / 'youtube-applied.json'
     rec = (json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}).get(mp4.name if mp4 else '', {})
     at = rec.get('publish_at')
     if not mp4 or not rec.get('public') or not at or datetime.fromisoformat(at.replace('Z', '+00:00')) > datetime.now(timezone.utc):
@@ -638,7 +638,7 @@ def post_long_facebook(lesson, dry=False, log=print):
             break
     posted.setdefault('_facebook', {})['long'] = {'id': v['id'], 'permalink': 'https://www.facebook.com' + link
                                                   if link.startswith('/') else link, **stamp()}
-    (out / POSTED).write_text(json.dumps(posted, ensure_ascii=False, indent=1), encoding='utf-8')
+    (extras(out) / POSTED).write_text(json.dumps(posted, ensure_ascii=False, indent=1), encoding='utf-8')
     write_md(lesson, out, data)
     return f"Facebook Page: {mp4.name} posted {posted['_facebook']['long']['permalink']}"
 
@@ -671,7 +671,7 @@ def post_next(lesson, dry=False, force=False, log=print):
 
     def save():
         posted[mp4.name] = rec
-        (out / POSTED).write_text(json.dumps(posted, ensure_ascii=False, indent=1), encoding='utf-8')
+        (extras(out) / POSTED).write_text(json.dumps(posted, ensure_ascii=False, indent=1), encoding='utf-8')
         write_md(lesson, out, data)
     said = []
     if 'id' not in rec:
@@ -699,10 +699,10 @@ def daily(root, log=print):
     start = profile(root).get('instagram', {}).get('start')
     if start and now.strftime('%Y-%m-%d') < start:
         return None
-    lessons = sorted((p.parent.parent for p in Path(root).glob('*/*/youtube.json') if not p.parent.parent.name.startswith('_')),
-                     key=lambda l: next(l.glob('*/youtube.json')).stat().st_mtime)
+    lessons = [l for l, _, p in sorted(records(root, 'youtube.json'), key=lambda r: r[2].stat().st_mtime)
+               if not l.name.startswith('_')]
     if fb_mode() and FACEBOOK_PAGE and 'page_id' in saved() and LONG_HOURS[0] <= now.hour < LONG_HOURS[1]:
-        longs = [datetime.fromisoformat(r['long']['posted_utc']) for l in lessons for o in l.glob(f'*/{POSTED}')
+        longs = [datetime.fromisoformat(r['long']['posted_utc']) for l in lessons for o in l.glob(f'*/{EXTRAS}/{POSTED}')
                  for r in [json.loads(o.read_text(encoding='utf-8')).get('_facebook', {})] if 'long' in r]
         if not longs or datetime.now(timezone.utc) - max(longs) > GAP:
             for lesson in lessons:

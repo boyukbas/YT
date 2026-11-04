@@ -36,7 +36,7 @@ Explorer token dies when you do ("the user logged out").
 Page was linked.)
 
 Everything prepared is in Drive: `SINEM-YouTube/_channel/instagram/` (profile picture, this guide) and, per lesson,
-`Output/cover-short-N.jpg` + `Output/instagram.md` (captions, also handy for posting by hand).
+`Output/extras/cover-short-N.jpg` + `Output/extras/instagram.md` (captions, also handy for posting by hand).
 
 Done so far (2026-11-02): Instagram `@almancadilatolyesi`, Facebook Page "Almanca Dil Atölyesi", Meta app
 "Almanca Dil Atölyesi" with the Instagram and Page use cases.
@@ -126,7 +126,7 @@ If it says "No Instagram account linked", do the linking in step 2 and make a ne
 - **Renewal:** the system user's key never expires. If it stops working, generate a new one (section "The key in
   use") and run `system-token`.
 
-Check any time: `instagram.py check` (accounts, posts used of the 24 h limit), `instagram.md` in the lesson's Output
+Check any time: `instagram.py check` (accounts, posts used of the 24 h limit), `instagram.md` in the lesson's Output/extras
 shows which Reels went out with their links, and `D:\YT\easy-work\instagram.log` has every post or problem.
 
 (Other route, not used: "API setup with Instagram login" + `instagram.py token`, where Meta downloads the video

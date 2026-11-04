@@ -10,7 +10,8 @@ J:\My Drive\SINEM-YouTube\
                        brand\ (banner, Facebook cover, Instagram highlights: brandkit.py), CEKIM-REHBERI.txt (filming guide)
   STATUS.txt           the whole channel on one page for the phone (overview.py; rewritten by the PC)
   <lesson>\            raw clips (.mov/.mp4), optional settings.json  ({"short": false} = no Short version)
-    Output\            results (or "Output (Easy)" if an Output folder made elsewhere exists)
+    Output\            the finished videos (or "Output (Easy)" if an Output folder made elsewhere exists)
+      extras\          everything else: thumbnails, captions (.srt), youtube.md/json, covers, instagram.md, records, STATUS.txt
 ```
 
 Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption tracks (`.srt`), `thumbnail-1..3.jpg`,

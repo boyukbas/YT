@@ -8,6 +8,17 @@ FFMPEG, FFPROBE = str(FF_DIR / 'ffmpeg.exe'), str(FF_DIR / 'ffprobe.exe')
 DEEP_FILTER = Path(os.environ.get('DEEP_FILTER', r'D:\YT\work\tools\deepfilter\deep-filter.exe'))   # DeepFilterNet 0.5.6 CLI
 VIDEO_EXT = {'.mp4', '.mov', '.m4v', '.mkv', '.webm', '.3gp'}
 HERE = Path(__file__).resolve().parent
+EXTRAS = 'extras'          # <lesson>/Output/extras/: everything except the finished videos (decided 2026-11-04)
+
+
+def extras(out):
+    """The lesson's non-video results: thumbnails, captions, texts, covers, records, status."""
+    return Path(out) / EXTRAS
+
+
+def records(root, name):
+    """[(lesson, out, path)] of the file `name` in every lesson's Output*/extras/ under the Drive root."""
+    return [(p.parents[2], p.parents[1], p) for p in sorted(Path(root).glob(f'*/*/{EXTRAS}/{name}'))]
 
 
 def cuda_dlls():
@@ -69,12 +80,13 @@ def slug(name):
 
 
 class Status:
-    """Progress for the phone: Output/STATUS.txt (human) + status.json (machine), plus a local log."""
+    """Progress for the phone: Output/extras/STATUS.txt (human) + status.json (machine), plus a local log."""
 
     def __init__(self, out_dir, work_dir):
         self.out, self.work = Path(out_dir), Path(work_dir)
+        self.x = extras(self.out)
         self.data = {}
-        p = self.out / 'status.json'
+        p = self.x / 'status.json'
         if p.exists():
             self.data = json.loads(p.read_text(encoding='utf-8'))
 
@@ -88,21 +100,21 @@ class Status:
         self.data.update(state=state, step=step, updated=time.strftime('%Y-%m-%d %H:%M'), **extra)
         for wait in (5, 10, 20, 30, 60, 0):          # Google Drive (J:) sometimes disappears for a moment
             try:
-                self.out.mkdir(parents=True, exist_ok=True)
+                self.x.mkdir(parents=True, exist_ok=True)
                 break
             except OSError:
                 if not wait:
                     raise
                 self.log(f'Drive not reachable, waiting {wait} s')
                 time.sleep(wait)
-        (self.out / 'status.json').write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding='utf-8')
+        (self.x / 'status.json').write_text(json.dumps(self.data, ensure_ascii=False, indent=1), encoding='utf-8')
         human = {'working': 'Working', 'done': 'Ready', 'failed': 'Failed', 'waiting': 'Waiting'}.get(state, state)
         lines = [f'{human}: {step}', f'Updated {self.data["updated"]}']
         if self.data.get('error'):
             lines.append('Error: ' + self.data['error'])
         if self.data.get('youtube'):
             lines += ['', 'YouTube:'] + ['  ' + p for p in self.data['youtube'].split(' | ')]
-        (self.out / 'STATUS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        (self.x / 'STATUS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
         self.log(f'[{state}] {step}')
         if Status.after_set:                           # the channel's overview page (overview.py), set by easy.py
             Status.after_set(self.out)
