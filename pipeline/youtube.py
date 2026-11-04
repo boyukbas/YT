@@ -214,6 +214,10 @@ def apply_video(yt, vid, out, mp4, w, rec, dry):
 
     # 2. thumbnail (50 units); YouTube gives no way to compare, so the file hash is remembered
     th = out / w['thumbnail'] if w['thumbnail'] else None
+    if th and (out / 'thumbnail-short.jpg').exists():   # a vertical main video (one-clip Short lesson): vertical cover
+        p = probe(mp4)
+        if p['height'] > p['width']:
+            th = out / 'thumbnail-short.jpg'
     if th and th.exists() and rec.get('thumbnail') != sha(th):
         if not dry:
             yt.thumbnails().set(videoId=vid, media_body=MediaFileUpload(str(th), mimetype='image/jpeg')).execute()
