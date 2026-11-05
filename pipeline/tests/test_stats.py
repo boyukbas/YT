@@ -109,7 +109,7 @@ class Schema(Case):
         tree = ast.parse(Path(stats.__file__).read_text(encoding='utf-8'))
         top = {a.name.split('.')[0] for n in tree.body if isinstance(n, ast.Import) for a in n.names}
         top |= {n.module for n in tree.body if isinstance(n, ast.ImportFrom)}
-        self.assertEqual(top, {'json', 'os', 're', 'sqlite3', 'datetime', 'pathlib', 'publish', 'schedule', '__future__'})
+        self.assertEqual(top, {'json', 'os', 're', 'sqlite3', 'datetime', 'pathlib', 'paths', 'publish', 'schedule', '__future__'})
         inner = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) and n not in tree.body for a in n.names}
         self.assertEqual(inner, {'youtube'})
 

@@ -344,8 +344,13 @@ const REGRESS = {
     await waitingCard(page, 0).locator('button', { hasText: 'Post' }).click();
     await until(page, () => !!document.querySelector('dialog[open] .rules'), 10000);
     await sleep(400);
-    check('F15 post sheet: the "I understand" tick is on screen', await inView(page, 'dialog[open] label.tick', 'I understand'));
-    check('F15 post sheet: the rule box is on screen', await inView(page, 'dialog[open] .rules'));
+    // the fixture's warnings depend on the time of day: with none, there is no rule box and the button is on
+    const warned = await page.evaluate(() => !document.querySelector('dialog[open] .rules').hidden);
+    check('F15 post sheet: the "I understand" tick is on screen', !warned ||
+      await inView(page, 'dialog[open] label.tick', 'I understand'));
+    check(warned ? 'F15 post sheet: the rule box is on screen' : 'F15 post sheet: no warning, so the post button is on',
+      warned ? await inView(page, 'dialog[open] .rules') : await page.evaluate(() =>
+        ![...document.querySelectorAll('dialog[open] .sheet-foot button')].find((b) => /Post on/.test(b.textContent)).disabled));
     await page.locator(`${DLG} .sheet-foot button`, { hasText: 'Cancel' }).click();
     await until(page, () => !document.querySelector('dialog[open]'), 5000);
     page.o.fx['/api/publish'] = (j) => { j.settings.auto = false; Object.assign(j.auto, { setting: false, effective: false, reason: 'off' }); };

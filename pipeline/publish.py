@@ -9,11 +9,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import paths
 import schedule as S
 import tools
 from schedule import Check, Post
 
-WORK = Path(os.environ.get('PIPELINE_WORK', r'D:\YT\easy-work'))
+WORK = paths.WORK
 DB = WORK / 'publish.db'
 LOCK = WORK / 'instagram-posting.lock'          # one lock for every platform (v1 name kept)
 PLATFORMS = ('instagram',)                      # UI order; platform_<name>.make() for each

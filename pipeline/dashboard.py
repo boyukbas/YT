@@ -36,7 +36,8 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from PIL import Image, ImageOps
 
-import easy
+import lessons
+import paths
 import instagram as IG
 import publish
 import schedule as S
@@ -46,13 +47,13 @@ from tools import extras, probe
 HERE = Path(__file__).parent
 PAGE = HERE / 'dashboard'                               # the page: index.html, app.css and the tab modules
 LOGO = HERE.parent / 'docs' / 'brand' / 'logo-trde.png'
-CONFIG = easy.WORK_ROOT / 'dashboard.json'
-LOG = easy.WORK_ROOT / 'dashboard.log'
-PROBES = easy.WORK_ROOT / 'dashboard-probes.json'       # cached video lengths (probing Drive files is slow)
-COVER_CACHE = easy.WORK_ROOT / 'cover-cache'
-HEARTBEAT = easy.WORK_ROOT / 'watcher.json'
-WATCH_LOCK = easy.WORK_ROOT / 'watch.lock'
-WATCH_LOG = easy.WORK_ROOT / 'watch.log'
+CONFIG = paths.WORK / 'dashboard.json'
+LOG = paths.WORK / 'dashboard.log'
+PROBES = paths.WORK / 'dashboard-probes.json'       # cached video lengths (probing Drive files is slow)
+COVER_CACHE = paths.WORK / 'cover-cache'
+HEARTBEAT = paths.WORK / 'watcher.json'
+WATCH_LOCK = paths.WORK / 'watch.lock'
+WATCH_LOG = paths.WORK / 'watch.log'
 REAL_WORK = r'D:\YT\easy-work'                          # --dev never runs on it (a str: the test guard refuses a
                                                         # Path into it in modules imported before it)
 WATCHER = 'YT Easy mode watcher'
@@ -229,8 +230,8 @@ def items(root, cache):
     """[{...}] one per video (or per lesson while it is being made / stopped), without YouTube counts."""
     found = []
     for lesson in sorted(p for p in Path(root).iterdir() if p.is_dir() and not p.name.startswith(('_', '.'))):
-        videos = easy.lesson_videos(lesson)
-        out = easy.output_dir(lesson)
+        videos = lessons.lesson_videos(lesson)
+        out = lessons.output_dir(lesson)
         x = extras(out)
         st = jload(x / 'status.json')
         base = {'lesson': lesson.name}
@@ -247,7 +248,7 @@ def items(root, cache):
             if st.get('error'):
                 it['error'] = st['error']
             if state == 'failed':
-                it['retry'] = easy.retry_marker(lesson).exists()             # pressed, waiting for the watcher
+                it['retry'] = lessons.retry_marker(lesson).exists()             # pressed, waiting for the watcher
             found.append(it)
             continue
         applied = jload(x / 'youtube-applied.json')
@@ -907,14 +908,14 @@ def start_watcher() -> bool:
 def retry_lesson(root: Path, name, by: str) -> dict:
     """POST /api/lesson/retry (v1's retry action): the retry marker for a stopped lesson, then the watcher. The name
     must be one of the root's lesson folders; it is matched against the folder list, never joined into a path."""
-    lessons = {p.name: p for p in Path(root).iterdir() if p.is_dir() and not p.name.startswith(('_', '.'))}
-    lesson = lessons.get(name) if isinstance(name, str) else None
+    folders = {p.name: p for p in Path(root).iterdir() if p.is_dir() and not p.name.startswith(('_', '.'))}
+    lesson = folders.get(name) if isinstance(name, str) else None
     if lesson is None:
         raise publish.PublishError(400, 'no_such_lesson', 'No such lesson.')
-    st = jload(extras(easy.output_dir(lesson)) / 'status.json')
+    st = jload(extras(lessons.output_dir(lesson)) / 'status.json')
     if not isinstance(st, dict) or st.get('state') != 'failed':
         raise publish.PublishError(409, 'not_stopped', 'That lesson is not stopped.')
-    m = easy.retry_marker(lesson)
+    m = lessons.retry_marker(lesson)
     m.parent.mkdir(parents=True, exist_ok=True)
     m.write_text(f'{by} {time.strftime("%Y-%m-%d %H:%M")}\n', encoding='utf-8')
     started = start_watcher()
@@ -1215,7 +1216,7 @@ class Handler(BaseHTTPRequestHandler):
         body = publish.activity(kind, int(before) if before else None)
         if before is None:
             body['logs'] = {'watch': log_tail(WATCH_LOG, 100),
-                            **{n: log_tail(easy.WORK_ROOT / f'{n}.log', 50) for n in publish.PLATFORMS}}
+                            **{n: log_tail(paths.WORK / f'{n}.log', 50) for n in publish.PLATFORMS}}
         return body
 
     # ----- POST /api/... (each returns (status, body)) -----
@@ -1383,7 +1384,7 @@ def dev_refusal(port: int, root) -> str | None:
     root, the real work folder (in PIPELINE_WORK or any module's folder), or a root on the real Drive."""
     if port == 8790:
         return 'port 8790 is the live dashboard; use another one (--port 8791).'
-    works = [os.environ.get('PIPELINE_WORK') or REAL_WORK, easy.WORK_ROOT, publish.WORK, S.WORK,
+    works = [os.environ.get('PIPELINE_WORK') or REAL_WORK, paths.WORK, getattr(sys.modules.get('easy'), 'WORK_ROOT', None), publish.WORK, S.WORK,
              getattr(stats, 'WORK', None), getattr(IG, 'WORK', None)]
     if any(_odd(w) for w in [*works, root] if w is not None):
         return 'PIPELINE_WORK and --root must be plain drive paths (D:\\...), not \\\\?\\, \\\\.\\ or network paths.'

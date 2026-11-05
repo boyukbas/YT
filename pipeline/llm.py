@@ -9,10 +9,11 @@ Answers are cached in work/llm, so a re-run never asks twice.
 """
 import base64, json, os, shutil, subprocess, urllib.request
 from pathlib import Path
+import paths
 
 MODEL = os.environ.get('PIPELINE_MODEL', 'claude-opus-5-5')
-KEY_FILE = Path.home() / '.shorts-pipeline' / 'anthropic_key'
-CLI_TOKENS = [Path.home() / '.shorts-pipeline' / n for n in ('claude_token', 'claude_token.txt', 'claude-token.txt')]
+KEY_FILE = paths.KEYS / 'anthropic_key'
+CLI_TOKENS = [paths.KEYS / n for n in ('claude_token', 'claude_token.txt', 'claude-token.txt')]
 
 
 def _cli_env():

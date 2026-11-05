@@ -6,10 +6,11 @@ import json, os, re, sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+import paths
 import publish
 import schedule as S
 
-WORK = Path(os.environ.get('PIPELINE_WORK', r'D:\YT\easy-work'))
+WORK = paths.WORK
 DB = WORK / 'stats.db'
 OLD_CACHE = WORK / 'dashboard-stats.json'
 EVERY = {'youtube': 3300, 'instagram': 3300, 'instagram_limit': 21600, 'instagram_permissions': 86400}

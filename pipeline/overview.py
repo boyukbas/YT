@@ -13,13 +13,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))          # python -I (as the watcher runs it) doesn't add it
-import easy
+import lessons
+import paths
 import instagram as IG
 from tools import Status, extras
 
 NAME = 'STATUS.txt'
 ISTANBUL = IG.ISTANBUL
-WATCH_LOG = easy.WORK_ROOT / 'watch.log'
+WATCH_LOG = paths.WORK / 'watch.log'
 
 
 def when(utc_iso):
@@ -47,8 +48,8 @@ def yt_state(rec, now):
 
 def lesson_block(lesson, now):
     """(sort key, lines) for one lesson folder, or None when it holds nothing of ours."""
-    videos = easy.lesson_videos(lesson)
-    out = easy.output_dir(lesson)
+    videos = lessons.lesson_videos(lesson)
+    out = lessons.output_dir(lesson)
     st = jload(extras(out) / 'status.json')
     if not videos and not st:
         return None
@@ -125,7 +126,7 @@ def next_lines(root, now):
 
 
 def pc_state(now):
-    lock = easy.WORK_ROOT / 'watch.lock'
+    lock = paths.WORK / 'watch.lock'
     if lock.exists() and time.time() - lock.stat().st_mtime < 6 * 3600:
         return 'working'
     runs = []
@@ -145,7 +146,7 @@ def build(root, idle=False, now=None):
          f'(Istanbul) · PC {pc}', '']
     nxt, foot = next_lines(root, now)
     sched = sorted((rec['publish_at'], l.name) for l in root.iterdir() if l.is_dir()
-                   for rec in jload(extras(easy.output_dir(l)) / 'youtube-applied.json').values()
+                   for rec in jload(extras(lessons.output_dir(l)) / 'youtube-applied.json').values()
                    if isinstance(rec, dict) and rec.get('publish_at') and yt_state(rec, now) != 'public')
     for at, name in sched[:3]:
         nxt.append(f'  YouTube: {when(at)} · {name}')

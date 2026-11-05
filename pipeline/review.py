@@ -8,9 +8,10 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
+import paths
 from tools import extras, probe, records, slug
 
-WORK_ROOT = Path(r'D:\YT\easy-work')
+WORK_ROOT = paths.WORK                    # PIPELINE_WORK (it used to ignore it)
 problems = []
 
 
@@ -25,10 +26,7 @@ def hashtags(text):
 
 
 def output(lesson):
-    for name in ('Output (Easy)', 'Output'):
-        if (extras(lesson / name) / 'status.json').exists():
-            return lesson / name
-    return lesson / 'Output'
+    return paths.finished_output(lesson) or lesson / 'Output'
 
 
 def schedule(root):

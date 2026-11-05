@@ -33,13 +33,14 @@ from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 sys.path.insert(0, str(Path(__file__).parent))
+import paths
 from tools import extras, probe, records
 
-KEYS = Path.home() / '.shorts-pipeline'
+KEYS = paths.KEYS
 CLIENT, TOKEN = KEYS / 'youtube_client.json', KEYS / 'youtube_token.json'
 SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
 CHANNEL_ID = 'UCivLHbvcLIKKGkLjnOrMaHA'                  # Almanca Dil Atölyesi (@sinembb)
-ISTANBUL = timezone(timedelta(hours=3))                  # Turkey has no daylight saving time
+ISTANBUL = paths.ISTANBUL
 APPLIED = 'youtube-applied.json'
 SHORTS_TIME = '19:00'                                    # Istanbul; Shorts go public one a day at this time
 SHORTS_WARN = 3                                          # more Shorts than this per lesson → a warning in STATUS

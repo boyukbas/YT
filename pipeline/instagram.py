@@ -36,9 +36,10 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
+import paths
 from tools import extras, probe, records
 
-KEYS = Path.home() / '.shorts-pipeline'
+KEYS = paths.KEYS
 TOKEN = KEYS / 'instagram.json'
 API = 'https://graph.instagram.com/v26.0'
 FB_API = 'https://graph.facebook.com/v26.0'
@@ -46,7 +47,7 @@ RUPLOAD = 'https://rupload.facebook.com'
 FB_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'instagram_basic',
              'instagram_content_publish', 'business_management']
 CLOUDFLARED = Path(r'D:\YT\tools\cloudflared.exe')
-ISTANBUL = timezone(timedelta(hours=3))
+ISTANBUL = paths.ISTANBUL
 POSTED = 'instagram-posted.json'
 POST_TIME = '20:00'                                      # v1's daily time and gap; v2's timing is in publishing.json
 GAP = timedelta(hours=20)
@@ -55,7 +56,7 @@ MAX_TAGS = 5                                             # Instagram shows few h
 SAVE_LINE = '💾 Kaydet, sonra tekrar et!'
 YOUTUBE_LINE = "▶️ Dersin tamamı YouTube'da: Almanca Dil Atölyesi (link profilde)"
 CHANNEL = 'https://www.youtube.com/@sinembb'
-WORK = Path(os.environ.get('PIPELINE_WORK', r'D:\YT\easy-work'))
+WORK = paths.WORK
 PAUSED = WORK / 'instagram-paused'                       # exists = no automatic Reels (the emergency brake)
 POSTING = WORK / 'instagram-posting.lock'                # publish.PostLock's file: one poster at a time
 POLL = 10                                                # seconds between upload checks (wait_container)
@@ -553,10 +554,11 @@ def write_md(lesson, out, data):
 
 def prepare(lesson, log=print):
     """Covers + captions for a finished lesson (easy.py does this right after the YouTube texts)."""
-    import easy
+    import lessons
+    from tools import slug
     lesson, out, data = lesson_files(lesson)
-    profile, assets = easy.load_profile(lesson.parent)
-    thumbs = easy.WORK_ROOT / easy.slug(lesson.name) / 'thumbs'
+    profile, assets = lessons.load_profile(lesson.parent)
+    thumbs = paths.WORK / slug(lesson.name) / 'thumbs'
     saved = thumbs / 'candidates.json'
     frames = {c['n']: thumbs / c['file'] for c in json.loads(saved.read_text(encoding='utf-8'))} if saved.exists() else {}
     if frames:

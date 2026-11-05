@@ -11,12 +11,13 @@ details (youtube-applied.json); before that the texts say {VIDEO}. The watcher f
 import json, os, re, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
+import paths
 import llm
 from tools import extras, slug
 
 X_MAX, THREADS_MAX, URL_LEN = 280, 500, 23      # X counts every link as 23 characters
 VIDEO = '{VIDEO}'
-WORK_ROOT = Path(os.environ.get('PIPELINE_WORK', r'D:\YT\easy-work'))      # same as easy.py
+WORK_ROOT = paths.WORK
 
 PROMPT = """You write the texts that share one lesson of the YouTube channel "{channel}" ({handle}) outside YouTube:
 German lessons for Turkish speakers by Sinem, a German teacher and translator (Turkish native speaker) who explains German
@@ -159,10 +160,7 @@ def relink(work, x, name):
 
 
 def _output(lesson):
-    for n in ('Output (Easy)', 'Output'):
-        if (extras(lesson / n) / 'status.json').exists():
-            return lesson / n
-    raise SystemExit(f'{lesson}: no finished Easy-mode output')
+    return paths.finished_output(lesson) or sys.exit(f'{lesson}: no finished Easy-mode output')
 
 
 def main(argv):

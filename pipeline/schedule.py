@@ -6,10 +6,11 @@ import json, os, re, secrets, threading, time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+import paths
 
-WORK = Path(os.environ.get('PIPELINE_WORK', r'D:\YT\easy-work'))
+WORK = paths.WORK
 SETTINGS = WORK / 'publishing.json'
-ISTANBUL = timezone(timedelta(hours=3))
+ISTANBUL = paths.ISTANBUL
 DAYS = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
 KNOWN = ('instagram',)                                   # platforms that may have settings (= publish.PLATFORMS)
 FIELDS = ('auto', 'every_days', 'days', 'post_after', 'post_before', 'min_gap_hours', 'hard_cap_24h', 'start_date')

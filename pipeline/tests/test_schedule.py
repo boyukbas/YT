@@ -1029,11 +1029,12 @@ class Module(Case):
         for p in S.PRESETS.values():
             self.assertTrue(set(p) - {'label'} <= set(S.FIELDS))
 
-    def test_standard_library_only(self):
-        tree = ast.parse(Path(S.__file__).read_text(encoding='utf-8'))
-        names = {a.name.split('.')[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
-        names |= {n.module.split('.')[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
-        self.assertLessEqual(names, set(sys.stdlib_module_names) | {'__future__'})
+    def test_standard_library_only(self):                          # paths.py (shared folders) is standard library only too
+        for f in (S.__file__, Path(S.__file__).with_name('paths.py')):
+            tree = ast.parse(Path(f).read_text(encoding='utf-8'))
+            names = {a.name.split('.')[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+            names |= {n.module.split('.')[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+            self.assertLessEqual(names, set(sys.stdlib_module_names) | {'__future__', 'paths'}, f)
 
 
 if __name__ == '__main__':

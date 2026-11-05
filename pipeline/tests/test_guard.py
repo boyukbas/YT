@@ -16,6 +16,7 @@ from . import fixtures, guard
 import instagram as IG
 import tools
 import youtube
+import paths as shared_paths
 
 NOWHERE = r'C:\nowhere-yt-tests'          # programs named in the start tests do not exist: a broken guard starts nothing
 OUTSIDE = (('192.0.2.1', 443), ('graph.facebook.com', 443), ('graph.instagram.com', 443),
@@ -196,6 +197,7 @@ class GuardWorks(unittest.TestCase):
         paths = {'guard.WORK': guard.WORK, 'guard.HOME': guard.HOME, 'instagram.KEYS': IG.KEYS,
                  'instagram.TOKEN': IG.TOKEN, 'instagram.WORK': IG.WORK, 'instagram.PAUSED': IG.PAUSED,
                  'instagram.POSTING': IG.POSTING, 'youtube.KEYS': youtube.KEYS, 'easy.WORK_ROOT': easy.WORK_ROOT,
+                 'paths.WORK': shared_paths.WORK, 'paths.KEYS': shared_paths.KEYS,
                  'llm.KEY_FILE': llm.KEY_FILE, **{f'llm.CLI_TOKENS[{i}]': p for i, p in enumerate(llm.CLI_TOKENS)},
                  **{f'youtube.{n}': getattr(youtube, n) for n in ('CLIENT', 'TOKEN') if hasattr(youtube, n)}}
         for name, p in paths.items():

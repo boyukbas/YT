@@ -8,7 +8,7 @@ FFMPEG, FFPROBE = str(FF_DIR / 'ffmpeg.exe'), str(FF_DIR / 'ffprobe.exe')
 DEEP_FILTER = Path(os.environ.get('DEEP_FILTER', r'D:\YT\work\tools\deepfilter\deep-filter.exe'))   # DeepFilterNet 0.5.6 CLI
 VIDEO_EXT = {'.mp4', '.mov', '.m4v', '.mkv', '.webm', '.3gp'}
 HERE = Path(__file__).resolve().parent
-EXTRAS = 'extras'          # <lesson>/Output/extras/: everything except the finished videos (decided 2026-11-04)
+from paths import EXTRAS   # <lesson>/Output/extras/: everything except the finished videos
 
 
 def extras(out):
