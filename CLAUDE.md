@@ -13,9 +13,10 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   https://boyukbas.github.io/YT/  (installable PWA, works offline after first use)
 - `ShortsEditor/`, `project.yml`, `.github/workflows/build-ipa.yml` — native iOS app (SwiftUI + WhisperKit).
   **Shelved**: sideloading failed (Apple login / anisette). Builds still pass in CI; don't invest further unless asked.
-- `pipeline/` — **Easy mode on the home PC** (Python): a lesson folder in Google Drive (`J:\My Drive\SINEM-YouTube\<lesson>`)
+- `pipeline/` — **Easy mode on the home PC** (Python): a lesson folder in Google Drive (`G:\My Drive\SINEM-YouTube\<lesson>`, letter can change)
   in → finished video, caption tracks, 3 thumbnails, YouTube texts out. See `pipeline/README.md`. Decided 2026-10-31:
-  Sinem's channel only; the PC is the worker; she uploads in the YouTube app and `youtube.py` fills in the details.
+  Sinem's channel only; the PC is the worker; she uploads in the YouTube app (or the PC uploads, see backlog) and
+  `youtube.py` fills in the details.
   Max 3 Shorts per lesson, published one a day (19:00); Instagram Reels by `publish.py` (the publishing
   core: queue, timing rules, posting lock, audit; platforms are plug-ins: `platform_instagram.py`, `platform_fake.py`
   for tests) on the schedule set on the dashboard (`schedule.py`, `D:\YT\easy-work\publishing.json`; default one a day
@@ -35,17 +36,20 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   Videos, Stats (`stats.py` → `stats.db`, hourly YouTube + Instagram numbers), Activity (`publish.db`); each press logged
   in `dashboard.log`. `instagram-paused` is only an emergency brake now (deleting it does not turn posting on).
   Dev copy, offline with fake data: `PIPELINE_WORK=<scratch> python -I dashboard.py serve --dev --fixtures --port 8791`
-  (refuses the real work folder). Tests: `python -I -m unittest discover -s pipeline	ests -t pipeline` (network
+  (refuses the real work folder). Tests: `python -I -m unittest discover -s pipeline/tests -t pipeline` (network
   blocked by `tests/guard.py`) and `node pipeline/tests/smoke_ui.cjs` against the dev server.
   Started at logon by Task Scheduler "YT dashboard" (`pipeline/dashboard.cmd`: tunnel `yt-dashboard` with config
   `D:\YT\easy-work\cloudflared.yml` + server, each restarted 30 s after it stops; logs `tunnel.log`, `dashboard-server.log`).
   Zero Trust team `frosty-bar-63c8` (Free); boyukbas.com DNS on Cloudflare since 2026-11-04 (Spaceship email forwarding
   MX/SPF kept). A new allowed email goes in BOTH the Access policy "Me and Sinem" and dashboard.json (then restart the task).
-  (The public GitHub status page of 2026-11-04 was removed the same day: too much info in public.)
+  Keep status info out of public places (a public GitHub status page was tried and removed on 2026-11-04).
   Lesson Output folders hold only the finished videos; everything else is in `Output/extras/` (`tools.extras()`).
   Google Drive's drive letter can change after a restart (J: → G: on 2026-11-03); `watch.cmd` looks for
   `<letter>:\My Drive\SINEM-YouTube` on every letter, so use whatever letter has it in manual commands too.
   YouTube API quota resets at midnight Pacific = 11:00 Istanbul in winter, 10:00 in summer.
+  PC folders (cleaned 2026-11-05): `D:\YT` holds only `easy-work` (databases, settings, transcripts, Claude answers),
+  `workenv` (the pipeline's Python), `work	ools`, `tools` (cloudflared) and `voice-samples`. Old hand-made videos and
+  build docs are in `<letter>:\My Drive\YT archive (PC)` (outside SINEM-YouTube, so the watcher ignores it).
   **User says "new video(s)" → follow `pipeline/RUNBOOK.md`** (STATUS → `review.py` rule check → look at frames → report).
 - The iOS workflow ignores `docs/**`, `pipeline/**`, `README.md` and `CLAUDE.md` changes.
 
@@ -58,7 +62,7 @@ point, hook first; titles without '#', ≤ 3 hashtags; never two uploads within 
 Slogan: "A1'den C1'e Almanca" (Sinem as a German teacher, all levels; not interpreter, not A1-only). Channel art in `_channel/brand/` (`pipeline/brandkit.py`); Sinem's filming guide `_channel/CEKIM-REHBERI.txt`.
 Word cards ("KELİME"): one harder word every 30–60 s. Section labels at each numbered part; the lesson's pattern is
 highlighted (yellow text, red outline); 10 s end-screen card "Sıradaki ders". Pipeline gotcha: never let ffmpeg read
-looped images from the Drive mount `J:` (it stalls) — the pipeline renders from a local copy of `_channel`.
+looped images from the Drive mount (it stalls) — the pipeline renders from a local copy of `_channel`.
 
 ## Web app files (`docs/`)
 | File | What |
@@ -108,6 +112,10 @@ looped images from the Drive mount `J:` (it stalls) — the pipeline renders fro
 - Always check exported files with ffprobe/ffmpeg frames, not just UI text.
 
 ## Easy mode backlog / decisions (pipeline, 2026-11-05)
+**Next items, in order:** (1) the owner's first real YouTube upload from the dashboard, and see whether Google keeps it
+locked private (see below); (2) look at the 2 private videos "2 abfahren" (rOf_Wc6WJME) and "3 am oder im Bahnhof"
+(jH5r-IRzkis) — deferred by the owner; (3) Threads as the next platform plug-in; (4) split instagram.py (API vs
+content); (5) studio layout for horizontal recordings; (6) the "turn your phone" idea.
 - **Studio layout: the owner likes it** (video on one side, a "board" with the lesson's example sentences building up
   on the other: `layout.studio` + `layout.board`, `channel.json "studio"`). Today it is used only for long videos made
   from *vertical* recordings. Idea: offer it for horizontal recordings too (her picture scaled into the card).
@@ -119,8 +127,11 @@ looped images from the Drive mount `J:` (it stalls) — the pipeline renders fro
   or a resumable private upload; processing = record id at once (`publish_pending`), `youtube.apply_video` details, wait
   for processing (≤ 15 min); publishing = `make_public`. Dashboard: Publish has an Instagram/YouTube switch; "Upload"
   button with the same warnings + override tick; automatic uploads use the same settings window as Instagram.
-  `easy.youtube_step` skips while a YouTube job is queued/running. Owner to check: OAuth consent screen
-  "In production" (Testing = refresh token dies after 7 days); the first real upload is the owner's.
+  `easy.youtube_step` skips while a YouTube job is queued/running. OAuth consent screen is "In production" (checked and
+  `youtube.py login` renewed 2026-11-05; Testing would kill the refresh token after 7 days). Not tried for real yet: the
+  first real upload is the owner's. Risk: Google restricts uploads from unaudited API projects to private; if
+  `make_public` can't lift it, either send the free YouTube API audit form or keep uploading in the app (the PC still
+  finds and fills those uploads).
 - **Lesson folder names (done 2026-11-05):** the watcher's `name_step` renames finished lessons whose folder name is a
   placeholder (`lessons.placeholder`: a number, new, yeni, ...) to `<her number> <thumbnail words>` with
   `lessons.rename` (work folder moved too, PostLock held, no queued/running job). Files keep their stem
@@ -134,11 +145,9 @@ looped images from the Drive mount `J:` (it stalls) — the pipeline renders fro
 - **Lesson posts (`posts.py`, done 2026-11-05):** blog.md + X thread + Threads post per lesson in `Output/extras/`
   (posts.md to copy, posts.json for future plug-ins); the link fills in after the YouTube upload.
 - **Architecture plan** (review 2026-11-05; publish.py's lock/journal/reconcile/breaker must NOT be refactored):
-  now: (1) one `paths.py` for WORK / keys folder / Istanbul TZ / output-folder lookup, keep old names as aliases;
-  `review.py` hard-codes `D:\YT\easy-work` (ignores PIPELINE_WORK); (2) light lesson helpers (`output_dir`,
-  `load_profile`, `retry_marker`, ...) into `lessons.py` so dashboard/overview stop importing easy (cv2 + render chain)
-  and two import cycles go; (3) tests for `youtube.next_slot`/`wanted` and review.py; (4) split instagram.py into API
-  and content parts (keep the names tests patch). With the 2nd platform: platform link patterns / settle hook / optional
+  done 2026-11-05: `paths.py` (WORK, keys folder, Istanbul TZ, output lookup; old names kept as aliases), light
+  `lessons.py` (dashboard/overview no longer import easy.py), tests for `youtube.next_slot`/`wanted`. Left: split
+  instagram.py into API and content parts (keep the names tests patch). With the next platform: platform link patterns / settle hook / optional
   `Item.file` in the Platform interface, `schedule.KNOWN` from the registry, stats + page JS driven by the registry,
   a shared candidate scanner; multi-part posts (X threads) need per-part journal state first.
 
@@ -157,9 +166,7 @@ looped images from the Drive mount `J:` (it stalls) — the pipeline renders fro
   (mediabunny `EncodedPacketSink` → `EncodedVideoPacketSource`/`EncodedAudioPacketSource`) — fast, tiny RAM;
   (2) **multi-clip projects**: keep the clips separate and only render once at export (no merge step);
   (3) stream audio per second instead of whole clips. Check the phone's diagnostics log first.
-- Direct YouTube upload: blocked by Google (unverified apps' uploads are locked private). Option discussed:
-  user uploads in the YouTube app, then the app applies title/description/thumbnail via the API (needs a
-  Google Cloud OAuth client). User postponed the decision.
+- Direct YouTube upload from the web app: not needed now — the home PC uploads and fills details (Easy mode).
 - Slow zoom-in effects; intro/outro templates. (Background music + ducking: done 2026-10-29.)
 - Music can't be browsed inside the app: YouTube's Audio Library has no API and needs a login, so the app links to it (`youtube.com/audiolibrary`) and the user adds downloaded files.
 - Subscribe reminder can overlap a presenter box in the bottom corner — could avoid it.
