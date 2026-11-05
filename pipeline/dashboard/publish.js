@@ -3,7 +3,7 @@ import { api, post, el, icon, num, len, fmt, fmtDay, ago, go, toast, openSheet, 
   noteJob, poll, onRoute, refresh, said, clock, when, btn, https, ext, many } from '/app.js';
 
 const ST = ['preparing', 'sharing', 'processing', 'publishing', 'saving'], DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-const KEYS = ['auto', 'every_days', 'days', 'post_after', 'post_before', 'min_gap_hours', 'start_date'];
+const KEYS = ['auto', 'every_days', 'per_day', 'days', 'post_after', 'post_before', 'min_gap_hours', 'start_date'];
 const LIM = { chars: 2200, tags_hard: 30, tags_suggested: 5, visible: 125 }, LV = { block: 0, warn: 1 }, CAP = /^caption_/, TAG = /#[\p{L}\p{N}_]+/gu;
 let P, D, V, L, N, JB, F, ps, all, gone, busy, uid = 0;
 const WAIT = {}, MEM = {}, IST = ' (Istanbul time)';
@@ -459,6 +459,7 @@ function settings(on) { // S14: the auto_on and gap_under_20 ticks; a dry run 40
     [[gL, gB], [oL, oB]] = [tickBox(`Yes, post ${N}s less than 20 h apart`), tickBox('Start posting automatically')];
     gB.onchange = oB.onchange = sync;
     s.body.replaceChildren(aL, (errs.auto = el('div', 'field-err')), pre, fld('every_days', 'Post every', stepper(1, 7, 1, f.every_days, (v) => many(v, 'day'), (v) => ch('every_days', v))),
+      fld('per_day', `${up1(N)}s on such a day`, stepper(1, 5, 1, f.per_day ?? 1, (v) => `up to ${v}`, (v) => ch('per_day', v))),
       fld('days', 'On these days', days), fld('post_after', `Post between${IST}`, win, (errs.post_before = el('div', 'field-err'))),
       fld('min_gap_hours', `At least this long between ${N}s`, stepper(1, 168, 0.5, f.min_gap_hours, (v) => `${v} h`, (v) => ch('min_gap_hours', v)), warn), gL,
       el('p', 'note', `At most ${cur.hard_cap_24h} ${N}s in any 24 hours (change on the PC in publishing.json).`), fld('start_date', 'Start date', sd),

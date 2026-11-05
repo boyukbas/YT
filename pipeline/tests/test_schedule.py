@@ -23,10 +23,10 @@ NO_SLEEP = types.SimpleNamespace(sleep=lambda s: None)
 ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 SPEC_EXAMPLE = {                                         # the document of spec 4.1
     'version': 1, 'rev': 1, 'updated': '2026-11-05T07:12:00Z', 'updated_by': 'migration',
-    'platforms': {'instagram': {'auto': False, 'every_days': 1, 'days': ALL_DAYS, 'post_after': '20:00',
+    'platforms': {'instagram': {'auto': False, 'every_days': 1, 'per_day': 1, 'days': ALL_DAYS, 'post_after': '20:00',
                                 'post_before': '23:59', 'min_gap_hours': 20, 'hard_cap_24h': 3,
                                 'start_date': '2026-11-03'},
-                  'youtube': {'auto': False, 'every_days': 1, 'days': ALL_DAYS, 'post_after': '20:00',     # a newer
+                  'youtube': {'auto': False, 'every_days': 1, 'per_day': 1, 'days': ALL_DAYS, 'post_after': '20:00',  # newer
                               'post_before': '23:59', 'min_gap_hours': 20, 'hard_cap_24h': 3, 'start_date': None}}}
 
 
@@ -41,7 +41,7 @@ def P(s, by='old'):
 
 def cfg(**change):
     """The default settings (daily, all days, 20:00-23:59, gap 20, cap 3) with these changes."""
-    return {'auto': False, 'every_days': 1, 'days': list(ALL_DAYS), 'post_after': '20:00', 'post_before': '23:59',
+    return {'auto': False, 'every_days': 1, 'per_day': 1, 'days': list(ALL_DAYS), 'post_after': '20:00', 'post_before': '23:59',
             'min_gap_hours': 20, 'hard_cap_24h': 3, 'start_date': None, **change}
 
 
@@ -151,9 +151,9 @@ class Validation(Case):
             self.good(min_gap_hours=v)
 
     def test_hard_cap(self):
-        self.bad('hard_cap_24h', (0, 6, 2.5, '3', None, True), 'Can only be changed in publishing.json on the PC.')
+        self.bad('hard_cap_24h', (0, 11, 2.5, '3', None, True), 'Can only be changed in publishing.json on the PC.')
         self.good(hard_cap_24h=1)
-        self.good(hard_cap_24h=5)
+        self.good(hard_cap_24h=10)
 
     def test_start_date(self):
         self.bad('start_date', ('2026-02-30', '2026-11-3', '03.11.2026', '20261103', '2026-W45-3', '2026-11-03T00:00',
@@ -478,7 +478,7 @@ class InvalidFileKept(Case):
         'unknown field': json.dumps(doc(auto=True, colour='red')),
         'bad value': json.dumps(doc(auto=True, post_before='20:10')),
         'bool as a number': json.dumps(doc(auto=True, every_days=True)),
-        'hard cap 9': json.dumps(doc(auto=True, hard_cap_24h=9)),
+        'hard cap 11': json.dumps(doc(auto=True, hard_cap_24h=11)),
     }
 
     def test_never_overwritten(self):
@@ -505,8 +505,8 @@ class InvalidFileKept(Case):
                          ['instagram post_before: Must be 40 minutes or more after the start, and 23:59 at the latest.'])
         self.put(doc(colour='red'))
         self.assertEqual(S.load_settings().problems, ['instagram colour: Unknown setting.'])
-        self.put(doc(hard_cap_24h=9))                    # the file's own problem says what is allowed
-        self.assertEqual(S.load_settings().problems, ['instagram hard_cap_24h: Choose 1 to 5, in publishing.json on the PC.'])
+        self.put(doc(hard_cap_24h=11))                   # the file's own problem says what is allowed
+        self.assertEqual(S.load_settings().problems, ['instagram hard_cap_24h: Choose 1 to 10, in publishing.json on the PC.'])
         self.put(self.BAD['not JSON'])
         self.assertRegex(S.load_settings().problems[0], r'^publishing\.json is not valid JSON \(.+\)\.$')
         self.put(self.BAD['version 2'])
@@ -1027,7 +1027,7 @@ class Module(Case):
         self.assertEqual(S.DAYS, tuple(ALL_DAYS))
         self.assertEqual((S.KNOWN, S.SEARCH_DAYS), (('instagram', 'youtube'), 15))
         self.assertEqual(S.ACKS, ('auto_on', 'gap_under_20', 'resume_auto', 'reset_settings'))
-        self.assertEqual(list(S.PRESETS), ['every_evening', 'every_other_day', 'weekdays', 'mon_wed_fri'])
+        self.assertEqual(list(S.PRESETS), ['every_evening', 'every_other_day', 'weekdays', 'mon_wed_fri', 'three_a_day'])
         for p in S.PRESETS.values():
             self.assertTrue(set(p) - {'label'} <= set(S.FIELDS))
 
@@ -1041,3 +1041,51 @@ class Module(Case):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PerDay(unittest.TestCase):
+    """per_day (2026-11-05): several automatic posts on one day, each min_gap_hours apart; manual posts warn
+    'same_day' only once per_day went out today. The hard cap (in publishing.json) still blocks."""
+    three = staticmethod(lambda **c: cfg(**{'per_day': 3, 'post_after': '12:00', 'min_gap_hours': 4, 'hard_cap_24h': 6, **c}))
+
+    def test_slots_on_one_day(self):
+        h = [P('2026-11-04 12:00')]
+        self.assertIsNone(S.slot_check(self.three(), h, T('2026-11-04 16:00')))
+        self.assertEqual(S.slot_check(self.three(), h, T('2026-11-04 14:00')), 'gap')
+        h.append(P('2026-11-04 16:00'))
+        self.assertIsNone(S.slot_check(self.three(), h, T('2026-11-04 20:00')))
+        h.append(P('2026-11-04 20:00'))
+        self.assertEqual(S.slot_check(self.three(), h, T('2026-11-05 00:30')), 'window')
+        self.assertEqual(S.slot_check(self.three(post_after='00:00'), h,
+                                      T('2026-11-04 23:59')), 'every_days')            # 3 out today: the day is full
+        self.assertEqual(S.slot_check(cfg(), [P('2026-11-04 12:00')], T('2026-11-04 23:00')), 'every_days')   # 1 a day, as before
+
+    def test_every_days_still_counts_between_days(self):
+        h = [P('2026-11-04 12:00')]
+        self.assertEqual(S.slot_check(self.three(every_days=2), h, T('2026-11-05 12:00')), 'every_days')
+        self.assertIsNone(S.slot_check(self.three(every_days=2), h, T('2026-11-04 16:00')))   # same day: room left
+
+    def test_forecast_three_a_day(self):
+        rows = S.forecast(self.three(), [], T('2026-11-04 09:00'), ['a', 'b', 'c', 'd'])
+        self.assertEqual([S.local(r['at']).strftime('%d %H:%M') for r in rows], ['04 12:00', '04 15:50', '04 19:40', '05 12:00'])   # AUTO_SLACK: 10 min early is fine
+
+    def test_manual_warnings(self):
+        h = [P('2026-11-04 12:00'), P('2026-11-04 16:00')]
+        codes = lambda c, now: [x.code for x in S.spacing_checks(c, h, T(now))]
+        self.assertEqual(codes(self.three(), '2026-11-04 20:30'), [])                 # 2 of 3, 4 h apart: fine
+        self.assertEqual(codes(self.three(), '2026-11-04 18:00'), ['gap'])
+        self.assertEqual(codes(self.three(per_day=2), '2026-11-04 20:30'), ['same_day'])
+        text = S.spacing_checks(self.three(per_day=2), h, T('2026-11-04 20:30'))[0].text
+        self.assertEqual(text, '2 Reels already went out today (the last at 16:00); the setting is 2 a day.')
+
+    def test_hard_cap_blocks_manual_posts(self):
+        h = [P(f'2026-11-04 {x}:00') for x in (8, 10, 12, 14, 16, 18)]
+        self.assertEqual(S.spacing_checks(self.three(), h, T('2026-11-04 20:00'))[0].code, 'hard_cap')
+        self.assertNotIn('hard_cap', [c.code for c in S.spacing_checks(self.three(), h[1:], T('2026-11-04 20:00'))])
+
+    def test_validation_and_summary(self):
+        self.assertEqual(S.validate(self.three()), {})
+        for bad in (0, 6, 1.5, True, None):
+            self.assertEqual(S.validate(cfg(per_day=bad)).get('per_day'), 'Choose 1 to 5 a day.')
+        self.assertEqual(S.summary(self.three()), 'Up to 3 Reels a day after 12:00, at least 4 h apart')
+        self.assertEqual(S.summary(cfg(), 'video'), 'One video a day after 20:00, at least 20 h apart')

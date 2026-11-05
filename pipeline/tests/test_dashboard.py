@@ -67,7 +67,7 @@ HOME = {'now': TIME, 'me': str, 'channel': {'name': str, 'url': str}, 'attention
         'counts': {'instagram': {'waiting': int, 'skipped': int, 'failed': int, 'posted': int},
                    'youtube': {'ready': int, 'uploaded': int, 'scheduled': int, 'public': int}},
         'tiles': [TILE]}
-SETTINGS = {'auto': bool, 'every_days': int, 'days': [str], 'post_after': str, 'post_before': str,
+SETTINGS = {'auto': bool, 'every_days': int, 'per_day': int, 'days': [str], 'post_after': str, 'post_before': str,
             'min_gap_hours': NUM, 'hard_cap_24h': int, 'start_date': (str, None)}
 BREAKER = {'name': (str, None), 'state': {'closed', 'cooling', 'stopped'}, 'until': T_, 'kind': (str, None),
            'message': (str, None), 'since': T_}

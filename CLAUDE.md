@@ -20,7 +20,9 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   Max 3 Shorts per lesson, published one a day (19:00); Instagram Reels by `publish.py` (the publishing
   core: queue, timing rules, posting lock, audit; platforms are plug-ins: `platform_instagram.py`, `platform_fake.py`
   for tests) on the schedule set on the dashboard (`schedule.py`, `D:\YT\easy-work\publishing.json`; default one a day
-  20:00-23:59, 20 h gap, never > 3 in 24 h; automatic posting was OFF at the v2 deploy) or by hand from the dashboard,
+  20:00-23:59, 20 h gap, never > 3 in 24 h; automatic posting was OFF at the v2 deploy; since 2026-11-05 the owner
+  wants it more frequent: `per_day` (up to N on a slot day, each `min_gap_hours` apart; preset "Three a day") and
+  the 24 h hard cap (file only, 1-10, blocks manual posts too) set to 3 a day, 4 h, cap 6 for both platforms) or by hand from the dashboard,
   via `instagram.py` (setup: `pipeline/instagram-setup.md`; Meta app "Almanca Dil Atölyesi", Facebook-login mode). No Facebook
   posts since 2026-11-03 (Page did poorly and was deleted, Instagram well): `FACEBOOK_PAGE = False`. Publishing still
   needs *a* Page linked to Instagram (a new empty one is; without it media_publish fails "Fatal" 2207085). Key: a

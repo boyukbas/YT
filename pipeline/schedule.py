@@ -14,19 +14,23 @@ ISTANBUL = paths.ISTANBUL
 DAYS = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
 KNOWN = ('instagram', 'youtube')                         # platforms that may have settings (= publish.PLATFORMS)
 V1 = ('instagram',)            # posted automatically before publishing.json existed: the first file keeps that
-FIELDS = ('auto', 'every_days', 'days', 'post_after', 'post_before', 'min_gap_hours', 'hard_cap_24h', 'start_date')
-DEFAULTS = {'auto': False, 'every_days': 1, 'days': list(DAYS), 'post_after': '20:00', 'post_before': '23:59',
+FIELDS = ('auto', 'every_days', 'per_day', 'days', 'post_after', 'post_before', 'min_gap_hours', 'hard_cap_24h',
+          'start_date')
+DEFAULTS = {'auto': False, 'every_days': 1, 'per_day': 1, 'days': list(DAYS), 'post_after': '20:00', 'post_before': '23:59',
             'min_gap_hours': 20, 'hard_cap_24h': 3, 'start_date': None}
 PRESETS = {
-    'every_evening':   {'label': 'Every evening', 'every_days': 1, 'days': list(DAYS),
+    'every_evening':   {'label': 'Every evening', 'every_days': 1, 'per_day': 1, 'days': list(DAYS),
                         'post_after': '20:00', 'post_before': '23:59', 'min_gap_hours': 20},
-    'every_other_day': {'label': 'Every other day', 'every_days': 2, 'days': list(DAYS),
+    'every_other_day': {'label': 'Every other day', 'every_days': 2, 'per_day': 1, 'days': list(DAYS),
                         'post_after': '20:00', 'post_before': '23:59', 'min_gap_hours': 20},
-    'weekdays':        {'label': 'Weekdays', 'every_days': 1, 'days': ['mon', 'tue', 'wed', 'thu', 'fri'],
+    'weekdays':        {'label': 'Weekdays', 'every_days': 1, 'per_day': 1, 'days': ['mon', 'tue', 'wed', 'thu', 'fri'],
                         'post_after': '20:00', 'post_before': '23:59', 'min_gap_hours': 20},
-    'mon_wed_fri':     {'label': 'Mon, Wed, Fri', 'every_days': 1, 'days': ['mon', 'wed', 'fri'],
+    'mon_wed_fri':     {'label': 'Mon, Wed, Fri', 'every_days': 1, 'per_day': 1, 'days': ['mon', 'wed', 'fri'],
                         'post_after': '20:00', 'post_before': '23:59', 'min_gap_hours': 20},
+    'three_a_day':     {'label': 'Three a day', 'every_days': 1, 'per_day': 3, 'days': list(DAYS),
+                        'post_after': '12:00', 'post_before': '23:59', 'min_gap_hours': 4},
 }
+PER_DAY_MAX, CAP_MAX = 5, 10                             # posts on one day (automatic), in any 24 h (all)
 ACKS = ('auto_on', 'gap_under_20', 'resume_auto', 'reset_settings')
 SEARCH_DAYS = 15
 WINDOW_MIN = 40                                          # minutes: one retry (30 min) + one watcher run (10)
@@ -35,6 +39,7 @@ AUTO_SLACK = timedelta(minutes=10)                       # one watcher run: an a
 MESSAGES = {                                             # spec 4.1, shown under the field
     'auto': 'Must be on or off.',
     'every_days': 'Choose 1 to 7 days.',
+    'per_day': 'Choose 1 to 5 a day.',
     'days': 'Choose at least one day.',
     'post_after': 'Use HH:MM between 00:00 and 23:19.',
     'post_before': 'Must be 40 minutes or more after the start, and 23:59 at the latest.',
@@ -45,7 +50,7 @@ MESSAGES = {                                             # spec 4.1, shown under
 UNKNOWN_DAY = 'Unknown day.'
 UNKNOWN_SETTING = 'Unknown setting.'
 READ_ONLY = MESSAGES['hard_cap_24h']                     # hard_cap_24h changed through the API (code 'read_only')
-_IN_FILE = {'hard_cap_24h': 'Choose 1 to 5, in publishing.json on the PC.'}     # a bad value in the file itself
+_IN_FILE = {'hard_cap_24h': f'Choose 1 to {CAP_MAX}, in publishing.json on the PC.'}     # a bad value in the file itself
 
 _DAY = timedelta(hours=24)
 _RETRIES = (0.2, 0.4, 0.6, 0.8, 1.0)                     # waits before the 5 retries of a refused write (3 s in all)
@@ -145,6 +150,8 @@ def validate(values: dict) -> dict[str, str]:
         out['auto'] = MESSAGES['auto']
     if not (_whole(v.get('every_days')) and 1 <= v['every_days'] <= 7):
         out['every_days'] = MESSAGES['every_days']
+    if not (_whole(v.get('per_day')) and 1 <= v['per_day'] <= PER_DAY_MAX):
+        out['per_day'] = MESSAGES['per_day']
     days = v.get('days')
     if not isinstance(days, (list, tuple)) or not days:
         out['days'] = MESSAGES['days']
@@ -158,7 +165,7 @@ def validate(values: dict) -> dict[str, str]:
     gap = v.get('min_gap_hours')
     if not (type(gap) in (int, float) and 1 <= gap <= 168 and float(gap * 2).is_integer()):
         out['min_gap_hours'] = MESSAGES['min_gap_hours']
-    if not (_whole(v.get('hard_cap_24h')) and 1 <= v['hard_cap_24h'] <= 5):
+    if not (_whole(v.get('hard_cap_24h')) and 1 <= v['hard_cap_24h'] <= CAP_MAX):
         out['hard_cap_24h'] = MESSAGES['hard_cap_24h']
     if v.get('start_date') not in (None, '') and not _date(v.get('start_date')):
         out['start_date'] = MESSAGES['start_date']
@@ -573,7 +580,8 @@ def cap_free_at(cfg: dict, history: list[Post], now: datetime) -> datetime | Non
 
 def slot_check(cfg: dict, history: list[Post], t: datetime) -> str | None:
     """Why an automatic post at t breaks the rules ('day', 'start', 'window', 'every_days', 'gap', 'same_day',
-    'cap', checked in that order), or None when it is allowed. The gap may be short by AUTO_SLACK (one watcher
+    'cap', checked in that order), or None when it is allowed. 'same_day': per_day posts are out on t's day already;
+    a later post on the day of the last one is not an 'every_days' break while that day has room. The gap may be short by AUTO_SLACK (one watcher
     run): a post goes live minutes after its run, so an exact gap would push every next post one run later."""
     t = _utc(t)
     lt = local(t)
@@ -584,16 +592,23 @@ def slot_check(cfg: dict, history: list[Post], t: datetime) -> str | None:
     if not cfg['post_after'] <= f'{lt:%H:%M}' <= cfg['post_before']:    # the end minute counts as inside
         return 'window'
     last = last_post(history)
+    on_day = sum(1 for p in history if local(p.at).date() == lt.date())
     if last:
-        if lt.date() < local(last.at).date() + timedelta(days=cfg['every_days']):
+        same = local(last.at).date() == lt.date() and on_day < per_day(cfg)
+        if not same and lt.date() < local(last.at).date() + timedelta(days=cfg['every_days']):
             return 'every_days'
         if t - _utc(last.at) < timedelta(hours=cfg['min_gap_hours']) - AUTO_SLACK:
             return 'gap'
-    if any(local(p.at).date() == lt.date() for p in history):
+    if on_day >= per_day(cfg):
         return 'same_day'
     if posts_in_24h(history, t) >= cfg['hard_cap_24h']:
         return 'cap'
     return None
+
+
+def per_day(cfg: dict) -> int:
+    """Posts allowed on one day: cfg['per_day'] (settings from before 2026-11-05 have none: 1)."""
+    return cfg.get('per_day', 1)
 
 
 def slot_open(cfg: dict, history: list[Post], now: datetime) -> tuple[bool, str]:
@@ -651,8 +666,8 @@ def runway(rows: list[dict]) -> str | None:
 
 def spacing_checks(cfg: dict, history: list[Post], now: datetime, noun: str = 'Reel') -> list[Check]:
     """Timing checks for a manual post now, in order: 'hard_cap' (block, data {'next_possible': ISO}), 'gap'
-    (warn, data {'last': ISO, 'hours': float}), 'same_day' (warn, data {'at': ISO}). Ignores days, window,
-    every_days and start_date. noun names the platform's posts in the texts ('Reel', 'video')."""
+    (warn, data {'last': ISO, 'hours': float}), 'same_day' (warn once per_day posts went out today, data
+    {'at': ISO}). Ignores days, window, every_days and start_date. noun names the platform's posts in the texts ('Reel', 'video')."""
     now = _utc(now)
     out = []
     n = posts_in_24h(history, now)
@@ -668,10 +683,12 @@ def spacing_checks(cfg: dict, history: list[Post], now: datetime, noun: str = 'R
                          f'{_hours(cfg["min_gap_hours"])} h between {noun}s.',
                          {'last': iso(last.at), 'hours': round(ago.total_seconds() / 3600, 1)}))
     today = [p for p in history if local_date(p.at) == local_date(now)]
-    if today:
+    if len(today) >= per_day(cfg):
         p = last_post(today)
-        out.append(Check('same_day', 'warn', f'A {noun} already went out today at {local(p.at):%H:%M}.',
-                         {'at': iso(p.at)}))
+        text = (f'A {noun} already went out today at {local(p.at):%H:%M}.' if len(today) == 1 else
+                f'{len(today)} {noun}s already went out today (the last at {local(p.at):%H:%M}); the setting is '
+                f'{per_day(cfg)} a day.')
+        out.append(Check('same_day', 'warn', text, {'at': iso(p.at)}))
     return out
 
 
@@ -679,8 +696,9 @@ def summary(cfg: dict, noun: str = 'Reel') -> str:
     """One line for people, e.g. 'One Reel a day after 20:00, at least 20 h apart' or 'One Reel every 2 days
     (Mon, Wed, Fri) between 20:00 and 23:00, at least 20 h apart'. A gap longer than every_days allows says so
     (', so less often than that')."""
-    n = cfg['every_days']
-    line = f'One {noun} a day' if n == 1 else f'One {noun} every {n} days'
+    n, k = cfg['every_days'], per_day(cfg)
+    many = f'Up to {k} {noun}s' if k > 1 else f'One {noun}'
+    line = f'{many} a day' if n == 1 else f'{many} every {n} days'
     if set(cfg['days']) != set(DAYS):
         line += ' (' + ', '.join(d.title() for d in DAYS if d in cfg['days']) + ')'
     line += (f' after {cfg["post_after"]}' if cfg['post_before'] == '23:59'
