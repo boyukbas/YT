@@ -114,6 +114,12 @@ class Candidates(Case):
         self.assertIn('new/Output/new-short-5.mp4', keys)
         self.assertNotIn('new/Output/new-short-6.mp4', keys)                           # scheduled after NOW
 
+    def test_timing_warnings_say_video(self):
+        texts = ' '.join(c['text'] for c in P.preview(self.root, 'youtube', P.item_id(NEW9), now=self.now)['checks']
+                         if c['code'] in ('gap', 'same_day', 'hard_cap'))
+        self.assertIn('video', texts)
+        self.assertNotIn('Reel', texts)
+
     def test_a_pending_record_still_waits(self):
         path = tools.extras(self.root / 'new' / 'Output') / Y.APPLIED
         data = json.loads(path.read_text(encoding='utf-8'))

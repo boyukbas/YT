@@ -649,28 +649,28 @@ def runway(rows: list[dict]) -> str | None:
     return rows[-1]['slot'] if rows else None
 
 
-def spacing_checks(cfg: dict, history: list[Post], now: datetime) -> list[Check]:
+def spacing_checks(cfg: dict, history: list[Post], now: datetime, noun: str = 'Reel') -> list[Check]:
     """Timing checks for a manual post now, in order: 'hard_cap' (block, data {'next_possible': ISO}), 'gap'
     (warn, data {'last': ISO, 'hours': float}), 'same_day' (warn, data {'at': ISO}). Ignores days, window,
-    every_days and start_date."""
+    every_days and start_date. noun names the platform's posts in the texts ('Reel', 'video')."""
     now = _utc(now)
     out = []
     n = posts_in_24h(history, now)
     if n >= cfg['hard_cap_24h']:
         free = cap_free_at(cfg, history, now)
-        out.append(Check('hard_cap', 'block', f'{n} Reel{"s" if n != 1 else ""} in the last 24 hours: that is the '
+        out.append(Check('hard_cap', 'block', f'{n} {noun}{"s" if n != 1 else ""} in the last 24 hours: that is the '
                          f'limit. Next possible {fmt(free)}.', {'next_possible': iso(free)}))
     last = last_post(history)
     if last and now - _utc(last.at) < timedelta(hours=cfg['min_gap_hours']):
         ago = max(now - _utc(last.at), timedelta(0))
         h, m = divmod(int(ago.total_seconds() // 60), 60)
-        out.append(Check('gap', 'warn', f'The last Reel went out {h} h {m} min ago. The rule is at least '
-                         f'{_hours(cfg["min_gap_hours"])} h between Reels.',
+        out.append(Check('gap', 'warn', f'The last {noun} went out {h} h {m} min ago. The rule is at least '
+                         f'{_hours(cfg["min_gap_hours"])} h between {noun}s.',
                          {'last': iso(last.at), 'hours': round(ago.total_seconds() / 3600, 1)}))
     today = [p for p in history if local_date(p.at) == local_date(now)]
     if today:
         p = last_post(today)
-        out.append(Check('same_day', 'warn', f'A Reel already went out today at {local(p.at):%H:%M}.',
+        out.append(Check('same_day', 'warn', f'A {noun} already went out today at {local(p.at):%H:%M}.',
                          {'at': iso(p.at)}))
     return out
 

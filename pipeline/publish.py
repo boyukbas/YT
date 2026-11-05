@@ -1281,7 +1281,7 @@ def _checks(v: _View, item: Item, caption: str, *, fresh: bool = False, busy: bo
                          f'Already on {p.label}.', {'at': at}))
     elif state == 'checking':
         out.append(Check('checking', 'block', f"This {p.noun}'s last post was interrupted. Check it first."))
-    out += S.spacing_checks(v.cfg, v.hist, v.now)
+    out += S.spacing_checks(v.cfg, v.hist, v.now, p.noun)
     out += p.preflight(item, caption, fresh)
     dup = v.duplicate(item, caption)
     if dup:
