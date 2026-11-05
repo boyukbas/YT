@@ -1,4 +1,5 @@
-"""YouTube Data API: Sinem uploads the finished video in the YouTube app; this fills in everything else.
+"""YouTube Data API: Sinem uploads the finished video in the YouTube app (or the PC does: upload(), called only by
+platform_youtube.py through publish.py); this fills in everything else.
 
   python youtube.py login                          sign in once (browser on this PC), pick Almanca Dil Atölyesi
   python youtube.py check                          read-only: channel + latest uploads
@@ -165,7 +166,8 @@ def taken_elsewhere(out):
     ids = set()
     for _, o, p in records(out.parent.parent, APPLIED):
         if o != out:
-            ids |= {r['id'] for r in json.loads(p.read_text(encoding='utf-8')).values()}
+            ids |= {r['id'] for r in json.loads(p.read_text(encoding='utf-8')).values()
+                    if isinstance(r, dict) and r.get('id') not in (None, '', 'hand')}
     return ids
 
 
@@ -212,6 +214,95 @@ def wanted(data, settings):
         'comment': data.get('pinned_comment', '').strip(),
         'public': False,
     }
+
+
+def is_short(f):
+    """The -short / -short-N match of a finished file (None for the main video)."""
+    return re.search(r'-short(-\d+)?$', Path(f).stem)
+
+
+def short_number(f):
+    """N of -short-N (0 for -short and the main video)."""
+    m = is_short(f)
+    return int(m.group(1)[1:]) if m and m.group(1) else 0
+
+
+def file_wanted(mp4, data, settings, applied, public=False, main=None):
+    """What one finished file should look like on YouTube. Shorts: their own title and description (with a link to
+    the full lesson once its video is up: main, else the main video's record), the Shorts playlist after the
+    lower-numbered Shorts, no custom thumbnail and no comment. A title or description edited on the dashboard
+    before the PC uploaded it (kept in its record) wins over youtube.json."""
+    w = wanted(data, settings)
+    w['public'] = public
+    if is_short(mp4):
+        own = next((s for s in data.get('shorts', []) if Path(mp4).stem.endswith('-' + s['version'])), {})
+        desc = own.get('description') or data['descriptions'][-1]
+        main = main or next((r.get('id') for f, r in applied.items() if not is_short(f) and isinstance(r, dict)
+                             and r.get('id') not in (None, '', 'hand')), None)
+        if main:                      # the full lesson as a link, once the video's ID is known
+            desc = desc.replace('Dersin tamamı kanalda.', f'Dersin tamamı: https://youtu.be/{main}')
+        w.update(title=(own.get('title') or data.get('short_title') or w['title'])[:100], description=desc,
+                 thumbnail=None, playlist=settings.get('shorts_playlist') or data.get('shorts_playlist'), comment='',
+                 before={r['id'] for f, r in applied.items() if is_short(f) and short_number(f) < short_number(mp4)
+                         and isinstance(r, dict) and r.get('id')})
+    rec = applied.get(Path(mp4).name)
+    for k in ('title', 'description'):
+        if isinstance(rec, dict) and isinstance(rec.get(k), str) and rec[k].strip():
+            w[k] = rec[k][:100] if k == 'title' else rec[k]
+    return w
+
+
+def save_record(out, name, rec):
+    """Set [name] in the lesson's youtube-applied.json, re-reading the file first so a record another process
+    (the dashboard's uploader) wrote meanwhile is kept. Returns the whole dict."""
+    path = extras(out) / APPLIED
+    applied = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+    applied[name] = rec
+    path.write_text(json.dumps(applied, ensure_ascii=False, indent=1), encoding='utf-8')
+    return applied
+
+
+# ---------- uploading (platform_youtube.py) ----------
+
+def upload(yt, mp4, w, on_part=None, part=8 * 1024 * 1024):
+    """Upload one finished file as a PRIVATE video with its title, description, tags, category, languages,
+    audience and AI answer: a resumable upload sent in parts of `part` bytes (an interrupted upload creates no
+    video). on_part(sent, total) runs after each part (it may raise to stop: nothing more is sent).
+    Returns the new video's id."""
+    total = Path(mp4).stat().st_size
+    body = {'snippet': {k: w[k] for k in ('title', 'description', 'tags', 'categoryId', 'defaultLanguage',
+                                          'defaultAudioLanguage')},
+            'status': {'privacyStatus': 'private', 'selfDeclaredMadeForKids': w['madeForKids'],
+                       'containsSyntheticMedia': w['ai'], 'embeddable': True}}
+    req = yt.videos().insert(part='snippet,status', body=body,
+                             media_body=MediaFileUpload(str(mp4), mimetype='video/mp4', chunksize=part, resumable=True))
+    resp = None
+    while resp is None:
+        status, resp = req.next_chunk(num_retries=3)
+        if on_part:
+            on_part(total if resp is not None else int(getattr(status, 'resumable_progress', 0) or 0), total)
+    return resp['id']
+
+
+def video_state(yt, vid):
+    """{'privacy', 'upload', 'publish_at', 'failure'} of one of our videos, or None when YouTube has no such video
+    (deleted, or not ours)."""
+    items = yt.videos().list(part='status', id=vid).execute().get('items', [])
+    if not items:
+        return None
+    st = items[0]['status']
+    return {'privacy': st.get('privacyStatus'), 'upload': st.get('uploadStatus'), 'publish_at': st.get('publishAt'),
+            'failure': st.get('failureReason') or st.get('rejectionReason')}
+
+
+def make_public(yt, vid):
+    """Make a video public now (a scheduled time is dropped). The status part's other settings are sent back as
+    they are: YouTube resets the ones left out."""
+    st = yt.videos().list(part='status', id=vid).execute()['items'][0]['status']
+    new = {k: st[k] for k in ('embeddable', 'license', 'publicStatsViewable', 'selfDeclaredMadeForKids',
+                              'containsSyntheticMedia') if k in st}
+    new['privacyStatus'] = 'public'
+    yt.videos().update(part='status', body={'id': vid, 'status': new}).execute()
 
 
 def apply_video(yt, vid, out, mp4, w, rec, dry):
@@ -350,26 +441,17 @@ def apply(lesson, video_id=None, dry=False, log=print, public=False):
     public = public or bool(settings.get('public'))
     yt = api()
     lines, complete = [], True
-    is_short = lambda f: re.search(r'-short(-\d+)?$', f.stem)
-    num = lambda f: int(m.group(1)[1:]) if (m := is_short(f)) and m.group(1) else 0
     main, planned = None, []
     n_shorts = sum(bool(is_short(f)) for f in out.glob('*.mp4'))
     if n_shorts > SHORTS_WARN:
         lines.append(f'WARNING: {n_shorts} Shorts in one lesson; they go public one a day, so the last one is '
                      f'{n_shorts} days away. Next time keep it to {SHORTS_WARN} or fewer (shorts_max)')
-    for mp4 in sorted(out.glob('*.mp4'), key=lambda f: (bool(is_short(f)), num(f), f.name)):      # the video first
+    for mp4 in sorted(out.glob('*.mp4'), key=lambda f: (bool(is_short(f)), short_number(f), f.name)):      # the video first
         short = is_short(mp4)
-        w = wanted(data, settings)
-        w['public'] = public
-        if short:                     # Shorts: own title + description + Shorts playlist, no custom thumbnail / comment
-            own = next((s for s in data.get('shorts', []) if mp4.stem.endswith('-' + s['version'])), {})
-            desc = own.get('description') or data['descriptions'][-1]
-            if main:                  # the full lesson as a link, once the video's ID is known
-                desc = desc.replace('Dersin tamamı kanalda.', f'Dersin tamamı: https://youtu.be/{main}')
-            w.update(title=(own.get('title') or data.get('short_title') or w['title'])[:100], description=desc,
-                     thumbnail=None, playlist=settings.get('shorts_playlist') or data.get('shorts_playlist'), comment='',
-                     before={r['id'] for f, r in applied.items() if is_short(Path(f)) and num(Path(f)) < num(mp4)})
+        w = file_wanted(mp4, data, settings, applied, public, main=main)
         rec = applied.get(mp4.name)
+        if rec and rec.get('id') in (None, '', 'hand'):   # marked as posted by hand on the dashboard: find the upload
+            rec = None
         if video_id and not short:
             rec = rec if rec and rec['id'] == video_id else {'id': video_id}
         elif not rec:
@@ -397,8 +479,7 @@ def apply(lesson, video_id=None, dry=False, log=print, public=False):
             rec['updated'] = datetime.now(ISTANBUL).strftime('%Y-%m-%d %H:%M')
             rec['complete'] = not waiting
             rec['public'] = rec.get('public') or public
-            applied[mp4.name] = rec
-            (extras(out) / APPLIED).write_text(json.dumps(applied, ensure_ascii=False, indent=1), encoding='utf-8')
+            applied = save_record(out, mp4.name, rec)
         complete &= not waiting
         parts = [f"{'Short' if short else 'Video'} https://youtu.be/{rec['id']}"]
         parts.append(('would set: ' if dry else 'set: ') + ', '.join(done) if done else 'up to date')

@@ -22,6 +22,7 @@ class InstagramPlatform(publish.Platform):
     """Candidates from finished lessons (IG.lesson_files + IG.reels), the pipeline's caption and cover,
     posting through IG.post_instagram, records in <lesson>/<Output>/extras/instagram-posted.json."""
     name, label, noun, breaker = 'instagram', 'Instagram', 'Reel', 'meta'
+    setup_hint = 'instagram.py system-token'
     caption_max, tags_max, tags_suggested = 2200, 30, IG.MAX_TAGS
 
     @property

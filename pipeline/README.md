@@ -49,6 +49,14 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
    STATUS shows the links. Still in Studio: pin the comment, end screen. Quota: ~900 units per Short, 10,000 a day.
    One-time sign-in: `python youtube.py login` (pick Almanca Dil Atölyesi). Test without changes:
    `python youtube.py apply "<lesson>" --dry-run`.
+   **Or the PC uploads** (`platform_youtube.py`, since 2026-11-05): the dashboard's Publish › YouTube lists every
+   finished file not on YouTube yet. "Upload" sends it (private first, with title, description, tags and settings;
+   then thumbnail, captions and playlist; after YouTube's processing it goes public) through publish.py, like an
+   Instagram Reel: same lock, job journal, spacing warnings and override tick. "Upload automatically" (settings
+   window, frequency, gap; **OFF** at the deploy) does the same on its own. A file already uploaded by hand is found
+   first and never sent twice; the watcher's details step waits while an upload runs and posts the comment later.
+   The dashboard caption is the title (first line) + the description. Upload quota: 100 a day (its own bucket).
+   Needs the OAuth consent screen "In production" (in Testing the sign-in dies after 7 days).
 
 **Instagram** (`instagram.py`, setup in `instagram-setup.md`): every Short also gets `cover-short-N.jpg` (its own photo +
 keywords, text inside the 3:4 grid crop) and a caption in `instagram.md`; when automatic posting is on (dashboard >

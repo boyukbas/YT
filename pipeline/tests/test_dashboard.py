@@ -92,7 +92,8 @@ JOB = {'id': Rx(r'j[0-9a-f]{10}'), 'platform': str, 'item': HEX12, 'key': str, '
        'stages': [str], 'created': TIME, 'started': T_, 'finished': T_, 'url': (str, None), 'kind': (str, None),
        'error': (str, None), 'result': (str, None), 'record_pending': bool}
 LAST_POST = (None, {'at': TIME, 'by': str, 'key': (str, None), 'title': (str, None), 'url': (str, None)})
-PUBLISH = {'platform': 'instagram', 'label': str, 'noun': str, 'set_up': bool, 'account_url': (str, None), 'now': TIME,
+PUBLISH = {'platform': 'instagram', 'label': str, 'noun': str, 'verb': str, 'setup_hint': str,
+           'platforms': [{'name': str, 'label': str}], 'set_up': bool, 'account_url': (str, None), 'now': TIME,
            'settings': SETTINGS, 'settings_rev': int, 'settings_problems': [str],
            'presets': [{'id': str, 'label': str, 'values': dict}], 'auto': AUTO, 'breaker': BREAKER,
            'last_post': LAST_POST, 'posts_24h': int, 'next_possible': T_,
@@ -121,7 +122,7 @@ STATS = {'now': TIME, 'sources': [{'source': str, 'last_ok': T_, 'last_try': T_,
          'limit': (None, {'used': NUM_, 'total': NUM_, 'at': T_, 'stale': bool})}
 ACTIVITY = {'items': [{'id': int, 'at': TIME, 'who': str, 'kind': str, 'platform': (str, None), 'text': str,
                        'url': (str, None)}],
-            'more': bool, 'logs': {'watch': [str], 'instagram': [str]}}
+            'more': bool, 'logs': {'watch': [str], 'instagram': [str], 'youtube': [str]}}
 
 
 def conforms(test, value, schema, where='$'):
@@ -647,7 +648,8 @@ class Endpoints(DevCase):
         self.assertEqual(d['counts'], {'instagram': {'waiting': 6, 'skipped': 0, 'failed': 0, 'posted': 5},
                                        'youtube': {'ready': 1, 'uploaded': 2, 'scheduled': 2, 'public': 8}})
         self.assertEqual(d['health']['platforms'], [{'name': 'instagram', 'ok': True, 'set_up': True,
-                                                     'breaker': 'closed', 'text': 'Instagram key OK'}])
+                                                     'breaker': 'closed', 'text': 'Instagram key OK'},
+                                                    {'name': 'youtube', 'ok': False, 'set_up': False, 'breaker': None, 'text': 'YouTube not available'}])     # in PLATFORMS, not in the test registry
 
     def test_publish(self):
         a = self.get('/api/publish?platform=instagram')
@@ -779,7 +781,7 @@ class Endpoints(DevCase):
         with mock.patch.object(publish, 'start_post', side_effect=publish.Busy(None)):
             a = self.post('/api/post', {'platform': 'instagram', 'id': ID[6], 'caption': pv['caption'],
                                         'check': pv['check']})
-        self.assertEqual((a.status, a.json), (409, {'error': 'busy', 'message': 'A Reel is being posted right now.',
+        self.assertEqual((a.status, a.json), (409, {'error': 'busy', 'message': 'Another post is going out right now.',
                                                     'job': None}))
         self.assertEqual(self.fake.calls, [])
 
@@ -1030,7 +1032,9 @@ class FixRound(DevCase):
             home = self.get('/api/home').json
             self.assertEqual(home['health']['platforms'], [{'name': 'instagram', 'ok': False, 'set_up': True,
                                                             'breaker': 'closed',
-                                                            'text': 'Instagram key refused: test the connection'}])
+                                                            'text': 'Instagram key refused: test the connection'},
+                                                           {'name': 'youtube', 'ok': False, 'set_up': False,
+                                                            'breaker': None, 'text': 'YouTube not available'}])
             card = next(c for c in home['attention'] if c['id'] == 'key_refused:instagram')
             conforms(self, card, ATTENTION)
             self.assertEqual((card['level'], card['who'], card['title']), ('red', 'pc', 'Instagram refused the key'))
@@ -1709,7 +1713,7 @@ class HomeParts(Case):
         publish.set_registry({})
         self.assertEqual(dashboard.health(self.root, NOW)['platforms'],
                          [{'name': 'instagram', 'ok': False, 'set_up': False, 'breaker': None,
-                           'text': 'Instagram not available'}])
+                           'text': 'Instagram not available'}, {'name': 'youtube', 'ok': False, 'set_up': False, 'breaker': None, 'text': 'YouTube not available'}])
 
     def test_numbers_health(self):
         src = [{'source': 'youtube', 'last_ok': S.iso(NOW - timedelta(minutes=12)), 'last_try': None, 'next_try': None,

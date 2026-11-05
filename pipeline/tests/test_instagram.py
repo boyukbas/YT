@@ -3,7 +3,7 @@ Offline: Meta answers come from guard.script_meta(), the public link from guard.
 fixture root; the clock is publish._utcnow, patched to fixtures.NOW (Wed 4 Nov 22:40 Istanbul)."""
 from . import fixtures, guard
 
-import ast, contextlib, dataclasses, io, json, os, shutil, stat, unittest
+import ast, contextlib, dataclasses, io, json, os, re, shutil, stat, unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
@@ -841,11 +841,19 @@ class NoFacebook(unittest.TestCase):
                 with self.subTest(name):
                     self.assertNotRegex(text, r'video_reels|graph-video\.facebook')
 
-    def test_no_youtube_upload(self):
+    def test_youtube_upload_only_through_its_platform(self):
+        # 2026-11-05 the owner asked for PC uploads: only youtube.upload() sends a video, only platform_youtube's
+        # post() calls it (so the posting lock, the job journal and the spacing rules always apply)
         for name, text in self.sources.items():
             with self.subTest(name):
-                self.assertNotRegex(text, r'videos\(\)\s*\.\s*insert')
-                self.assertNotRegex(text, r"""mimetype\s*=\s*['"]video/""")
+                ok = name == 'youtube.py'
+                (self.assertRegex if ok else self.assertNotRegex)(text, r'videos\(\)\s*\.\s*insert')
+                (self.assertRegex if ok else self.assertNotRegex)(text, r"""mimetype\s*=\s*['"]video/""")
+                calls = re.findall(r'\bY\.upload\(|\byoutube\.upload\(', text)
+                self.assertEqual(len(calls), 1 if name == 'platform_youtube.py' else 0)
+        y = self.sources['youtube.py']
+        self.assertEqual(len(re.findall(r'videos\(\)\s*\.\s*insert', y)), 1)
+        self.assertIn('def upload(', y)
 
 
 if __name__ == '__main__':

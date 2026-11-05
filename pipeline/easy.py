@@ -455,6 +455,17 @@ def heartbeat(phase):
             pass
 
 
+def _uploading():
+    """True while the PC is uploading a video (publish.py's YouTube job): the details step waits for the next run,
+    so the two never look for or write the same video at once."""
+    try:
+        import publish
+        j = publish.current_job('youtube')
+        return bool(j and j.get('state') in ('queued', 'running'))
+    except Exception:
+        return False
+
+
 def youtube_step(lesson):
     """After Sinem uploads the finished video/Shorts in the YouTube app: fill in their details (youtube.py).
     Runs for finished lessons until everything is set (the comment waits until the video is public)."""
@@ -466,7 +477,7 @@ def youtube_step(lesson):
     if s.get('state') != 'done' or s.get('youtube_complete') or not (extras(out) / 'youtube.json').exists():
         return
     import youtube as Y
-    if not Y.TOKEN.exists():
+    if not Y.TOKEN.exists() or _uploading():
         return
     st = Status(out, WORK_ROOT / slug(lesson.name))
     try:

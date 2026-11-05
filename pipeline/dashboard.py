@@ -468,7 +468,7 @@ def platform_health(now: datetime | None = None) -> list[dict]:
                 raise LookupError('not available')
             up, b = bool(p.set_up()), publish.breaker(p.breaker)
         except Exception as e:
-            label = getattr(p, 'label', None) or name.title()
+            label = getattr(p, 'label', None) or publish.LABELS.get(name, name.title())
             out.append({'name': name, 'ok': False, 'set_up': False, 'breaker': None,
                         'text': f'{label} not available' if p is None else f'{label}: {_short(e)}'})
             continue
@@ -568,6 +568,8 @@ def counts(root: Path, found: list[dict], views: dict | None = None, now: dateti
     the YouTube states of every video and Short (addendum C2). views: see _views."""
     out = {}
     for name in _registry():
+        if name == 'youtube':            # its own strip below (ready / uploaded / scheduled / public) says more
+            continue
         try:
             q = publish.queue(root, name, now, v=(views or {}).get(name))
         except Exception as e:
@@ -1412,7 +1414,13 @@ def _dev_setup(root, fixtures: bool) -> None:
             sys.exit(f'--root {root} is not a folder.')
     fake = (F.fake_platform(root) if root is not None else
             platform_fake.FakePlatform([], records=guard.WORK / 'fake-records.json'))
-    publish.set_registry({fake.name: fake})
+    reg = {fake.name: fake}
+    if root is not None:
+        try:
+            reg['youtube'] = F.fake_youtube_platform(root)
+        except Exception as e:                       # the dev page still works with Instagram alone
+            _say('fake YouTube not made', e)
+    publish.set_registry(reg)
     Handler.access, Handler.dev, Handler.root = None, True, root
     Handler.youtube = F.fake_youtube_api(F.YT_VIDEOS, F.YT_CHANNEL)
 

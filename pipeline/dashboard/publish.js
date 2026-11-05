@@ -10,11 +10,28 @@ const WAIT = {}, MEM = {}, IST = ' (Istanbul time)';
 
 const live = (j) => /^(queued|running)$/.test(j?.state);
 const up1 = (s) => s[0].toUpperCase() + s.slice(1);
+const ICON = { instagram: 'ig', youtube: 'yt' };
+const VB = () => (/^[a-z]{2,12}$/.test(D?.verb || '') ? D.verb : 'post'), Vb = () => up1(VB()); // 'post' / 'upload'
+const done = () => `${VB()}ed`.replace(/ee?d$/, 'ed');                                            // 'posted' / 'uploaded'
+const wide = (it) => P === 'youtube' && !it.part;                                                 // a lesson video: 16:9 thumbnail
 const stem = (k) => String(k || '').split('/').pop().replace(/\.\w+$/, '');
 const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const line = (it) => [it.lesson, it.part ? `Short ${it.part}` : 'Lesson video', len(it.seconds)].filter(Boolean).join(' · ');
 const pic = (it) => /^\/api\/cover\/\w+\/\w+\.jpg$/.test(it.cover);
 const cover = (it, c) => (pic(it) ? Object.assign(el('img', c), { alt: '', loading: 'lazy', src: it.cover }) : el('div', c));
+function switcher(d) { // one link per platform when there is more than one (Instagram · YouTube)
+  const ps = (d.platforms || []).filter((x) => /^[a-z]{2,20}$/.test(x.name));
+  if (ps.length < 2) return '';
+  const nav = el('div', 'chips seg');
+  nav.setAttribute('role', 'tablist');
+  for (const x of ps) {
+    const a = Object.assign(el('a', `chip${x.name === P ? ' on' : ''}`, x.label || x.name), { href: `#publish/${x.name}` });
+    a.setAttribute('role', 'tab');
+    a.setAttribute('aria-selected', String(x.name === P));
+    nav.append(a);
+  }
+  return nav;
+}
 const checking = () => `This ${N}'s last post was interrupted. Check it first.`;
 const reload = () => go(`#publish/${P}`);
 const toPost = (it) => (e) => { e.currentTarget.disabled = true; go(`#publish/${P}/post/${it.id}`); };
@@ -175,21 +192,22 @@ function draw() {
     if (items.length || k === 'waiting') out.push(s);
     return s;
   };
-  h.append(icon(P === 'instagram' ? 'ig' : 'publish'), `${L} ${N}s`);
-  if (!d.set_up) out.push(el('div', 'panel ring-red', `${L} is not set up on this PC (instagram.py system-token).`));
+  h.append(icon(ICON[P] || 'publish'), `${L} ${N}s`);
+  out.unshift(switcher(d));
+  if (!d.set_up) out.push(el('div', 'panel ring-red', `${L} is not set up on this PC${d.setup_hint ? ` (${d.setup_hint})` : ''}.`));
   out.push(statusCard(d), (JB = el('div')));
   JB.setAttribute('aria-live', 'polite');
   for (const j of d.unresolved || (/^(interrupted|unknown)$/.test(d.job?.state) ? [d.job] : [])) out.push(unresolved(j));
-  out.push(countStrip(`${N}s`, null, [box('Waiting', 'waiting', 'yellow'), box('Skipped', 'skipped'), box('Failed', 'failed', c.failed > 0 && 'red'), box('Posted', 'posted')]));
+  out.push(countStrip(`${N}s`, null, [box('Waiting', 'waiting', 'yellow'), box('Skipped', 'skipped'), box('Failed', 'failed', c.failed > 0 && 'red'), box(up1(done()), 'posted')]));
   for (const t of [(c.by_lesson || []).map((x) => `${x.lesson} ${x.waiting}`).join(' · '), fc.runway_text && fc.runway_text + (fc.assumes_on ? (d.auto.effective ? ' (once automatic posting runs again)' : ' (if automatic posting were on)') : ''), beyond(fc),
     pr.length && `${many(pr.length, 'lesson')} could not be read: ${pr.map((x) => `${x.lesson}: ${x.error}`).join('; ')}`]) if (t) out.push(el('p', 'note', t));
-  const ws = list('waiting', 'Waiting', W, (it) => card(it, Object.assign(btn('Post', 'small primary', toPost(it)), { ariaLabel: `Post ${it.title || it.file}` })),
+  const ws = list('waiting', 'Waiting', W, (it) => card(it, Object.assign(btn(Vb(), 'small primary', toPost(it)), { ariaLabel: `${Vb()} ${it.title || it.file}` })),
     W.some((i) => i.top) && btn('Reset order', 'small', () => op('reset_order')));
   if (!W.length) ws.append(el('div', 'panel empty', `Nothing waiting. New ${N}s appear here when a lesson is finished.`));
   list('failed', 'Failed', q.failed || [], (it) => (it.state === 'checking' ? card(it, 0, el('div', 'err', checking()))
     : card(it, btn('Try again', 'small', () => op('clear_failed', it)), el('div', 'err', `${it.failed?.reason || 'Failed'}${it.failed?.at ? ` (${fmt(it.failed.at)})` : ''}`))));
   list('skipped', 'Skipped', q.skipped || [], (it) => card(it, btn('Unskip', 'small', () => op('unskip', it))));
-  const pl = list('posted', 'Posted', all ? PO : PO.slice(0, 3), (it) => {
+  const pl = list('posted', up1(done()), all ? PO : PO.slice(0, 3), (it) => {
     const p = it.posted || {};
     return card(it, https(p.url) && ext('open', p.url), el('div', 'meta', [fmt(p.at), p.likes != null && many(p.likes, 'like'), p.comments != null && many(p.comments, 'comment')].filter(Boolean).join(' · ')));
   });
@@ -249,17 +267,17 @@ function itemSheet(it) {
     const cp = btn('Copy caption', null, () => copyCap(pv.caption, s), 'copy'), sv = Object.assign(el('a', 'btn', 'Save cover'), { href: `${it.cover}?download=1`, download: '' });
     let pv;
     s.title.textContent = it.title || it.file;
-    if (pic(it)) s.body.append(cover(it, 'cover-lg'));
+    if (pic(it)) s.body.append(cover(it, wide(it) ? 'cover-wide' : 'cover-lg'));
     s.body.append(el('p', 'muted', line(it)), st);
     if (it.state === 'checking') st.before(el('p', 'err', checking()));
-    else st.append(btn('Post now', 'primary', toPost(it), 'publish'));
+    else st.append(btn(`${Vb()} now`, 'primary', toPost(it), 'publish'));
     if (w) st.append(btn(it.top ? 'Back to normal order' : 'Move to top', null, () => op(it.top ? 'untop' : 'top', it), 'up'));
     if (w || it.state === 'skipped') st.append(btn(w ? `Skip this ${N}` : 'Unskip', null, () => op(w ? 'skip' : 'unskip', it)));
     e.disabled = cp.disabled = true;
     sv.prepend(icon('download'));
     st.append(e, cp, pic(it) ? sv : '');
     if (it.state === 'failed') st.append(btn('Try again', null, () => op('clear_failed', it), 'refresh'));
-    if (it.state !== 'checking') st.append(btn('Mark as posted…', null, () => markSheet(it), 'check'));
+    if (it.state !== 'checking') st.append(btn(`Mark as ${done()}…`, null, () => markSheet(it), 'check'));
     api(`/api/preview?platform=${P}&id=${it.id}`).then((r) => { pv = r; e.disabled = cp.disabled = false; }, (x) => s.body.append(el('p', 'err', x.message)));
   });
 }
@@ -271,15 +289,15 @@ function markSheet(it) { // F5 (P1): a Reel posted by hand in the app: a tick, a
       f.append(el('label', null, x), i);
       return [f, i];
     }), err = el('div', 'field-err');
-    const [tl, tb] = tickBox(`Yes, I posted it by hand on ${L}`), ok = btn('Mark as posted', 'primary', async () => {
+    const [tl, tb] = tickBox(`Yes, I ${done()} it by hand on ${L}`), ok = btn(`Mark as ${done()}`, 'primary', async () => {
       const r = await op('mark_posted', it, { permalink: u.value.trim(), at: t.value ? `${t.value}:00+03:00` : null }, 1);
       if (r?.status === 422) err.textContent = r.json.message;
     });
     t.value = new Date(Date.now() + 108e5).toISOString().slice(0, 16);
     ok.disabled = true;
     tb.onchange = () => { ok.disabled = !tb.checked; };
-    s.title.textContent = 'Mark as posted';
-    s.body.append(el('p', null, `Only for a ${N} already on ${L} (posted by hand in the app). The PC will not post it again.`), el('div', 'title', it.title || it.file),
+    s.title.textContent = `Mark as ${done()}`;
+    s.body.append(el('p', null, `Only for a ${N} already on ${L} (${done()} by hand in the app). The PC will not ${VB()} it again.`), el('div', 'title', it.title || it.file),
       uf, tf, err, tl);
     s.foot.append(btn('Cancel', null, () => s.close()), ok);
   });
@@ -319,7 +337,7 @@ function capSheet(it, pv) {
 
 function postSheet(id) { // spec 9.4; S10: warns post only with the tick, which sends them as override
   const st = {}, lim = {}, s = openSheet((s) => {
-    s.title.textContent = `Post on ${L}`;
+    s.title.textContent = `${Vb()} on ${L}`;
     s.body.append(el('p', 'loading', 'Loading…'));
   });
   let ta, rules, tL, tick, msg, send;
@@ -334,17 +352,18 @@ function postSheet(id) { // spec 9.4; S10: warns post only with the tick, which 
   function show(pv) {
     const it = pv.item || {}, out = [], cb = capBlock(id, pv.caption, pv.default_caption, Object.assign(lim, LIM, pv.caption_limits), () => check());
     Object.assign(st, { pv, extra: [], stop: 0 });
-    if (pic(it)) {
+    if (pic(it) && P !== 'instagram') out.push(cover(it, wide(it) ? 'cover-wide' : 'cover-lg'));
+    else if (pic(it)) {
       const f = el('div', 'cover-916'), [l, b] = tickBox('Show the profile grid crop (3:4)');
       f.append(cover(it), el('div', 'crop'));
       b.onchange = () => f.classList.toggle('show-crop', b.checked);
       out.push(f, l);
     }
-    [ta, [tL, tick]] = [cb.ta, tickBox('I understand, post anyway')];
+    [ta, [tL, tick]] = [cb.ta, tickBox(`I understand, ${VB()} anyway`)];
     tick.onchange = check;
     // F15: the rules first and the tick beside the button, so the reason the button is off is on the first screen
     s.body.replaceChildren((rules = el('div', 'rules')), (msg = el('p')), ...out, el('div', 'title', it.title || it.file), el('p', 'muted small', line(it)), ...cb.nodes);
-    s.foot.replaceChildren(tL, btn('Cancel', null, () => s.close()), (send = btn(`Post on ${L} now`, 'primary', fire)));
+    s.foot.replaceChildren(tL, btn('Cancel', null, () => s.close()), (send = btn(`${Vb()} on ${L} now`, 'primary', fire)));
     check();
   }
 
@@ -386,7 +405,7 @@ function postSheet(id) { // spec 9.4; S10: warns post only with the tick, which 
     t.append(since(j));
     s.body.setAttribute('aria-live', 'polite');
     s.body.replaceChildren(el('div', 'title', j.title || stem(j.key)), ol, t, ...(on ? [el('p', 'job-line', j.result),
-      gone ? el('p', 'err', LOST) : el('p', 'note', 'Takes 1–3 minutes. You can close this; it keeps going on the PC.')] : [result(j)]));
+      gone ? el('p', 'err', LOST) : el('p', 'note', `${P === 'youtube' ? 'Takes a few minutes (the upload, then YouTube’s processing)' : 'Takes 1–3 minutes'}. You can close this; it keeps going on the PC.`)] : [result(j)]));
     s.foot.replaceChildren(btn(on ? 'Close' : 'Done', !on && 'primary', () => s.close()));
   }
 }

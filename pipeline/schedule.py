@@ -12,7 +12,8 @@ WORK = paths.WORK
 SETTINGS = WORK / 'publishing.json'
 ISTANBUL = paths.ISTANBUL
 DAYS = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
-KNOWN = ('instagram',)                                   # platforms that may have settings (= publish.PLATFORMS)
+KNOWN = ('instagram', 'youtube')                         # platforms that may have settings (= publish.PLATFORMS)
+V1 = ('instagram',)            # posted automatically before publishing.json existed: the first file keeps that
 FIELDS = ('auto', 'every_days', 'days', 'post_after', 'post_before', 'min_gap_hours', 'hard_cap_24h', 'start_date')
 DEFAULTS = {'auto': False, 'every_days': 1, 'days': list(DAYS), 'post_after': '20:00', 'post_before': '23:59',
             'min_gap_hours': 20, 'hard_cap_24h': 3, 'start_date': None}
@@ -366,7 +367,7 @@ def _migrate(path: Path, root: Path | None) -> bool:
     now = datetime.now(timezone.utc)
     doc = {'version': 1, 'rev': 1, 'updated': iso(now), 'updated_by': 'migration',
            'platforms': {p: {**_defaults(), 'auto': not pause_file(p).exists(), 'start_date': _channel_start(root, p)}
-                         for p in KNOWN}}
+                         if p in V1 else _defaults() for p in KNOWN}}          # a newer platform starts off
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _temp(path, doc)
     try:

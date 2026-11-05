@@ -413,6 +413,34 @@ def fake_platform(root: Path) -> 'platform_fake.FakePlatform':
     return fake
 
 
+def youtube_items(root: Path) -> list[dict]:
+    """The YouTube upload candidates of a fixture root (platform_youtube's own scan) as FakePlatform items, with
+    the record each one has in youtube-applied.json ('applied': None when not uploaded)."""
+    import platform_youtube as PY
+    items, _ = PY.YouTubePlatform(client=object()).candidates(Path(root))
+    yp = PY.YouTubePlatform(client=object())
+    return [{'key': i.key, 'lesson': i.lesson, 'out': i.out, 'file': i.file, 'part': i.part, 'title': i.title,
+             'seconds': i.seconds, 'rank': i.rank, 'entry': i.entry, 'cover': yp.cover(i), 'applied': i.posted}
+            for i in items]
+
+
+def fake_youtube_platform(root: Path) -> 'platform_fake.FakePlatform':
+    """A FakePlatform named 'youtube' (verb 'upload', breaker 'google') over youtube_items(root); the videos
+    already on YouTube in the fixture records start posted. Records in guard.WORK/fake-youtube-records.json."""
+    import platform_fake
+    import platform_youtube as PY
+    items = youtube_items(root)
+    fake = platform_fake.FakePlatform(items, name='youtube', label='YouTube', noun='video', breaker='google',
+                                      records=guard.WORK / 'fake-youtube-records.json', root=Path(root))
+    fake.verb, fake.setup_hint, fake.account_url = 'upload', 'youtube.py login', 'https://www.youtube.com/@example'
+    fake.link_re, fake.link_hint = PY.YouTubePlatform.link_re, PY.YouTubePlatform.link_hint
+    got, _ = fake.candidates(root)
+    for item, d in zip(sorted(got, key=lambda i: i.key), sorted(items, key=lambda d: d['key'])):
+        if d['applied'] and not item.posted:
+            fake.write_record(item, d['applied'])
+    return fake
+
+
 def fake_youtube_api(videos: dict[str, dict], channel: dict | None) -> object:
     """An object with .videos().list(**kw).execute() and .channels().list(**kw).execute(), like the YouTube
     client, answering from videos and channel. channel None makes every call raise an error whose text

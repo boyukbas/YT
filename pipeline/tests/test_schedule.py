@@ -25,7 +25,9 @@ SPEC_EXAMPLE = {                                         # the document of spec 
     'version': 1, 'rev': 1, 'updated': '2026-11-05T07:12:00Z', 'updated_by': 'migration',
     'platforms': {'instagram': {'auto': False, 'every_days': 1, 'days': ALL_DAYS, 'post_after': '20:00',
                                 'post_before': '23:59', 'min_gap_hours': 20, 'hard_cap_24h': 3,
-                                'start_date': '2026-11-03'}}}
+                                'start_date': '2026-11-03'},
+                  'youtube': {'auto': False, 'every_days': 1, 'days': ALL_DAYS, 'post_after': '20:00',     # a newer
+                              'post_before': '23:59', 'min_gap_hours': 20, 'hard_cap_24h': 3, 'start_date': None}}}
 
 
 def T(s):
@@ -46,7 +48,7 @@ def cfg(**change):
 def doc(rev=1, **instagram):
     """A valid publishing.json with these Instagram settings."""
     return {'version': 1, 'rev': rev, 'updated': '2026-11-05T07:12:00Z', 'updated_by': 'migration',
-            'platforms': {'instagram': cfg(**instagram)}}
+            'platforms': {'instagram': cfg(**instagram), 'youtube': cfg()}}
 
 
 class Case(unittest.TestCase):
@@ -223,7 +225,7 @@ class EffectiveTable(Case):
                 self.assertEqual(S.effective_auto(loaded, 'instagram'), want)
                 self.assertEqual(bool(loaded.problems), want[1] == 'invalid')
                 if want[1] == 'invalid':                 # every auto False when invalid
-                    self.assertEqual(loaded.doc['platforms'], {'instagram': cfg()})
+                    self.assertEqual(loaded.doc['platforms'], {'instagram': cfg(), 'youtube': cfg()})
                     self.assertEqual(S.platform_settings(loaded, 'instagram'), cfg())
 
     def test_unreadable_file_means_off(self):
@@ -487,7 +489,7 @@ class InvalidFileKept(Case):
                 loaded = S.load_settings(self.root)
                 self.assertTrue(loaded.problems)
                 self.assertFalse(loaded.migrated)
-                self.assertEqual(loaded.doc['platforms'], {'instagram': cfg()})
+                self.assertEqual(loaded.doc['platforms'], {'instagram': cfg(), 'youtube': cfg()})
                 self.assertEqual(S.effective_auto(loaded, 'instagram'), (False, 'invalid'))
                 for dry in (False, True):
                     with self.assertRaises(S.InvalidFile) as e:
@@ -513,7 +515,7 @@ class InvalidFileKept(Case):
     def test_reset_replaces_it(self):
         self.put({**doc(rev=7, auto=True), 'version': 2})
         out = S.reset_settings('dev@localhost', ['reset_settings'])
-        self.assertEqual((out['rev'], out['updated_by'], out['platforms']), (8, 'dev@localhost', {'instagram': cfg()}))
+        self.assertEqual((out['rev'], out['updated_by'], out['platforms']), (8, 'dev@localhost', {'instagram': cfg(), 'youtube': cfg()}))
         self.assertEqual(self.saved(), out)
         loaded = S.load_settings()
         self.assertEqual(loaded.problems, [])
@@ -539,14 +541,14 @@ class ValidFiles(Case):
         loaded = S.load_settings()
         self.assertEqual(loaded.problems, [])
         self.assertNotIn('note', loaded.doc)
-        self.assertEqual(list(loaded.doc['platforms']), ['instagram'])
+        self.assertEqual(list(loaded.doc['platforms']), ['instagram', 'youtube'])
         S.save_settings('instagram', {}, 1, 'dev@localhost')
         self.assertNotIn('note', self.saved())
-        self.assertEqual(list(self.saved()['platforms']), ['instagram'])
+        self.assertEqual(list(self.saved()['platforms']), ['instagram', 'youtube'])
 
     def test_missing_platform_and_fields_get_defaults(self):
         self.put({**doc(), 'platforms': {}})
-        self.assertEqual(S.load_settings().doc['platforms'], {'instagram': cfg()})
+        self.assertEqual(S.load_settings().doc['platforms'], {'instagram': cfg(), 'youtube': cfg()})
         self.put({**doc(), 'platforms': {'instagram': {'auto': True, 'days': ['fri', 'mon']}}})
         loaded = S.load_settings()
         self.assertEqual(loaded.problems, [])
@@ -1023,7 +1025,7 @@ class Module(Case):
         self.assertEqual(S.DEFAULTS, cfg())
         self.assertEqual(tuple(S.DEFAULTS), S.FIELDS)
         self.assertEqual(S.DAYS, tuple(ALL_DAYS))
-        self.assertEqual((S.KNOWN, S.SEARCH_DAYS), (('instagram',), 15))
+        self.assertEqual((S.KNOWN, S.SEARCH_DAYS), (('instagram', 'youtube'), 15))
         self.assertEqual(S.ACKS, ('auto_on', 'gap_under_20', 'resume_auto', 'reset_settings'))
         self.assertEqual(list(S.PRESETS), ['every_evening', 'every_other_day', 'weekdays', 'mon_wed_fri'])
         for p in S.PRESETS.values():

@@ -1441,7 +1441,7 @@ class StateBodies(Case):
     """state(), next_run(), attention() and activity() on the fixtures (spec 8.3, 9.2)."""
     def test_state(self):
         st = P.state(self.root, IG, now=self.now)
-        self.assertEqual(set(st), {'platform', 'label', 'noun', 'set_up', 'account_url', 'now', 'settings', 'settings_rev',
+        self.assertEqual(set(st), {'platform', 'label', 'noun', 'verb', 'setup_hint', 'platforms', 'set_up', 'account_url', 'now', 'settings', 'settings_rev',
                                    'settings_problems', 'presets', 'auto', 'breaker', 'last_post', 'posts_24h',
                                    'next_possible', 'counts', 'forecast', 'job', 'unresolved', 'queue'})
         self.assertEqual((st['account_url'], st['now'], st['posts_24h'], st['next_possible'], st['job']),

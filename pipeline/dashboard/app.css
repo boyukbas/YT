@@ -145,6 +145,8 @@ dialog.sheet::backdrop{background:rgba(5,8,14,.66)}
 .sheet-foot>.tick{flex-basis:100%;min-height:36px}
 .cover-lg,.cover-916{display:block;aspect-ratio:9 / 16;margin:4px auto 12px;border-radius:12px;background:var(--deep)}
 .cover-lg{width:min(56%,220px);object-fit:cover}
+.cover-wide{display:block;width:100%;max-width:420px;aspect-ratio:16 / 9;margin:4px auto 12px;border-radius:12px;background:var(--deep);object-fit:cover}
+.seg{margin-bottom:10px}.seg .chip{font-size:13px;padding:6px 14px;text-decoration:none;color:inherit}.seg .chip.on{background:var(--yellow);color:var(--ink)}
 .cover-916{position:relative;width:min(62%,240px);overflow:hidden}
 .cover-916 img{display:block;width:100%;height:100%;object-fit:cover}
 .crop{display:none;position:absolute;left:0;right:0;top:12.5%;height:75%;outline:2px solid var(--yellow);outline-offset:-2px;box-shadow:0 0 0 999px rgba(5,8,14,.6)}

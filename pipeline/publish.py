@@ -17,7 +17,8 @@ from schedule import Check, Post
 WORK = paths.WORK
 DB = WORK / 'publish.db'
 LOCK = WORK / 'instagram-posting.lock'          # one lock for every platform (v1 name kept)
-PLATFORMS = ('instagram',)                      # UI order; platform_<name>.make() for each
+PLATFORMS = ('instagram', 'youtube')           # UI order; platform_<name>.make() for each
+LABELS = {'instagram': 'Instagram', 'youtube': 'YouTube'}     # names shown when a platform module does not load
 STAGES = ('preparing', 'sharing', 'processing', 'publishing', 'saving')
 KINDS = ('auth', 'permission', 'rate', 'content', 'transient', 'local', 'unknown')
 LOCK_BEAT, LOCK_STALE, LOCK_STALE_V1, LOCK_HARD = 30, 300, 1800, 3600       # seconds
@@ -88,6 +89,10 @@ class Platform:
     name: str = ''                 # 'instagram'
     label: str = ''                # 'Instagram'
     noun: str = 'post'             # 'Reel'
+    verb: str = 'post'             # what the page's button says: 'post' (Instagram), 'upload' (YouTube)
+    setup_hint: str = ''           # the command that sets the platform up on the PC ('instagram.py system-token')
+    link_re = None                 # a valid link to one post (mark_posted); None: an Instagram link
+    link_hint: str = ''            # the message for a wrong link
     breaker: str = ''              # shared by one company's platforms: 'meta'
     caption_max: int = 2200        # UTF-16 code units
     tags_max: int = 30             # platform limit (block)
@@ -274,7 +279,7 @@ class Busy(PublishError):
     """The PostLock is held by someone else (409 'busy')."""
     def __init__(self, holder: dict | None = None):
         self.holder = holder
-        super().__init__(409, 'busy', 'A Reel is being posted right now.', job=_job_or_none((holder or {}).get('job')))
+        super().__init__(409, 'busy', 'Another post is going out right now.', job=_job_or_none((holder or {}).get('job')))
 
 
 # ---------- time, database, text ----------
@@ -576,9 +581,9 @@ def _result(stage: str, platform_name: str) -> str:
 
 def _label(platform_name: str) -> str:
     try:
-        return registry()[platform_name].label or platform_name.title()
+        return registry()[platform_name].label or LABELS.get(platform_name, platform_name.title())
     except Exception:
-        return str(platform_name).title()
+        return LABELS.get(platform_name, str(platform_name).title())
 
 
 # ---------- platforms ----------
@@ -1419,8 +1424,8 @@ def _mark_posted(v: _View, item: Item, rev: int, by: str, permalink, at) -> dict
     """queue_op 'mark_posted' (P1): a hand record for a Reel posted in the app, written under the PostLock."""
     p = v.p
     permalink = (permalink or '').strip() if isinstance(permalink, str) or permalink is None else None
-    if permalink is None or (permalink and not _PERMALINK.match(permalink)):
-        raise PublishError(422, 'bad_op', 'Use a link like https://www.instagram.com/reel/…/, or leave it empty.')
+    if permalink is None or (permalink and not (p.link_re or _PERMALINK).match(permalink)):
+        raise PublishError(422, 'bad_op', p.link_hint or 'Use a link like https://www.instagram.com/reel/…/, or leave it empty.')
     t = _time(at) if at else v.now
     if t is None or not v.now - timedelta(days=30) <= t <= v.now + timedelta(minutes=5):
         raise PublishError(422, 'bad_op', 'Use a time in the last 30 days.')
@@ -2761,7 +2766,8 @@ def state(root: Path, platform_name: str, now: datetime | None = None, with_queu
     for i in wait:
         lessons[i.lesson] = lessons.get(i.lesson, 0) + 1
     counts['by_lesson'] = [{'lesson': k, 'waiting': n} for k, n in lessons.items()]
-    body = {'platform': p.name, 'label': p.label, 'noun': p.noun, 'set_up': p.set_up(),
+    body = {'platform': p.name, 'label': p.label, 'noun': p.noun, 'verb': p.verb, 'setup_hint': p.setup_hint,
+            'platforms': [{'name': n, 'label': x.label} for n, x in registry().items()], 'set_up': p.set_up(),
             'account_url': p.account_url or None, 'now': S.iso(now),
             'settings': v.cfg, 'settings_rev': v.loaded.doc.get('rev'), 'settings_problems': list(v.loaded.problems),
             'presets': [{'id': k, 'label': d['label'], 'values': {f: x for f, x in d.items() if f != 'label'}}

@@ -114,12 +114,13 @@ looped images from the Drive mount `J:` (it stalls) — the pipeline renders fro
 - **Idea: horizontal videos as they are + a "turn your phone" animation** (a phone rotating, 1-2 s) at the start, instead
   of cropping. Caveats: YouTube counts only vertical/square ≤ 3 min as a Short (a horizontal one is a normal video), and
   Reels show a horizontal video small between bars, so it fits the long video best. Not started.
-- **Automatic YouTube upload is possible now:** Google lifted the "unverified API project → locked private" rule on
-  2026-11-02 (Data API revision history; videos.insert: own quota bucket, 100 uploads/day, 1 unit). Plan: a
-  `platform_youtube.py` on publish.py (lock/journal = no double upload), upload private + `publishAt` from
-  `youtube.next_slot` (keeps 19:00 / 3 h / one-a-day), then `youtube.apply` as today without length matching. Check first:
-  the OAuth consent screen must be "In production" (Testing = refresh token dies after 7 days); one unlisted test upload.
-  Nothing goes public without the owner's OK (the dashboard would show "uploaded, scheduled for ..." with Cancel).
+- **YouTube uploads by the PC (done 2026-11-05, auto OFF at the deploy):** `platform_youtube.py` on publish.py
+  (verb 'upload', breaker 'google'): sharing = find an existing upload of the file (record, else `youtube.find_upload`)
+  or a resumable private upload; processing = record id at once (`publish_pending`), `youtube.apply_video` details, wait
+  for processing (≤ 15 min); publishing = `make_public`. Dashboard: Publish has an Instagram/YouTube switch; "Upload"
+  button with the same warnings + override tick; automatic uploads use the same settings window as Instagram.
+  `easy.youtube_step` skips while a YouTube job is queued/running. Owner to check: OAuth consent screen
+  "In production" (Testing = refresh token dies after 7 days); the first real upload is the owner's.
 - **Platforms (research 2026-11-05):** Threads = worth it (official API, video, same Meta business; back in Turkey since
   2026-06-17; needs the Threads use case on a Meta app, go slowly with logins); TikTok = by hand / TikTok Studio only
   (its API posts SELF_ONLY until audited, and audits refuse own-account tools); X = maybe later (pay per use:
