@@ -95,27 +95,32 @@ class Spec:
         return ((box[0] - cx) * sx + px, (box[1] - cy) * sy + py, (box[2] - cx) * sx + px, (box[3] - cy) * sy + py)
 
 
-STUDIO_CROP = 0.78        # share of the recording's height shown: her face ~28 % bigger than the whole frame
+STUDIO_CROP = 1.0         # share of the recording's height shown (0.78 until 2026-11-05: her face 28 % bigger)
+STUDIO_HEIGHT = 0.62      # the card's height on the 1080 px canvas, centred (0.926 until 2026-11-05; the owner
+                          # chose her face at about half that size: option F of the size previews)
 STUDIO_CARD = (0.72, 0.9)  # card width / height from a horizontal recording: the vertical card's shape, up to wider
 STUDIO_ROOM = 1.0          # face widths of room on each side of where her face goes (hair, shoulders, gestures)
 
 
-def studio(name, src_w, src_h, faces=()):
+def studio(name, src_w, src_h, faces=(), crop=None, height=None):
     """Long video in the studio layout: 16:9 canvas on the animated channel background, her picture as a card on
     the left, a panel on the right for the section header, word cards and subtitles (text never touches her).
-    The card shows the upper STUDIO_CROP of the frame around her face, so she isn't tiny on a TV or desktop.
+    The card shows STUDIO_CROP of the frame's height around her face, STUDIO_HEIGHT of the canvas high.
     A horizontal recording gets a card cut around her: the vertical card's shape, made wider (up to STUDIO_CARD[1])
-    when her face moves around, so it stays inside with STUDIO_ROOM face widths to spare."""
+    when her face moves around, so it stays inside with STUDIO_ROOM face widths to spare.
+    crop / height: STUDIO_CROP / STUDIO_HEIGHT for this video (channel.json "studio_size", easy.studio_size)."""
     W, H = 1920, 1080
-    ch = int(src_h * STUDIO_CROP)
+    crop, height = crop or STUDIO_CROP, height or STUDIO_HEIGHT
+    ch = int(src_h * crop)
     fy = sorted((f[1] + f[3]) / 2 for f in faces if f)
     cy = min(max(0, (fy[len(fy) // 2] if fy else 0.32 * src_h) - 0.32 * ch), src_h - ch)
     cx, cw = 0, src_w
     if src_w > src_h:
         cx, cw = _studio_columns(src_w, ch, faces)
-    ph = int(0.926 * H)
+    ph = int(height * H)
     pw = int(ph * cw / ch)
-    s = Spec(name, W, H, False, src_w, src_h, crop=(cx, cy, cw, ch), pic=(110, (H - ph) // 2, pw, ph))
+    top = min((H - ph) // 2, int(0.055 * H))             # level with the section header: room below for word cards
+    s = Spec(name, W, H, False, src_w, src_h, crop=(cx, cy, cw, ch), pic=(110, top, pw, ph))
     s.studio = True
     s.panel = (110 + pw + 90, W - 70)                    # x range of the text panel
     s.margin_l, s.margin_r = s.panel[0], W - s.panel[1]

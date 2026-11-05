@@ -68,10 +68,18 @@ def plan_zoom(segs, frame, size, logo, banner):
 def use_studio(profile, settings, landscape):
     """The long video in the studio layout? The lesson's settings.json {"studio": true/false} decides; else
     channel.json: "studio" for vertical recordings (on unless set false), "studio_landscape" for horizontal ones
-    (off unless set true: new 2026-11-05, the owner switches it on after seeing a test)."""
+    (on unless set false: the default for every long video since 2026-11-05, the owner's choice)."""
     if 'studio' in settings:
         return bool(settings['studio'])
-    return bool(profile.get('studio_landscape', False)) if landscape else bool(profile.get('studio', True))
+    return bool(profile.get('studio_landscape', True)) if landscape else bool(profile.get('studio', True))
+
+
+def studio_size(profile):
+    """(crop, height) for layout.studio from channel.json "studio_size": {"crop": share of the recording's height
+    shown, "height": the card's share of the canvas height}; None = layout's default. Out-of-range values are ignored."""
+    size = profile.get('studio_size') if isinstance(profile.get('studio_size'), dict) else {}
+    ok = lambda v, lo, hi: float(v) if isinstance(v, (int, float)) and lo <= v <= hi else None
+    return ok(size.get('crop'), 0.5, 1.0), ok(size.get('height'), 0.5, 0.95)
 
 
 def cover_logo(logo, zooms):
@@ -241,7 +249,7 @@ def process(lesson, root, log_only=False):
             cx = min(max(0, fx - side / 2), src[0] - side)
             spec = L.Spec(vname, 1080, 1920, short=True, src_w=src[0], src_h=src[1], crop=(cx, 0, side, side), pic=(0, 200, 1080, 1080))
         elif not is_short and use_studio(profile, settings, landscape):           # long video
-            spec = L.studio(vname, *src, faces)
+            spec = L.studio(vname, *src, faces, *studio_size(profile))
         else:
             spec = L.Spec(vname, *src, short=is_short, src_w=src[0], src_h=src[1])
         visible = bool(src_logo) and spec.crop[0] <= src_logo[0] and src_logo[2] <= spec.crop[0] + spec.crop[2]
@@ -285,7 +293,7 @@ def process(lesson, root, log_only=False):
                 item = {**item, 'e': min((nxt[0] if nxt else total) - 0.2, b0 if banner else total)}
                 xy = (spec.panel[0], int(0.055 * spec.H)) if item['e'] - item['s'] > 1 else None
             else:
-                fit = {'maxw': int(spec.pic[2]) - 48} if spec.studio and kind == 'card' else {}   # cards sit on her picture
+                fit = {'maxw': int(spec.panel[0] - spec.pic[0] - 30)} if spec.studio and kind == 'card' else {}   # her column
                 size = draw(item, profile['palette'], spec.H, png, assets['fonts'], **fit)
                 xy = chips.place(spec, size, item, cues, blks, sides, faces, banner and (banner, b0), taken)
             if xy:

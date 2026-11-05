@@ -74,8 +74,9 @@ def place(spec, size, card, cues, blks, sides, faces, banner, taken=()):
     W, H = spec.W, spec.H
     m = int(0.04 * min(W, H))
     if spec.studio:
-        px, py, pw, ph = spec.pic                       # the panel holds the sentence board: cards go on her picture
-        spots = [(int(px + 24), int(py + ph - h - 0.22 * H)), (int(px + pw - w - 24), int(py + ph - h - 0.22 * H)),
+        px, py, pw, ph = spec.pic                       # the panel holds the sentence board: cards go in her column,
+        spots = [(int(px), int(py + ph + 28)),          # under her picture first, else on it
+                 (int(px + 24), int(py + ph - h - 0.22 * H)), (int(px + pw - w - 24), int(py + ph - h - 0.22 * H)),
                  (int(px + 24), int(py + ph - h - 24))]
     elif spec.short:
         spots = [(m, int(0.40 * H)), (m, int(0.55 * H)), (m, int(0.25 * H)), (W - w - 190, int(0.25 * H))]

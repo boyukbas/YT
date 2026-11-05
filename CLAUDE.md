@@ -115,13 +115,16 @@ looped images from the Drive mount (it stalls) — the pipeline renders from a l
 **Next items, in order:** (1) the owner's first real YouTube upload from the dashboard, and see whether Google keeps it
 locked private (see below); (2) look at the 2 private videos "2 abfahren" (rOf_Wc6WJME) and "3 am oder im Bahnhof"
 (jH5r-IRzkis) — deferred by the owner; (3) Threads as the next platform plug-in (reuse `meta.py`; extend `tests/guard.py`'s Share fake to it); (4) ~~split
-instagram.py~~ done; (5) studio layout for horizontal recordings: built 2026-11-05, OFF until the owner approves the test render;
+instagram.py~~ done; (5) ~~studio layout for horizontal recordings~~ done;
 (6) the "turn your phone" idea.
 - **Studio layout: the owner likes it** (video on one side, a "board" with the lesson's example sentences building up
-  on the other: `layout.studio` + `layout.board`, `channel.json "studio"`). Long videos from *vertical* recordings use it by
-  default. Horizontal recordings (done 2026-11-05): `easy.use_studio`, a card cut around her (`layout._studio_columns`:
-  the vertical card's shape, wider up to 0.9 when her face moves); switched on by `channel.json "studio_landscape": true`
-  or a lesson's `settings.json {"studio": true}`; off by default until the owner approves.
+  on the other: `layout.studio` + `layout.board`). Since 2026-11-05 it is the default for EVERY long video (the owner's
+  choice), vertical and horizontal (`easy.use_studio`; horizontal: a card cut around her, `layout._studio_columns`), and
+  smaller: the owner picked size option F of 7 previews (her face ~52 % of before: `STUDIO_CROP` 1.0 = whole recording
+  height, `STUDIO_HEIGHT` 0.62 = card height on the canvas; per channel `channel.json "studio_size"`). Off per lesson
+  with `settings.json {"studio": false}`. The small card sits level with the section header, and word cards go
+  under it (`chips.place`; on her picture they never fit beside her face). Recordings with a burned-in subscribe
+  banner get it cut by the card.
 - **Idea: horizontal videos as they are + a "turn your phone" animation** (a phone rotating, 1-2 s) at the start, instead
   of cropping. Caveats: YouTube counts only vertical/square ≤ 3 min as a Short (a horizontal one is a normal video), and
   Reels show a horizontal video small between bars, so it fits the long video best. Not started.
