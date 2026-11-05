@@ -12,6 +12,8 @@ import requests
 
 import instagram as IG
 import platform_instagram as PI
+import instagram_content as IGC
+import meta
 import publish as P
 import schedule as S
 import tools
@@ -283,7 +285,7 @@ class RealShare(Case):
         video = guard.WORK / 'share-test.mp4'
         video.write_bytes(b'')
         share = guard.REAL['instagram.Share']([video])
-        with mock.patch.object(IG, 'CLOUDFLARED', guard.TMP / 'no-such-folder' / 'missing-tunnel.exe'):
+        with mock.patch.object(meta, 'CLOUDFLARED', guard.TMP / 'no-such-folder' / 'missing-tunnel.exe'):
             with self.assertRaisesRegex(IG.ShareError, r'could not start \(FileNotFoundError\)') as e:
                 share.__enter__()
         self.assertEqual(IG.classify(e.exception), 'local')
@@ -292,7 +294,7 @@ class RealShare(Case):
 
 
 class Reels(Case):
-    """reels(out, data, probe=...) uses the probe it is given; None means instagram.probe at call time."""
+    """reels(out, data, probe=...) uses the probe it is given; None means instagram_content.probe at call time."""
     def test_probe_injection(self):
         _, out, data = IG.lesson_files(self.root / 'Um etwas bitten')
         seen = []
@@ -304,7 +306,7 @@ class Reels(Case):
         self.assertEqual((f.name, entry['whole'], seen), ('um-etwas-bitten-video.mp4', True, ['um-etwas-bitten-video.mp4']))
         self.assertEqual(IG.reels(out, data, probe=lambda p: probe(p, w=1920, h=1080)), [])        # horizontal
         self.assertEqual(IG.reels(out, data, probe=lambda p: probe(p, seconds=181.0)), [])         # over 3 min
-        with mock.patch.object(IG, 'probe', probe):
+        with mock.patch.object(IGC, 'probe', probe):
             IG.reels(out, data)
         self.assertEqual(len(seen), 4)
         _, out, data = IG.lesson_files(self.root / 'new')
@@ -428,7 +430,7 @@ class WriteRecord(Case):
         before = self.path.read_text(encoding='utf-8')
         def away(*a, **k):
             raise FileNotFoundError(2, 'Drive is away (made up)')
-        with P.PostLock(owner='cli'), contextlib.redirect_stdout(io.StringIO()),                 mock.patch.object(PI, '_read', away), mock.patch.object(IG.os, 'listdir', away),                 mock.patch.object(Path, 'exists', lambda self, *a, **k: False):
+        with P.PostLock(owner='cli'), contextlib.redirect_stdout(io.StringIO()),                 mock.patch.object(PI, '_read', away), mock.patch.object(IGC.os, 'listdir', away),                 mock.patch.object(Path, 'exists', lambda self, *a, **k: False):
             with self.assertRaises(OSError):
                 self.p.write_record(self.item, self.REC)
             with mock.patch.object(Path, 'read_text', away), self.assertRaises(OSError):

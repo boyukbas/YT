@@ -64,7 +64,9 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
    The dashboard caption is the title (first line) + the description. Upload quota: 100 a day (its own bucket).
    Needs the OAuth consent screen "In production" (in Testing the sign-in dies after 7 days).
 
-**Instagram** (`instagram.py`, setup in `instagram-setup.md`): every Short also gets `cover-short-N.jpg` (its own photo +
+**Instagram** (`instagram.py`: key, Graph API calls, posting, commands; `instagram_content.py`: which files are
+Reels, captions, covers, records; `meta.py`: errors and the temporary public link, shared with future Meta
+platforms; setup in `instagram-setup.md`): every Short also gets `cover-short-N.jpg` (its own photo +
 keywords, text inside the 3:4 grid crop) and a caption in `instagram.md`; when automatic posting is on (dashboard >
 Publish > Settings, `publishing.json`; default one a day after 20:00, at least 20 h apart, never more than 3 in 24 h)
 the watcher posts the next waiting Reel; any Reel can also be posted by hand from the dashboard (key: a system user's token from Business settings, `instagram.py system-token`, never expires, used

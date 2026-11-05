@@ -4,7 +4,7 @@
 - Subprocesses named cloudflared or schtasks raise NetworkBlocked.
 - instagram.call, instagram.Share and youtube.api are replaced by fakes that raise NetworkBlocked unless a
   test scripts them.
-- tools.probe (and instagram.probe, dashboard.probe) answer from fixtures.PROBES for files under TMP; any
+- tools.probe (and instagram_content.probe, dashboard.probe) answer from fixtures.PROBES for files under TMP; any
   other path uses the real ffprobe (only the real-data dry run).
 
 Blocked the same way: DNS lookups of other names, binding a socket to a non-loopback address, those programs

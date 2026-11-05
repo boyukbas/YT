@@ -114,8 +114,8 @@ looped images from the Drive mount (it stalls) — the pipeline renders from a l
 ## Easy mode backlog / decisions (pipeline, 2026-11-05)
 **Next items, in order:** (1) the owner's first real YouTube upload from the dashboard, and see whether Google keeps it
 locked private (see below); (2) look at the 2 private videos "2 abfahren" (rOf_Wc6WJME) and "3 am oder im Bahnhof"
-(jH5r-IRzkis) — deferred by the owner; (3) Threads as the next platform plug-in; (4) split instagram.py (API vs
-content); (5) studio layout for horizontal recordings; (6) the "turn your phone" idea.
+(jH5r-IRzkis) — deferred by the owner; (3) Threads as the next platform plug-in (reuse `meta.py`; extend `tests/guard.py`'s Share fake to it); (4) ~~split
+instagram.py~~ done; (5) studio layout for horizontal recordings; (6) the "turn your phone" idea.
 - **Studio layout: the owner likes it** (video on one side, a "board" with the lesson's example sentences building up
   on the other: `layout.studio` + `layout.board`, `channel.json "studio"`). Today it is used only for long videos made
   from *vertical* recordings. Idea: offer it for horizontal recordings too (her picture scaled into the card).
@@ -146,8 +146,10 @@ content); (5) studio layout for horizontal recordings; (6) the "turn your phone"
   (posts.md to copy, posts.json for future plug-ins); the link fills in after the YouTube upload.
 - **Architecture plan** (review 2026-11-05; publish.py's lock/journal/reconcile/breaker must NOT be refactored):
   done 2026-11-05: `paths.py` (WORK, keys folder, Istanbul TZ, output lookup; old names kept as aliases), light
-  `lessons.py` (dashboard/overview no longer import easy.py), tests for `youtube.next_slot`/`wanted`. Left: split
-  instagram.py into API and content parts (keep the names tests patch). With the next platform: platform link patterns / settle hook / optional
+  `lessons.py` (dashboard/overview no longer import easy.py), tests for `youtube.next_slot`/`wanted`. Done 2026-11-05 too:
+  instagram.py split into `meta.py` (Meta errors, classify, answer, Share: for Threads too), `instagram_content.py`
+  (reels, captions, covers, records) and `instagram.py` (key, calls, posting, CLI; re-exports the rest, so
+  `instagram.<name>` still works; tests patch CLOUDFLARED on meta and probe on instagram_content). With the next platform: platform link patterns / settle hook / optional
   `Item.file` in the Platform interface, `schedule.KNOWN` from the registry, stats + page JS driven by the registry,
   a shared candidate scanner; multi-part posts (X threads) need per-part journal state first.
 

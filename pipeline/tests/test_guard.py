@@ -14,6 +14,8 @@ from PIL import Image
 
 from . import fixtures, guard
 import instagram as IG
+import meta
+import instagram_content as IGC
 import tools
 import youtube
 import paths as shared_paths
@@ -233,7 +235,7 @@ class GuardWorks(unittest.TestCase):
         video = guard.WORK / 'share-test.mp4'
         video.write_bytes(b'')
         share = guard.REAL['instagram.Share']([video])
-        with mock.patch.object(IG, 'CLOUDFLARED', Path(NOWHERE) / 'cloudflared.exe'):
+        with mock.patch.object(meta, 'CLOUDFLARED', Path(NOWHERE) / 'cloudflared.exe'):
             try:
                 with self.assertRaises(guard.NetworkBlocked):
                     share.__enter__()
@@ -320,7 +322,7 @@ class GuardWorks(unittest.TestCase):
     def test_install_is_idempotent(self):
         def state():
             return (socket.socket.connect, socket.getaddrinfo, subprocess.Popen.__init__, os.system, tools.probe,
-                    IG.probe, IG.call, guard.TMP, guard.WORK, guard.HOME)
+                    IGC.probe, IG.call, guard.TMP, guard.WORK, guard.HOME)
         before, env = state(), dict(os.environ)
         guard.install()
         for a, b in zip(before, state()):
@@ -335,7 +337,7 @@ class GuardWorks(unittest.TestCase):
         self.assertEqual(set(p), {'duration', 'width', 'height', 'fps', 'hdr', 'transfer', 'audio', 'created'})
         p['duration'] = 1
         self.assertEqual(tools.probe(str(f))['duration'], 30.03)     # answers are copies
-        self.assertIs(IG.probe, guard._probe)
+        self.assertIs(IGC.probe, guard._probe)
         unknown = guard.WORK / 'not-in-probes.mp4'
         unknown.write_bytes(b'')
         with self.assertRaisesRegex(RuntimeError, 'PROBES'):
