@@ -107,6 +107,35 @@ looped images from the Drive mount `J:` (it stalls) — the pipeline renders fro
 - Use real WebM/VP9 test clips in headless Chromium (no H.264 decoder there).
 - Always check exported files with ffprobe/ffmpeg frames, not just UI text.
 
+## Easy mode backlog / decisions (pipeline, 2026-11-05)
+- **Studio layout: the owner likes it** (video on one side, a "board" with the lesson's example sentences building up
+  on the other: `layout.studio` + `layout.board`, `channel.json "studio"`). Today it is used only for long videos made
+  from *vertical* recordings. Idea: offer it for horizontal recordings too (her picture scaled into the card).
+- **Idea: horizontal videos as they are + a "turn your phone" animation** (a phone rotating, 1-2 s) at the start, instead
+  of cropping. Caveats: YouTube counts only vertical/square ≤ 3 min as a Short (a horizontal one is a normal video), and
+  Reels show a horizontal video small between bars, so it fits the long video best. Not started.
+- **Automatic YouTube upload is possible now:** Google lifted the "unverified API project → locked private" rule on
+  2026-11-02 (Data API revision history; videos.insert: own quota bucket, 100 uploads/day, 1 unit). Plan: a
+  `platform_youtube.py` on publish.py (lock/journal = no double upload), upload private + `publishAt` from
+  `youtube.next_slot` (keeps 19:00 / 3 h / one-a-day), then `youtube.apply` as today without length matching. Check first:
+  the OAuth consent screen must be "In production" (Testing = refresh token dies after 7 days); one unlisted test upload.
+  Nothing goes public without the owner's OK (the dashboard would show "uploaded, scheduled for ..." with Cancel).
+- **Platforms (research 2026-11-05):** Threads = worth it (official API, video, same Meta business; back in Turkey since
+  2026-06-17; needs the Threads use case on a Meta app, go slowly with logins); TikTok = by hand / TikTok Studio only
+  (its API posts SELF_ONLY until audited, and audits refuse own-account tools); X = maybe later (pay per use:
+  $0.015 a post, $0.20 with a link; throttled in Turkey at times); LinkedIn, Telegram, own blog = maybe later;
+  Facebook, Pinterest, Bluesky = given up.
+- **Lesson posts (`posts.py`, done 2026-11-05):** blog.md + X thread + Threads post per lesson in `Output/extras/`
+  (posts.md to copy, posts.json for future plug-ins); the link fills in after the YouTube upload.
+- **Architecture plan** (review 2026-11-05; publish.py's lock/journal/reconcile/breaker must NOT be refactored):
+  now: (1) one `paths.py` for WORK / keys folder / Istanbul TZ / output-folder lookup, keep old names as aliases;
+  `review.py` hard-codes `D:\YT\easy-work` (ignores PIPELINE_WORK); (2) light lesson helpers (`output_dir`,
+  `load_profile`, `retry_marker`, ...) into `lessons.py` so dashboard/overview stop importing easy (cv2 + render chain)
+  and two import cycles go; (3) tests for `youtube.next_slot`/`wanted` and review.py; (4) split instagram.py into API
+  and content parts (keep the names tests patch). With the 2nd platform: platform link patterns / settle hook / optional
+  `Item.file` in the Platform interface, `schedule.KNOWN` from the registry, stats + page JS driven by the registry,
+  a shared candidate scanner; multi-part posts (X threads) need per-part journal state first.
+
 ## Backlog / ideas (not done)
 - **Thumbnail maker in the Share tab, in the approved format** (user asked for it, "not now", 2026-10-29).
   Reference: `D:\YT\work\scripts\thumbnail.py` → `D:\YT\V1\output\thumbnail_youtube.jpg`. 1280×720, dark navy

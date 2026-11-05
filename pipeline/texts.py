@@ -147,13 +147,17 @@ def drop_chapters(text):
     return re.sub(r'\n{3,}', '\n\n', text).strip()            # no trailing newline: YouTube drops it (no false diff)
 
 
+def cue_rows(cues):
+    """The final subtitles as prompt lines: time  lang  text  [translation]  (mark)."""
+    return '\n'.join(f'{ts(c["s"])}  {c["lang"]}  {c["text"].replace("<", "").replace(">", "")}' +
+                     (f'  [{c["tr"]}]' if c['lang'] == 'de' and c.get('tr') else '') +
+                     (f'  ({c["mark"]})' if c.get('mark') else '') for c in cues)
+
+
 def build_prompt(profile, lesson, topic, cues, versions, ncand, series=None):
-    rows = [f'{ts(c["s"])}  {c["lang"]}  {c["text"].replace("<", "").replace(">", "")}' +
-            (f'  [{c["tr"]}]' if c['lang'] == 'de' and c.get('tr') else '') +
-            (f'  ({c["mark"]})' if c.get('mark') else '') for c in cues]
     yt = profile['youtube']
     return PROMPT.format(channel=profile['name'], handle=profile.get('handle', ''), lesson=lesson, topic=topic,
-                         versions=versions, hashtags=' '.join(yt.get('hashtags', [])), cues='\n'.join(rows), ncand=ncand,
+                         versions=versions, hashtags=' '.join(yt.get('hashtags', [])), cues=cue_rows(cues), ncand=ncand,
                          series=', '.join(f'{k}: "{v}"' for k, v in (series or {}).items()) or '-',
                          playlists=', '.join(f'"{p}"' for p in yt.get('playlists', [])) or '-')
 

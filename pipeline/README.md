@@ -38,6 +38,9 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
    a 10 s end-screen card ("Sıradaki ders").
 6. **Check**: every subtitle line is checked on the finished video for face overlap; loudness measured; frame sheet.
 7. **YouTube texts + thumbnails** (`texts.py`, `thumbnail.py`, Claude looks at candidate frames).
+   **Lesson posts** (`posts.py`, one more Claude call): `blog.md` (an article with tables, mistakes, exercises),
+   `posts.md` (an X thread + a Threads post to copy, with lengths) and `posts.json`; `{VIDEO}` becomes the YouTube link
+   once the details are applied. A failure here never stops the lesson. Older lessons: `python -I posts.py "<lesson>"`.
 8. **YouTube details** (`youtube.py`): Sinem uploads the finished files in the YouTube app; the watcher finds each upload
    by its length (closest file size when Shorts have the same length) and sets title, description, tags, category,
    languages, audience, paid-promotion/AI answers, thumbnail, TR + DE captions, playlist (existing ones only; Shorts go in

@@ -372,6 +372,12 @@ def process(lesson, root, log_only=False):
         import instagram
         instagram.make_covers(out, data, {c['n']: c['file'] for c in cand}, assets['logo'], profile['palette'], st.log)
         instagram.write_md(lesson, out, data)
+    try:                                       # blog post + X/Threads texts (posts.py): a problem never stops the lesson
+        import posts
+        for n in posts.make(work, x, name, profile, T.cue_rows(cues)):
+            st.log(f'posts: {n}')
+    except Exception as e:
+        st.log(f'posts: not made ({type(e).__name__}: {str(e)[:200]}); later: python -I posts.py "{lesson}"')
     (work / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding='utf-8')
     covered = sum(len(q['face_covered']) for q in report['qa'].values())
     st.set('done', f'{", ".join(f for f in files if f.endswith(".mp4"))}' +
@@ -508,6 +514,12 @@ def youtube_step(lesson):
             r = (f'YouTube step failed: {type(e).__name__}: {e}'[:300], False)
     if r and (r[0] != s.get('youtube') or r[1]):
         st.set('done', s.get('step', ''), youtube=r[0], youtube_complete=r[1])
+    try:                                       # the lesson posts get the video link once it is on YouTube
+        import posts
+        if posts.relink(WORK_ROOT / slug(lesson.name), extras(out), slug(lesson.name)):
+            st.log('posts: video link filled in')
+    except Exception as e:
+        st.log(f'posts: link not filled in ({type(e).__name__}: {str(e)[:200]})')
 
 
 def retry_marker(lesson):
