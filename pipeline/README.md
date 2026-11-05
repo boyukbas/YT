@@ -41,6 +41,12 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
    **Lesson posts** (`posts.py`, one more Claude call): `blog.md` (an article with tables, mistakes, exercises),
    `posts.md` (an X thread + a Threads post to copy, with lengths) and `posts.json`; `{VIDEO}` becomes the YouTube link
    once the details are applied. A failure here never stops the lesson. Older lessons: `python -I posts.py "<lesson>"`.
+   **Folder names** (`lessons.py`, since 2026-11-05): once a lesson is finished, a folder named only `4`, `new`,
+   `yeni`, `New folder (2)`, ... gets a short name from the thumbnail's German words (`4` → `4 Lass uns kennenlernen`),
+   together with its work folder in `D:\YT\easy-work`, under the posting lock (never while a Reel or video goes out).
+   Names Sinem chose herself are never changed. The finished files keep their names (`4-video.mp4`), so records,
+   queue entries and later renders still match. Preview: `python -I lessons.py names "<channel folder>"`; by hand:
+   `python -I lessons.py rename "<lesson>" ["<new name>"]`.
 8. **YouTube details** (`youtube.py`): Sinem uploads the finished files in the YouTube app; the watcher finds each upload
    by its length (closest file size when Shorts have the same length) and sets title, description, tags, category,
    languages, audience, paid-promotion/AI answers, thumbnail, TR + DE captions, playlist (existing ones only; Shorts go in

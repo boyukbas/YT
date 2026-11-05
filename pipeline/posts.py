@@ -11,7 +11,7 @@ details (youtube-applied.json); before that the texts say {VIDEO}. The watcher f
 import json, os, re, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
-import paths
+import lessons, paths
 import llm
 from tools import extras, slug
 
@@ -73,8 +73,10 @@ def cue_block(prompt_file):
 def video_link(x, name):
     """https://youtu.be/<id> of the lesson's main video once youtube.py applied its details, else None."""
     p = Path(x) / 'youtube-applied.json'
-    rec = json.loads(p.read_text(encoding='utf-8')).get(f'{name}-video.mp4', {}) if p.exists() else {}
-    return f'https://youtu.be/{rec["id"]}' if rec.get('id') else None
+    rec = (json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}).get(f'{name}-video.mp4') or {}
+    if not isinstance(rec, dict) or rec.get('id') in (None, '', 'hand'):
+        return None
+    return f'https://youtu.be/{rec["id"]}'
 
 
 def x_length(text):
@@ -168,7 +170,7 @@ def main(argv):
     if len(args) != 1:
         raise SystemExit(__doc__)
     lesson = Path(args[0])
-    name, work = slug(lesson.name), WORK_ROOT / slug(lesson.name)
+    name, work = lessons.file_stem(lesson), WORK_ROOT / slug(lesson.name)
     x = extras(_output(lesson))
     ans = work / 'llm' / 'posts.answer.json'
     if '--link-only' in argv:

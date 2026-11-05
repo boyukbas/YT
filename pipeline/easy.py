@@ -27,7 +27,7 @@ import render as R
 import speech
 import paths
 import texts as T
-from lessons import OURS, lesson_videos, load_profile, local_copy, output_dir, retry_marker   # noqa: F401 (also used as easy.*)
+from lessons import OURS, file_stem, lesson_videos, load_profile, local_copy, output_dir, retry_marker   # noqa: F401 (also used as easy.*)
 import thumbnail
 from tools import HERE, Status, VIDEO_EXT, extras, ffmpeg, probe, run, FFMPEG, slug, ts
 
@@ -151,7 +151,7 @@ def process(lesson, root, log_only=False):
     work.mkdir(parents=True, exist_ok=True)
     st = Status(out, work)
     st.set('working', f'Starting: {len(videos)} video(s)', inputs=fingerprint(videos), error='', youtube='', youtube_complete=False)
-    name = slug(lesson.name)
+    name = file_stem(lesson)                          # a renamed folder keeps its files' names
     # the same recording in two lesson folders (copied by mistake): stop instead of making the video twice
     for other in Path(root).iterdir():
         if other.is_dir() and other.resolve() != lesson.resolve() and not other.name.startswith(('_', '.')):
@@ -407,7 +407,8 @@ def watch(root, once):
                 for lesson in sorted(Path(root).iterdir()):
                     if not lesson.is_dir() or lesson.name.startswith(('_', '.')):
                         continue
-                    for step in (lambda: changed(lesson) and safe_process(lesson, root), lambda: youtube_step(lesson)):
+                    for step in (lambda: changed(lesson) and safe_process(lesson, root), lambda: youtube_step(lesson),
+                                 lambda: name_step(lesson)):
                         try:
                             step()
                         except Exception as e:                 # one lesson's problem never stops the others
@@ -491,10 +492,28 @@ def youtube_step(lesson):
         st.set('done', s.get('step', ''), youtube=r[0], youtube_complete=r[1])
     try:                                       # the lesson posts get the video link once it is on YouTube
         import posts
-        if posts.relink(WORK_ROOT / slug(lesson.name), extras(out), slug(lesson.name)):
+        if posts.relink(WORK_ROOT / slug(lesson.name), extras(out), file_stem(lesson)):
             st.log('posts: video link filled in')
     except Exception as e:
         st.log(f'posts: link not filled in ({type(e).__name__}: {str(e)[:200]})')
+
+
+def name_step(lesson):
+    """A finished lesson in a folder named '4' or 'new' gets a meaningful name (lessons.rename). Tried again on the
+    next run when a post is going out or a file is in use."""
+    import lessons
+    if not lessons.placeholder(lesson.name) or not lessons.finished(lesson) or retry_marker(lesson).exists():
+        return
+    new = lessons.suggested_name(lesson)
+    if not new or new == lesson.name or lesson.with_name(new).exists():
+        return
+    try:
+        target = lessons.rename(lesson, new, owner='watcher', log=lambda line: None)
+    except Exception as e:
+        print(f'lesson {lesson.name}: not renamed yet ({type(e).__name__}: {e})')
+        return
+    (WORK_ROOT / slug(target.name)).mkdir(parents=True, exist_ok=True)
+    Status(output_dir(target), WORK_ROOT / slug(target.name)).log(f'folder renamed: "{lesson.name}" -> "{target.name}"')
 
 
 def safe_process(lesson, root):

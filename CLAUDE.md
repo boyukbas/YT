@@ -121,6 +121,11 @@ looped images from the Drive mount `J:` (it stalls) — the pipeline renders fro
   button with the same warnings + override tick; automatic uploads use the same settings window as Instagram.
   `easy.youtube_step` skips while a YouTube job is queued/running. Owner to check: OAuth consent screen
   "In production" (Testing = refresh token dies after 7 days); the first real upload is the owner's.
+- **Lesson folder names (done 2026-11-05):** the watcher's `name_step` renames finished lessons whose folder name is a
+  placeholder (`lessons.placeholder`: a number, new, yeni, ...) to `<her number> <thumbnail words>` with
+  `lessons.rename` (work folder moved too, PostLock held, no queued/running job). Files keep their stem
+  (`lessons.file_stem`), so records/queue (publish `_adopt` by sig)/re-renders still match. Folders 1-5 and `new`
+  were renamed that day.
 - **Platforms (research 2026-11-05):** Threads = worth it (official API, video, same Meta business; back in Turkey since
   2026-06-17; needs the Threads use case on a Meta app, go slowly with logins); TikTok = by hand / TikTok Studio only
   (its API posts SELF_ONLY until audited, and audits refuse own-account tools); X = maybe later (pay per use:
