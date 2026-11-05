@@ -95,20 +95,27 @@ class Spec:
         return ((box[0] - cx) * sx + px, (box[1] - cy) * sy + py, (box[2] - cx) * sx + px, (box[3] - cy) * sy + py)
 
 
-STUDIO_CROP = 0.78        # share of the vertical recording's height shown: her face ~28 % bigger than the whole frame
+STUDIO_CROP = 0.78        # share of the recording's height shown: her face ~28 % bigger than the whole frame
+STUDIO_CARD = (0.72, 0.9)  # card width / height from a horizontal recording: the vertical card's shape, up to wider
+STUDIO_ROOM = 1.0          # face widths of room on each side of where her face goes (hair, shoulders, gestures)
 
 
 def studio(name, src_w, src_h, faces=()):
-    """Long video from a vertical recording: 16:9 canvas on the animated channel background, her picture as a card on
+    """Long video in the studio layout: 16:9 canvas on the animated channel background, her picture as a card on
     the left, a panel on the right for the section header, word cards and subtitles (text never touches her).
-    The card shows the upper STUDIO_CROP of the frame around her face, so she isn't tiny on a TV or desktop."""
+    The card shows the upper STUDIO_CROP of the frame around her face, so she isn't tiny on a TV or desktop.
+    A horizontal recording gets a card cut around her: the vertical card's shape, made wider (up to STUDIO_CARD[1])
+    when her face moves around, so it stays inside with STUDIO_ROOM face widths to spare."""
     W, H = 1920, 1080
     ch = int(src_h * STUDIO_CROP)
     fy = sorted((f[1] + f[3]) / 2 for f in faces if f)
     cy = min(max(0, (fy[len(fy) // 2] if fy else 0.32 * src_h) - 0.32 * ch), src_h - ch)
+    cx, cw = 0, src_w
+    if src_w > src_h:
+        cx, cw = _studio_columns(src_w, ch, faces)
     ph = int(0.926 * H)
-    pw = int(ph * src_w / ch)
-    s = Spec(name, W, H, False, src_w, src_h, crop=(0, cy, src_w, ch), pic=(110, (H - ph) // 2, pw, ph))
+    pw = int(ph * cw / ch)
+    s = Spec(name, W, H, False, src_w, src_h, crop=(cx, cy, cw, ch), pic=(110, (H - ph) // 2, pw, ph))
     s.studio = True
     s.panel = (110 + pw + 90, W - 70)                    # x range of the text panel
     s.margin_l, s.margin_r = s.panel[0], W - s.panel[1]
@@ -116,6 +123,21 @@ def studio(name, src_w, src_h, faces=()):
     s.size, s.dsize, s.tsize = 56, 70, 40
     s.top, s.bottom = int(0.30 * H), int(0.90 * H)
     return s
+
+
+def _studio_columns(src_w, ch, faces):
+    """(x, width) of the card's part of a horizontal recording: where her face is (10th-90th percentile of the face
+    centres, so a stray detection doesn't widen it) plus STUDIO_ROOM face widths each side, at least the vertical
+    card's shape and at most STUDIO_CARD[1] (then centred on her usual place). No face: the middle."""
+    lo_w, hi_w = int(STUDIO_CARD[0] * ch), min(src_w, int(STUDIO_CARD[1] * ch))
+    xs = sorted((f[0] + f[2]) / 2 for f in faces if f)
+    if not xs:
+        return (src_w - lo_w) // 2, lo_w
+    fw = sorted(f[2] - f[0] for f in faces if f)[len(xs) // 2]
+    a, b = xs[int(0.1 * (len(xs) - 1))], xs[int(round(0.9 * (len(xs) - 1)))]
+    cw = min(hi_w, max(lo_w, int(b - a + 2 * (0.5 + STUDIO_ROOM) * fw)))
+    mid = (a + b) / 2 if cw < hi_w else xs[len(xs) // 2]
+    return int(min(max(0, mid - cw / 2), src_w - cw)), cw
 
 
 # ---- text layout (same wrapping as V1/V2) ----

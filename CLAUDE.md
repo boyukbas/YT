@@ -115,10 +115,13 @@ looped images from the Drive mount (it stalls) — the pipeline renders from a l
 **Next items, in order:** (1) the owner's first real YouTube upload from the dashboard, and see whether Google keeps it
 locked private (see below); (2) look at the 2 private videos "2 abfahren" (rOf_Wc6WJME) and "3 am oder im Bahnhof"
 (jH5r-IRzkis) — deferred by the owner; (3) Threads as the next platform plug-in (reuse `meta.py`; extend `tests/guard.py`'s Share fake to it); (4) ~~split
-instagram.py~~ done; (5) studio layout for horizontal recordings; (6) the "turn your phone" idea.
+instagram.py~~ done; (5) studio layout for horizontal recordings: built 2026-11-05, OFF until the owner approves the test render;
+(6) the "turn your phone" idea.
 - **Studio layout: the owner likes it** (video on one side, a "board" with the lesson's example sentences building up
-  on the other: `layout.studio` + `layout.board`, `channel.json "studio"`). Today it is used only for long videos made
-  from *vertical* recordings. Idea: offer it for horizontal recordings too (her picture scaled into the card).
+  on the other: `layout.studio` + `layout.board`, `channel.json "studio"`). Long videos from *vertical* recordings use it by
+  default. Horizontal recordings (done 2026-11-05): `easy.use_studio`, a card cut around her (`layout._studio_columns`:
+  the vertical card's shape, wider up to 0.9 when her face moves); switched on by `channel.json "studio_landscape": true`
+  or a lesson's `settings.json {"studio": true}`; off by default until the owner approves.
 - **Idea: horizontal videos as they are + a "turn your phone" animation** (a phone rotating, 1-2 s) at the start, instead
   of cropping. Caveats: YouTube counts only vertical/square ≤ 3 min as a Short (a horizontal one is a normal video), and
   Reels show a horizontal video small between bars, so it fits the long video best. Not started.

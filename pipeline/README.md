@@ -29,7 +29,9 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
    The lesson's pattern (`<zu lernen>` in the cues) gets a red highlighter outline. German lines are the biggest,
    Turkish smaller, the translation under a German line smaller still; deliberate wrong/right examples (`"mark"` in a
    cue) get a red ✘ / green ✔ and their colour. Vertical recordings in a long video use the studio layout (cropped
-   to her upper body, face high in the card).
+   to her upper body, face high in the card). Horizontal ones can too: the card is cut around her, wider when she
+   moves (`channel.json "studio_landscape": true` for all, or the lesson's `settings.json {"studio": true}`;
+   `{"studio": false}` turns it off for one lesson). Off for horizontal recordings until the owner says so.
 5. **Render**: libass subtitles in the channel palette, logo (skipped when the recording already has it; our own opaque
    logo covers a burned-in one when punch-ins move it), labels + word cards, subscribe banner, a slight punch-in on every
    second segment (jump cuts look intentional), compression-noise cleanup + sharpening for small sources, speech noise

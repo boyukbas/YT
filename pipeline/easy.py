@@ -9,7 +9,8 @@
 Drive layout:  SINEM-YouTube/_channel/channel.json (+ logo, banner, fonts, music/)  ·  SINEM-YouTube/<lesson>/*.mp4|mov
 Results go to <lesson>/Output/ (or "Output (Easy)" when an Output folder made elsewhere already exists): the finished
 videos there, everything else (thumbnails, captions, texts, covers, records, status) in Output/extras/.
-Optional <lesson>/settings.json, e.g. {"short": false} = no Short version for this lesson.
+Optional <lesson>/settings.json, e.g. {"short": false} = no Short version for this lesson, {"studio": true} = the
+long video in the studio layout (picture card + example-sentence board), also from a horizontal recording.
 Work files stay on the PC in D:\\YT\\easy-work\\<lesson>.
 """
 import argparse, hashlib, json, os, shutil, statistics, sys, threading, time, traceback
@@ -62,6 +63,15 @@ def plan_zoom(segs, frame, size, logo, banner):
             x0, y0 = min(max(0, fx - cw / 2), W - cw), min(max(0, fy - ch * 0.45), H - ch)
         g['zoom'] = [ZOOM, round(x0), round(y0)]
     return [g['zoom'] for g in segs if g.get('zoom')]
+
+
+def use_studio(profile, settings, landscape):
+    """The long video in the studio layout? The lesson's settings.json {"studio": true/false} decides; else
+    channel.json: "studio" for vertical recordings (on unless set false), "studio_landscape" for horizontal ones
+    (off unless set true: new 2026-11-05, the owner switches it on after seeing a test)."""
+    if 'studio' in settings:
+        return bool(settings['studio'])
+    return bool(profile.get('studio_landscape', False)) if landscape else bool(profile.get('studio', True))
 
 
 def cover_logo(logo, zooms):
@@ -230,7 +240,7 @@ def process(lesson, root, log_only=False):
             side = src[1]
             cx = min(max(0, fx - side / 2), src[0] - side)
             spec = L.Spec(vname, 1080, 1920, short=True, src_w=src[0], src_h=src[1], crop=(cx, 0, side, side), pic=(0, 200, 1080, 1080))
-        elif not is_short and not landscape and profile.get('studio', True):    # vertical recording, long video
+        elif not is_short and use_studio(profile, settings, landscape):           # long video
             spec = L.studio(vname, *src, faces)
         else:
             spec = L.Spec(vname, *src, short=is_short, src_w=src[0], src_h=src[1])
