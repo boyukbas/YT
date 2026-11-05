@@ -1,6 +1,7 @@
 # Instagram setup: Almanca Dil Atölyesi
 
-Goal: the PC posts each lesson's Shorts as Reels on **Instagram**, **one a day after 20:00 (Istanbul)**, each with its
+Goal: the PC posts each lesson's Shorts as Reels on **Instagram** (automatically on the schedule set in the dashboard,
+by default one a day after 20:00 Istanbul, or by hand from the dashboard), each with its
 own cover and caption. You set it up once (steps 1–5). After that nothing is needed per video.
 
 **Facebook (2026-11-03):** the PC posts nothing on Facebook (`FACEBOOK_PAGE = False`). But **a Facebook Page must stay
@@ -21,7 +22,7 @@ Verified 2026-11-03 (Short 4 of "new" posted with it). Doesn't expire.
 4. On the PC, in a terminal:
 
    ```
-   D:\YT\workenv\Scripts\python D:\code\YT\pipeline\instagram.py system-token
+   D:\YT\work\venv\Scripts\python D:\code\YT\pipeline\instagram.py system-token
    ```
 
    Paste the token (not shown) → it prints the account and the check. "has no Instagram account" = step 2 is missing.
@@ -112,17 +113,19 @@ API right away are more likely to be flagged as bots.
 
 If it says "No Instagram account linked", do the linking in step 2 and make a new token (4.1–4.5).
 
-## 5. Automatic posting (already on)
+## 5. Automatic posting (a setting on the dashboard)
 
 - **How the video gets there:** Instagram downloads the video + cover from a temporary, random Cloudflare address
   that the PC opens for 2–3 minutes and closes right after (only those two files answer; tested 2026-11-02: link up in
   ~70 s, Instagram done ~40 s later). Its direct upload refuses Page keys.
 - **The watcher:** Task Scheduler task "YT Easy mode watcher" runs every 10 minutes (also does YouTube and new
-  lessons). After 20:00, if nothing went out in the last 20 hours, it posts the next Reel on Instagram. Oldest lesson
-  first, in Short order. (Posting the Reels and the long video on the Page too is built in but switched off:
-  `FACEBOOK_PAGE` in `instagram.py`.) Nothing is posted until step 4 is done, and not
-  before the start date in `_channel/channel.json` → `"instagram": {"start": "2026-11-05"}` (change or delete it to
-  start earlier).
+  lessons). When automatic posting is on (dashboard > Publish > Settings; stored in
+  `D:\YT\easy-work\publishing.json`), it posts the next waiting Reel inside the chosen window, days and gap; the order
+  is the Publish list (oldest lesson first, in Short order, unless moved or skipped there). (Posting on the Page too is
+  built in but switched off: `FACEBOOK_PAGE` in `instagram.py`.) Nothing is posted until step 4 is done. The start date
+  is a setting too; `_channel/channel.json` `"instagram": {"start": ...}` was read only once, when the settings were
+  created. `D:\YT\easy-work\instagram-paused` is an emergency brake (nothing automatic while it exists; deleting it does
+  not turn posting on).
 - **Renewal:** the system user's key never expires. If it stops working, generate a new one (section "The key in
   use") and run `system-token`.
 

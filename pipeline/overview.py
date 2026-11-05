@@ -1,8 +1,9 @@
 """One status page for the phone: SINEM-YouTube/STATUS.txt (open it in the Google Drive app).
 
 Every lesson (newest first) with its state, YouTube (uploaded / scheduled / public, with links), Instagram (Reels
-posted / queued), what goes out next, and what the PC is doing. Built only from the files the pipeline already keeps
-(status.json, youtube-applied.json, instagram-posted.json, the watcher log); it calls no API.
+posted / queued), what goes out next (publish.next_run: the dashboard's settings, so a pause shows), and what the PC
+is doing. Built only from the files the pipeline already keeps (status.json, youtube-applied.json,
+instagram-posted.json, publishing.json, publish.db, the watcher log); it calls no API.
 Written by the watcher on every run and whenever a lesson's status changes.
 
   python overview.py "<Drive root>"      write it now and print it
@@ -14,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))          # python -I (as the watcher runs it) doesn't add it
 import easy
 import instagram as IG
-from tools import Status, extras, records
+from tools import Status, extras
 
 NAME = 'STATUS.txt'
 ISTANBUL = IG.ISTANBUL
@@ -110,33 +111,17 @@ def lesson_block(lesson, now):
     return key, L
 
 
-def next_reel(root, now):
-    """(time text, what) of the next Instagram Reel, or None. Same order as instagram.daily()."""
-    if not IG.TOKEN.exists():
-        return None
-    lessons = [l for l, _, p in sorted(records(root, 'youtube.json'), key=lambda r: r[2].stat().st_mtime)
-               if not l.name.startswith('_')]
-    for lesson in lessons:
-        try:
-            _, out, data = IG.lesson_files(lesson)
-        except StopIteration:
-            continue
-        posted = IG.load(out)
-        todo = [(m, sh) for m, sh in IG.reels(out, data) if 'id' not in posted.get(m.name, {})]
-        if not todo:
-            continue
-        m, sh = todo[0]
-        last = IG.last_post(root)
-        t = max(now, (last + IG.GAP) if last else now).astimezone(ISTANBUL)
-        hh, mm = map(int, IG.POST_TIME.split(':'))
-        if (t.hour, t.minute) < (hh, mm):
-            t = t.replace(hour=hh, minute=mm)
-        start = IG.profile(root).get('instagram', {}).get('start')
-        if start and t.strftime('%Y-%m-%d') < start:
-            t = datetime.strptime(f'{start} {IG.POST_TIME}', '%Y-%m-%d %H:%M').replace(tzinfo=ISTANBUL)
-        title = re.sub(r'\s*#\w+', '', sh.get('title', '')).strip() or m.name
-        return f'{t.strftime("%a %d %b")} after {t.strftime("%H:%M")}', f'{lesson.name}: {title}'
-    return None
+def next_lines(root, now):
+    """(NEXT lines, footer lines) for the publishing platforms, from publish.next_run(root, now) (lazy import).
+    On any error: (['  Instagram: status not available (<Type>)'], [])."""
+    try:
+        import publish
+        runs = publish.next_run(Path(root), now)
+        foot = [r['footer'] if r['footer'].startswith(f"{r['label']}:") else f"{r['label']}: {r['footer']}."
+                for r in runs if r.get('footer')]
+        return [f"  {r['text']}" for r in runs if r.get('text')], foot
+    except Exception as e:
+        return [f'  Instagram: status not available ({type(e).__name__})'], []
 
 
 def pc_state(now):
@@ -149,18 +134,16 @@ def pc_state(now):
     return 'idle' + (f' (last check {runs[-1].split()[-1]}, every 10 min)' if runs else '')
 
 
-def build(root, idle=False):
+def build(root, idle=False, now=None):
+    """The page's text. now: aware UTC (tests); default the current time."""
     root = Path(root)
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     pc = 'idle (checks every 10 min)' if idle else pc_state(now)
     blocks = [b for l in root.iterdir() if l.is_dir() and not l.name.startswith(('_', '.'))
               for b in [lesson_block(l, now)] if b]
     L = ['ALMANCA DİL ATÖLYESİ · STATUS', f'Updated {now.astimezone(ISTANBUL).strftime("%a %d %b %H:%M")} '
          f'(Istanbul) · PC {pc}', '']
-    nxt = []
-    r = next_reel(root, now)
-    if r:
-        nxt.append(f'  Instagram Reel: {r[0]} · {r[1]}')
+    nxt, foot = next_lines(root, now)
     sched = sorted((rec['publish_at'], l.name) for l in root.iterdir() if l.is_dir()
                    for rec in jload(extras(easy.output_dir(l)) / 'youtube-applied.json').values()
                    if isinstance(rec, dict) and rec.get('publish_at') and yt_state(rec, now) != 'public')
@@ -172,8 +155,8 @@ def build(root, idle=False):
     for _, lines in sorted(blocks, key=lambda b: -b[0]):
         L += lines + ['']
     L += ['How it works: Sinem puts a recording in a lesson folder → the PC makes the video (~10 min) → she uploads it',
-          'in the YouTube app → the PC fills in title, captions, thumbnail, playlist. Instagram: one Reel a day after',
-          f'{IG.POST_TIME}. This page is rewritten by the PC; changes here are lost.']
+          'in the YouTube app → the PC fills in title, captions, thumbnail, playlist.', *foot,
+          'This page is rewritten by the PC; changes here are lost.']
     return '\n'.join(L) + '\n'
 
 

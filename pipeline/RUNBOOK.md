@@ -7,9 +7,12 @@ Paths: lessons in `J:\My Drive\SINEM-YouTube\<lesson>`, work files in `D:\YT\eas
 ## 1. Where is it? (1 minute)
 The whole channel on one page: `SINEM-YouTube\STATUS.txt` (`overview.py`; the user reads it in the Drive app on the
 phone). Rewritten by the watcher every run and on every lesson status change; it calls no API.
-The private dashboard https://yt.boyukbas.com (Google login, the user + Sinem) shows the same per video with views,
-and has buttons: post next Reel now, pause/resume daily Reels, retry a stopped lesson (`dashboard.py`; button presses
-in `D:\YT\easy-work\dashboard.log`). Its data by hand: `python -I dashboard.py json "J:\My Drive\SINEM-YouTube"`.
+The private dashboard https://yt.boyukbas.com (Google login, the user + Sinem; `dashboard.py`, page in `dashboard/`)
+is the management page: **Home** (what needs attention, what goes out next, counts waiting for Instagram and YouTube,
+numbers), **Publish** (every waiting Reel: post any one now, move to top, skip, edit caption, mark as posted by hand;
+automatic posting on/off with frequency, days, time window and gap), **Videos**, **Stats** (YouTube + Instagram numbers
+saved hourly in `D:\YT\easy-work\stats.db`), **Activity** (who did what; also `publish.db`). Every press is logged in
+`D:\YT\easy-work\dashboard.log`. Its data by hand: `python -I dashboard.py json "J:\My Drive\SINEM-YouTube"`.
 ```
 type "J:\My Drive\SINEM-YouTube\STATUS.txt"
 type "J:\My Drive\SINEM-YouTube\<lesson>\Output\extras\STATUS.txt"
@@ -59,12 +62,33 @@ Short message, in English, with what was verified:
 ## 4. After the upload (automatic, check next day)
 - STATUS.txt "YouTube:" lines show each video's link and what was set. Quota: ~900 units per Short, 10,000 a day;
   "quota used up" → it resets at 11:00 Istanbul (winter) / 10:00 (summer); the watcher retries by itself.
-- Instagram (`instagram.py`, log `D:\YT\easy-work\instagram.log`): one Reel a day after 20:00, made from the lesson's
-  `-short-N.mp4` files (a one-clip Short lesson is one Reel itself). Nothing is posted on Facebook, but the
-  empty Page must stay linked to Instagram. Plan: `Output\extras\instagram.md`. Post the next one now:
-  `python -I instagram.py post "<lesson>"` (refuses within 20 h of the last one). Key: a system user's token (never
-  expires). "API access blocked" (code 200) on every call = Meta flagged the developer account: the user confirms it
+- Instagram (`publish.py` + `platform_instagram.py`; log `D:\YT\easy-work\instagram.log`): Reels are made from the
+  lesson's `-short-N.mp4` files (a one-clip Short lesson is one Reel itself). **Automatic posting** is a setting on the
+  dashboard (Publish > Settings, stored in `D:\YT\easy-work\publishing.json`): on/off, every N days, weekdays, time
+  window (default 20:00-23:59 Istanbul), minimum gap (default 20 h); never more than 3 in 24 h (`hard_cap_24h`, only in
+  the file). It was OFF at the v2 deploy (2026-11-05). `D:\YT\easy-work\instagram-paused` is only an emergency brake:
+  while it exists nothing is posted automatically, but deleting it does NOT turn automatic posting on. Posting by hand:
+  Publish > any Reel > Post (warns about the one-a-day gap; needs a tick to override), or
+  `python -I instagram.py post "<lesson folder, exact name>"` (refuses on gap warnings unless `--force`; never passes the
+  3-in-24-h cap; refuses while a post is unresolved). A post that was interrupted shows a red card: press **Check again**
+  (the PC also re-checks by itself) before answering by hand. Nothing is posted on Facebook, but the empty Page must
+  stay linked to Instagram. Plan: `Output\extras\instagram.md`; records: `Output\extras\instagram-posted.json`.
+  Key: a system user's token (never expires). "API access blocked" (code 200) on every call = Meta flagged the developer account: the user confirms it
   on developers.facebook.com, or it clears by itself; try once, then wait, don't hammer it.
+
+## Going back to the old dashboard (rollback of v2, only if v2 is broken)
+v1 reads only the Drive records and the pause file; it knows nothing of publish.db (skips, edited captions, order,
+interrupted posts). So, in this order, while v2 still runs:
+1. Stop automatic posting: Publish > Turn off, and make sure `D:\YT\easy-work\instagram-paused` exists
+   (`type nul > D:\YT\easy-work\instagram-paused`). v1 posts every evening when that file is missing.
+2. No post in flight: no red "post was interrupted" card (press Check again until it settles), no "record not saved
+   yet" card. A Reel v2 posted without a Drive record would be posted again by v1.
+3. Note the skipped Reels and edited captions (Publish list) — v1 will not respect them; don't press v1's "Post next
+   Reel now" for a skipped one.
+4. `git revert` the v2 commits in `D:\code\YT`, then right away stop the `dashboard.py serve` processes (dashboard.cmd
+   restarts the server in 30 s on the old code), then push.
+5. If `D:\YT\easy-work\instagram-posting.lock` is left and no python is posting, delete it (v1 refuses to post while
+   it exists). publish.db, stats.db and publishing.json can stay; v1 ignores them.
 
 ## Gotchas seen so far
 - **Same recording in two lesson folders** (copied by mistake): the second one stops with "is also in the lesson …".

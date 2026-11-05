@@ -1,5 +1,6 @@
-"""Instagram: the lesson's Shorts as Reels, with their own cover and caption, posted one a day
-(see instagram-setup.md for the one-time setup).
+"""Instagram: the lesson's Shorts as Reels, with their own cover and caption (see instagram-setup.md for the one-time
+setup). What goes out when is decided by publish.py (the dashboard's Publish tab and its settings, one posting lock,
+the safety rules); this module holds the key, the Graph API calls, the covers and the captions.
 
   python instagram.py system-token                  the key in use (2026-11-03): paste a system user's token from
                                                     Business settings; the Instagram account must be assigned to it
@@ -12,17 +13,21 @@
   python instagram.py token                         Instagram-login mode: paste the token from the app dashboard
   python instagram.py check                         read-only: account, posts left in the 24 h limit
   python instagram.py prepare "<lesson>"            covers (cover-short-N.jpg) + captions (instagram.md); posts nothing
-  python instagram.py post "<lesson>" [--dry-run]   post the lesson's next Reel now (refuses if one went out < 20 h ago
-                                                    unless --force: one Reel a day, so followers aren't flooded)
-  python instagram.py daily "<root>"                the watcher's step: after POST_TIME, post the next Reel of the
-                                                    oldest lesson that has some left, if none went out in the last 20 h
+  python instagram.py post "<lesson>" [--dry-run] [--force]
+                                                    post the lesson's next waiting Reel now, with the dashboard's
+                                                    rules and lock (publish.cli_post): a gap or same-day warning
+                                                    refuses unless --force; nothing passes the 24 h hard cap
+  python instagram.py daily "<root>"                the watcher's automatic step by hand (publish.auto_step): posts
+                                                    only when automatic posting is on and its slot is open
 
 Instagram downloads the video + cover from a public URL (its direct upload refuses Page tokens), so while one Reel is
 being posted, the PC serves just those two files under a random path through a temporary Cloudflare quick tunnel
 (cloudflared, no account), and closes it as soon as Instagram has them. Posting to the Facebook Page as well
-(FACEBOOK_PAGE) is off since 2026-11-03: the Page got few views and was deleted; Instagram does well.
+(FACEBOOK_PAGE) is off since 2026-11-03: the Page got few views and was deleted; Instagram does well (the Facebook
+functions stay, uncalled).
 Token: %USERPROFILE%\\.shorts-pipeline\\instagram.json (Page / Unified-login key: no expiry; Instagram token: 60 days, refreshed
-here every week). Record: <lesson>/Output/extras/instagram-posted.json."""
+here every week). Graph API calls send it in the Authorization header, so it never shows up in an error message or log.
+Record: <lesson>/Output/extras/instagram-posted.json (written by platform_instagram.py under the posting lock)."""
 import argparse, getpass, http.server, json, os, re, secrets, shutil, subprocess, sys, tempfile, threading, time, webbrowser
 from datetime import datetime, timedelta, timezone
 from functools import partial
@@ -31,7 +36,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
-from tools import EXTRAS, extras, probe, records
+from tools import extras, probe, records
 
 KEYS = Path.home() / '.shorts-pipeline'
 TOKEN = KEYS / 'instagram.json'
@@ -43,40 +48,89 @@ FB_SCOPES = ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', '
 CLOUDFLARED = Path(r'D:\YT\tools\cloudflared.exe')
 ISTANBUL = timezone(timedelta(hours=3))
 POSTED = 'instagram-posted.json'
-POST_TIME = '20:00'                                      # Istanbul; the daily Reel goes out after this time
-GAP = timedelta(hours=20)                                # at most one Reel per day
+POST_TIME = '20:00'                                      # v1's daily time and gap; v2's timing is in publishing.json
+GAP = timedelta(hours=20)
 FACEBOOK_PAGE = False                                    # also post Reels + long videos to the Page (off: deleted 2026-11-03)
-LONG_HOURS = (12, 17)                                    # Facebook long videos: from 12:00, last start 16:59
 MAX_TAGS = 5                                             # Instagram shows few hashtags; more looks like spam
 SAVE_LINE = '💾 Kaydet, sonra tekrar et!'
 YOUTUBE_LINE = "▶️ Dersin tamamı YouTube'da: Almanca Dil Atölyesi (link profilde)"
 CHANNEL = 'https://www.youtube.com/@sinembb'
 WORK = Path(os.environ.get('PIPELINE_WORK', r'D:\YT\easy-work'))
-PAUSED = WORK / 'instagram-paused'                       # exists = no daily Reels (the dashboard's Pause button)
-POSTING = WORK / 'instagram-posting.lock'                # one poster at a time (watcher or dashboard)
+PAUSED = WORK / 'instagram-paused'                       # exists = no automatic Reels (the emergency brake)
+POSTING = WORK / 'instagram-posting.lock'                # publish.PostLock's file: one poster at a time
+POLL = 10                                                # seconds between upload checks (wait_container)
+
+
+class MetaError(RuntimeError):
+    """A Graph API refusal, or Meta unreachable. str() keeps the old text and adds 'subcode N' when one is given:
+    'Meta 400: <message> (code 100, subcode 2207085, <user message>)' or 'Meta unreachable: ConnectTimeout'."""
+    def __init__(self, message: str, status: int | None = None, code: int | None = None,
+                 subcode: int | None = None):
+        super().__init__(message)
+        self.status, self.code, self.subcode = status, code, subcode
+
+
+class ContainerError(RuntimeError):
+    """Instagram did not finish the upload. .status is 'ERROR', 'EXPIRED' or 'TIMEOUT' (still processing
+    after 10 min)."""
+    def __init__(self, message: str, status: str):
+        super().__init__(message)
+        self.status = status
+
+
+class ShareError(RuntimeError):
+    """The temporary public link (cloudflared quick tunnel) could not be made: a problem on the PC."""
+
+
+def classify(exc: BaseException) -> str:
+    """The error kind for the publish module's retry and stop rules, checked in this order:
+    ContainerError: 'content' for ERROR, else 'transient'.
+    ShareError: 'local'.
+    MetaError without status and code (unreachable): 'transient'.
+    code 190 or 102: 'auth'.
+    subcode 2207085, code 10, code 368, or code 200-299: 'permission'.
+    code 4, 17, 32, 613 or 80002, or HTTP 429: 'rate'.
+    code 1 or 2, or HTTP 500 and above: 'transient'.
+    Any other MetaError (including every other 2207xxx subcode, an assumption): 'unknown'.
+    OSError: 'local'.
+    Anything else: 'unknown'."""
+    if isinstance(exc, ContainerError):
+        return 'content' if exc.status == 'ERROR' else 'transient'
+    if isinstance(exc, ShareError):
+        return 'local'
+    if isinstance(exc, MetaError):
+        code, status = exc.code, exc.status
+        if status is None and code is None:
+            return 'transient'
+        if code in (190, 102):
+            return 'auth'
+        if exc.subcode == 2207085 or code in (10, 368) or (code is not None and 200 <= code <= 299):
+            return 'permission'
+        if code in (4, 17, 32, 613, 80002) or status == 429:
+            return 'rate'
+        if code in (1, 2) or (status or 0) >= 500:
+            return 'transient'
+        return 'unknown'
+    return 'local' if isinstance(exc, OSError) else 'unknown'
 
 
 class Posting:
-    """Lock so the watcher's daily step and the dashboard's "post now" never post at the same time.
-    A lock older than 30 min is left over from a crash and is taken over."""
+    """Deprecated wrapper around publish.PostLock(owner='cli') (lazy import); raises Busy when it is held."""
     def __enter__(self):
-        WORK.mkdir(parents=True, exist_ok=True)
-        if POSTING.exists() and time.time() - POSTING.stat().st_mtime > 1800:
-            POSTING.unlink(missing_ok=True)
+        import publish
+        self.lock = publish.PostLock(owner='cli')
         try:
-            fd = os.open(POSTING, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
+            self.lock.__enter__()
+        except publish.Busy:
             raise Busy('a Reel is being posted right now') from None
-        os.write(fd, str(os.getpid()).encode())
-        os.close(fd)
         return self
 
     def __exit__(self, *exc):
-        POSTING.unlink(missing_ok=True)
+        self.lock.__exit__(*exc)
 
 
 class Busy(RuntimeError):
-    pass
+    """Posting: another poster (dashboard, watcher or CLI) holds the lock."""
 
 
 # ---------- token + API ----------
@@ -109,25 +163,42 @@ def token():
     return t['token']
 
 
-def call(method, path, files=None, **params):
-    """One Graph API call. The token goes in a header, so it never shows up in an error message or log."""
+def call(method, path, files=None, timeout=600, **params):
+    """One Graph API call. The token goes in a header, so it never shows up in an error message or log.
+    timeout: requests' seconds (or (connect, read)); short ones for the reads a person waits for. A network
+    failure (a timeout too) raises MetaError('Meta unreachable: <Type>')."""
     url = path if path.startswith('https://') else f"{FB_API if fb_mode() else API}/{path}"
     try:
-        r = requests.request(method, url, timeout=600, headers={'Authorization': f'Bearer {token()}'},
+        r = requests.request(method, url, timeout=timeout, headers={'Authorization': f'Bearer {token()}'},
                              **({'data': params, 'files': files} if files else {'params': params}))
     except requests.RequestException as e:
-        raise RuntimeError(f'Meta unreachable: {type(e).__name__}') from None
+        raise MetaError(f'Meta unreachable: {type(e).__name__}') from None
     return answer(r)
 
 
 def answer(r):
-    j = r.json() if r.headers.get('content-type', '').startswith(('application/json', 'text/javascript')) else {}
+    """The JSON of a Graph API answer. Raises MetaError with the same text as before, plus the subcode."""
+    try:
+        j = r.json() if r.headers.get('content-type', '').startswith(('application/json', 'text/javascript')) else {}
+    except ValueError:                                    # a broken body: judged by the HTTP status alone
+        j = {}
+    j = j if isinstance(j, dict) else {}
     if not r.ok or 'error' in j:
         err = j.get('error', {})
         err = err if isinstance(err, dict) else {'message': str(err)}
-        raise RuntimeError(f"Meta {r.status_code}: {err.get('message', r.text[:200])} "
-                           f"(code {err.get('code')}, {err.get('error_user_msg', '')})")
+        sub = err.get('error_subcode')
+        raise MetaError(f"Meta {r.status_code}: {err.get('message', r.text[:200])} (code {err.get('code')}"
+                        f"{'' if sub is None else f', subcode {sub}'}, {err.get('error_user_msg', '')})",
+                        r.status_code, _number(err.get('code')), _number(sub))
     return j
+
+
+def _number(x):
+    """Meta's code or subcode as an int, else None."""
+    try:
+        return int(x)
+    except (TypeError, ValueError):
+        return None
 
 
 def upload(url, path):
@@ -329,11 +400,15 @@ def save_system_token():
     check()
 
 
-def renew_warning():
-    """Meta lets a token read data for 90 days after the last login; then fb-token has to be run again."""
-    t = saved()
+def renew_warning(now=None):
+    """Meta lets a token read data for 90 days after the last login; then fb-token has to be run again. The
+    warning from 14 days before the key's expires_at or data_access_until, else None (also without a key file).
+    now: aware UTC (tests); default the current time."""
+    if not TOKEN.exists():
+        return None
+    t, now = saved(), now or datetime.now(timezone.utc)
     for until in (t.get('data_access_until'), t.get('expires_at')):
-        if until and datetime.fromtimestamp(until, timezone.utc) - datetime.now(timezone.utc) < timedelta(days=14):
+        if isinstance(until, (int, float)) and datetime.fromtimestamp(until, timezone.utc) - now < timedelta(days=14):
             how = 'run  instagram.py unified-token  again' if t.get('mode') == 'unified' else \
                 'make a new token in the Graph API Explorer and run  instagram.py fb-token'
             return f"WARNING: Meta access ends {datetime.fromtimestamp(until):%Y-%m-%d}: {how} (instagram-setup.md)."
@@ -370,9 +445,11 @@ def lesson_files(lesson):
     return lesson, out, json.loads((extras(out) / 'youtube.json').read_text(encoding='utf-8'))
 
 
-def reels(out, data):
+def reels(out, data, probe=None):
     """[(mp4, short entry)] in Short order. A one-clip Short lesson (no -short-N files; the main video is vertical and
-    at most 3 min) is one Reel itself, with the main video's first title/description (decided 2026-11-04)."""
+    at most 3 min) is one Reel itself, with the main video's first title/description (decided 2026-11-04).
+    probe: a callable like tools.probe; None means this module's probe, looked up now (tests patch it)."""
+    probe = probe or globals()['probe']
     num = lambda f: int(re.search(r'-short-(\d+)$', f.stem).group(1))
     by_version = {s['version']: s for s in data.get('shorts', [])}
     found = [(f, by_version.get(f'short-{num(f)}', {})) for f in sorted(out.glob('*-short-*.mp4'), key=num)]
@@ -458,8 +535,9 @@ def write_md(lesson, out, data):
     posted = load(out)
     tags = hashtags(lesson.parent)
     L = ['# Instagram Reels', '',
-         'Posted automatically, one Reel a day after ' + POST_TIME + ' (Istanbul). To post one by hand instead: '
-         'Instagram → + → Reel → pick the video → Edit cover → Add from camera roll → the cover → paste the caption.', '']
+         'Posted from the private dashboard (automatically when it is on: Publish → Settings). To post one by hand '
+         'instead: Instagram → + → Reel → pick the video → Edit cover → Add from camera roll → the cover → paste the '
+         'caption.', '']
     lv = posted.get('_facebook', {}).get('long')
     if lv:
         L += [f"Long video on the Facebook Page: posted {lv['posted']}: {lv['permalink']}", '']
@@ -498,13 +576,23 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
 
 
 class Share:
-    """Serve a few files at https://<random>.trycloudflare.com/<random>/<name> while the block runs."""
+    """Serve a few files at https://<random>.trycloudflare.com/<random>/<name> while the block runs.
+    __enter__ raises ShareError when cloudflared.exe is missing, gives no address within 180 s, or the address
+    does not answer; whatever it started is stopped again."""
 
     def __init__(self, files):
         self.files = [Path(f) for f in files]
+        self.proc = self.httpd = None
 
     def __enter__(self):
         self.tmp = Path(tempfile.mkdtemp(prefix='ig-'))
+        try:
+            return self._open()
+        except BaseException:
+            self.__exit__()
+            raise
+
+    def _open(self):
         self.key = secrets.token_urlsafe(16)
         (self.tmp / self.key).mkdir()
         for f in self.files:
@@ -512,8 +600,12 @@ class Share:
         self.httpd = http.server.ThreadingHTTPServer(('127.0.0.1', 0), partial(Quiet, directory=str(self.tmp)))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         port = self.httpd.server_address[1]
-        self.proc = subprocess.Popen([str(CLOUDFLARED), 'tunnel', '--url', f'http://127.0.0.1:{port}', '--no-autoupdate'],
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, errors='replace')
+        try:
+            self.proc = subprocess.Popen([str(CLOUDFLARED), 'tunnel', '--url', f'http://127.0.0.1:{port}',
+                                          '--no-autoupdate'], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                         text=True, errors='replace')
+        except OSError as e:
+            raise ShareError(f'cloudflared could not start ({type(e).__name__}): is {CLOUDFLARED} there?') from None
         found = []
 
         def read():
@@ -526,8 +618,7 @@ class Share:
         while not found and time.time() < end:
             time.sleep(0.5)
         if not found:
-            self.__exit__()
-            raise RuntimeError('cloudflared gave no public address')
+            raise ShareError('cloudflared gave no public address')
         self.urls = [f'{found[0]}/{self.key}/{f.name}' for f in self.files]
         while time.time() < end:                     # the new address takes a few seconds to reach the internet
             try:
@@ -536,19 +627,37 @@ class Share:
             except requests.RequestException:
                 pass
             time.sleep(3)
-        self.__exit__()
-        raise RuntimeError('the temporary public address did not answer')
+        raise ShareError('the temporary public address did not answer')
 
     def __exit__(self, *exc):
-        if getattr(self, 'proc', None):
+        if self.proc:
             self.proc.terminate()
-        self.httpd.shutdown()
+        if self.httpd:
+            self.httpd.shutdown()
+            self.httpd.server_close()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
 
 def load(out):
+    """The lesson's instagram-posted.json ({} when it has none). Raises OSError when Drive cannot be read: a Drive
+    that is away for a moment is never taken for 'nothing posted yet' (Path.exists() says False then)."""
     p = extras(out) / POSTED
-    return json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
+    try:
+        return json.loads(p.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        if absent(p):
+            return {}
+        raise
+
+
+def absent(path):
+    """True only when path's folder (or the folder above it) can be listed and path is not in it: a file that
+    really does not exist. Raises OSError when neither folder can be listed (Drive away)."""
+    path = Path(path)
+    try:
+        return path.name not in os.listdir(path.parent)
+    except FileNotFoundError:
+        return path.parent.name not in os.listdir(path.parent.parent)
 
 
 def last_post(root):
@@ -563,28 +672,46 @@ def stamp():
 
 
 def wait_container(cid, name):
+    """Poll status_code every POLL (10) s, at most 60 times. ERROR or EXPIRED raise ContainerError with that status;
+    the 60th poll raises ContainerError(..., 'TIMEOUT')."""
     for _ in range(60):                                   # Instagram fetches + processes the video (usually < 1 min)
-        time.sleep(10)
+        time.sleep(POLL)
         s = call('GET', cid, fields='status_code,status')
         if s.get('status_code') == 'FINISHED':
             return
         if s.get('status_code') in ('ERROR', 'EXPIRED'):
-            raise RuntimeError(f"Instagram could not process {name}: {s.get('status')}")
-    raise RuntimeError(f'{name}: Instagram still processing after 10 min')
+            raise ContainerError(f"Instagram could not process {name}: {s.get('status')}", s['status_code'])
+    raise ContainerError(f'{name}: Instagram still processing after 10 min', 'TIMEOUT')
 
 
-def post_instagram(mp4, cover, cap, log):
+def post_instagram(mp4, cover, cap, log, on_stage=None, on_container=None, on_published=None):
+    """Post one Reel, calling in order: on_stage('sharing') -> Share -> POST {uid}/media -> on_container(id) ->
+    on_stage('processing') -> wait_container -> on_stage('publishing') -> POST media_publish ->
+    on_published(media_id) -> GET permalink. The permalink read is best effort: a MetaError there gives ''.
+    Returns {'id', 'permalink', 'posted', 'posted_utc'}. Raises MetaError, ContainerError or ShareError;
+    never retries."""
+    tell = lambda f, *a: f and f(*a)
     uid = saved().get('user_id') or check()['user_id']
     log(f'{mp4.name}: sending to Instagram')
+    tell(on_stage, 'sharing')
     # Instagram's direct upload (rupload ig-api-upload) refuses Page tokens (ProcessingFailedError, 2026-11-02), and
     # user tokens expire after 60 days, so Instagram fetches the files through the temporary link in both modes.
     with Share([mp4, cover]) as (video_url, cover_url):
         c = call('POST', f'{uid}/media', media_type='REELS', video_url=video_url, cover_url=cover_url, caption=cap,
                  share_to_feed='true')
+        tell(on_container, c['id'])
+        tell(on_stage, 'processing')
         wait_container(c['id'], mp4.name)
+    tell(on_stage, 'publishing')
     m = call('POST', f'{uid}/media_publish', creation_id=c['id'])
-    info = call('GET', m['id'], fields='permalink,timestamp')
-    return {'id': m['id'], 'permalink': info.get('permalink', ''), **stamp()}
+    tell(on_published, m['id'])
+    when = stamp()                                        # the moment it went live
+    try:
+        link = call('GET', m['id'], fields='permalink').get('permalink', '')
+    except MetaError as e:
+        log(f'{mp4.name}: posted; its link is read later ({e})')
+        link = ''
+    return {'id': m['id'], 'permalink': link, **when}
 
 
 def post_facebook(mp4, cover, text, log):
@@ -669,151 +796,19 @@ def post_long_facebook(lesson, dry=False, log=print):
     return f"Facebook Page: {mp4.name} posted {posted['_facebook']['long']['permalink']}"
 
 
-def post_next(lesson, dry=False, force=False, log=print):
-    """Post the lesson's next Reel. Returns a one-line summary, or None when it has none left."""
-    lesson, out, data = lesson_files(lesson)
-    posted = load(out)
-    fb = fb_mode() and FACEBOOK_PAGE and 'page_id' in saved()
-    done = lambda r: bool(r) and 'id' in r and (not fb or 'facebook' in r)
-    todo = [(m, sh) for m, sh in reels(out, data) if not done(posted.get(m.name))]
-    if not todo:
-        return None
-    last = last_post(lesson.parent)
-    if last and datetime.now(timezone.utc) - last < GAP and not force:
-        return (f'WARNING: a Reel went out {(datetime.now(timezone.utc) - last).seconds // 3600} h ago; one a day keeps '
-                f'followers from being flooded. Use --force to post anyway.')
-    mp4, sh = todo[0]
-    cover = cover_path(mp4)
-    if not cover.exists():
-        prepare(lesson, log)
-    cap = caption(sh, hashtags(lesson.parent))
-    if dry:
-        return f'would post {mp4.name} with {cover.name}:\n{cap}' + \
-            (f'\n\nFacebook Page text:\n{fb_caption(cap, out)}' if fb else '')
-    length = probe(mp4)['duration']
-    if not 3 <= length <= 900:
-        raise RuntimeError(f'{mp4.name}: {length:.0f} s, Reels must be 3 s to 15 min')
-    rec = dict(posted.get(mp4.name, {}))
-
-    def save():
-        posted[mp4.name] = rec
-        (extras(out) / POSTED).write_text(json.dumps(posted, ensure_ascii=False, indent=1), encoding='utf-8')
-        write_md(lesson, out, data)
-    said = []
-    if 'id' not in rec:
-        rec.update(post_instagram(mp4, cover, cap, log))
-        save()
-        said.append(f"Instagram {rec['permalink']}")
-    if fb and 'facebook' not in rec:
-        try:
-            rec['facebook'] = post_facebook(mp4, cover, fb_caption(cap, out), log)
-            save()
-            said.append(f"Facebook {rec['facebook']['permalink']}")
-        except RuntimeError as e:                         # Instagram has it; the Page gets it with the next daily run
-            said.append(f'WARNING: Facebook Page failed, tries again tomorrow: {e}')
-    return f"{mp4.name} posted: {'; '.join(said)} ({len(todo) - 1} left in this lesson)"
-
-
-def daily(root, log=print):
-    """Watcher step: at most one Reel a day, after POST_TIME, oldest lesson first, not before channel.json's
-    "instagram": {"start": "YYYY-MM-DD"} (a new account should be used by hand for a few days first).
-    With FACEBOOK_PAGE on, Facebook-login mode also puts each lesson's long video on the Page once it is public on YouTube: one a day, between
-    LONG_HOURS, so it never lands within 3 hours of the evening Reel."""
-    if not TOKEN.exists() or PAUSED.exists():
-        return None
-    now = datetime.now(ISTANBUL)
-    start = profile(root).get('instagram', {}).get('start')
-    if start and now.strftime('%Y-%m-%d') < start:
-        return None
-    lessons = queue(root)
-    if fb_mode() and FACEBOOK_PAGE and 'page_id' in saved() and LONG_HOURS[0] <= now.hour < LONG_HOURS[1]:
-        longs = [datetime.fromisoformat(r['long']['posted_utc']) for l in lessons for o in l.glob(f'*/{EXTRAS}/{POSTED}')
-                 for r in [json.loads(o.read_text(encoding='utf-8')).get('_facebook', {})] if 'long' in r]
-        if not longs or datetime.now(timezone.utc) - max(longs) > GAP:
-            for lesson in lessons:
-                r = post_long_facebook(lesson, log=log)
-                if r:
-                    log(r)
-                    return r
-    hh, mm = map(int, POST_TIME.split(':'))
-    last = last_post(root)
-    if (now.hour, now.minute) < (hh, mm) or (last and datetime.now(timezone.utc) - last < GAP):
-        return None
-    warn = renew_warning()
-    if warn:
-        log(warn)
-    try:
-        with Posting():
-            for lesson in lessons:
-                r = post_next(lesson, log=log)
-                if r:
-                    log(r)
-                    return r
-    except Busy:
-        return None                                       # the dashboard is posting one right now
-    return None
-
-
-def queue(root):
-    """Lessons in Reel order: oldest finished lesson first."""
-    return [l for l, _, p in sorted(records(root, 'youtube.json'), key=lambda r: r[2].stat().st_mtime)
-            if not l.name.startswith('_')]
-
-
-def next_reel(root):
-    """(lesson, mp4) of the Reel the next daily run would post, or None."""
-    fb = fb_mode() and FACEBOOK_PAGE and 'page_id' in saved()
-    for lesson in queue(root):
-        try:
-            _, out, data = lesson_files(lesson)
-        except Exception:
-            continue
-        posted = load(out)
-        for m, _ in reels(out, data):
-            r = posted.get(m.name)
-            if not (r and 'id' in r and (not fb or 'facebook' in r)):
-                return lesson, m
-    return None
-
-
-def too_soon(root):
-    """A warning text when the last Reel went out less than GAP ago (one a day keeps followers from being flooded),
-    else None."""
-    last = last_post(root)
-    if not last or datetime.now(timezone.utc) - last >= GAP:
-        return None
-    ago = datetime.now(timezone.utc) - last
-    wait = GAP - ago
-    return (f'The last Reel went out {ago.seconds // 3600} h {ago.seconds % 3600 // 60} min ago; the daily rule waits '
-            f'{wait.seconds // 3600} h {wait.seconds % 3600 // 60} min more. Two Reels close together can flood followers.')
-
-
-def post_now(root, force=False, log=print):
-    """The dashboard's "Post next Reel now": the daily step without waiting for POST_TIME (or a pause). Within 20 h
-    of the last Reel it only posts with force=True (the dashboard asks for a confirmation first). One-line result."""
-    if not TOKEN.exists():
-        return 'Instagram is not set up on this PC.'
-    warn = too_soon(root)
-    if warn and not force:
-        return f'Not posted: {warn}'
-    with Posting():
-        for lesson in queue(root):
-            r = post_next(lesson, force=force, log=log)    # force goes on: post_next checks the 20 h gap too
-            if r:
-                return r
-    return 'Nothing left to post: every finished lesson is on Instagram.'
-
-
-if __name__ == '__main__':
-    sys.stdout.reconfigure(encoding='utf-8')
+def main(argv=None):
+    """The command line (see the module docstring). post and daily go through publish (lazy import)."""
     ap = argparse.ArgumentParser()
     ap.add_argument('cmd', choices=['system-token', 'fb-token', 'unified-token', 'token', 'check', 'prepare', 'post', 'daily'])
     ap.add_argument('path', nargs='?')
-    ap.add_argument('--dry-run', action='store_true')
-    ap.add_argument('--force', action='store_true', help='post even if a Reel went out less than 20 h ago')
+    ap.add_argument('--dry-run', action='store_true', help='post: show what would be posted; nothing is sent')
+    ap.add_argument('--force', action='store_true',
+                    help='post despite the gap and same-day warnings (never past the 24 h hard cap)')
     ap.add_argument('--app-id', default='', help='unified-token: the Meta app ID (asked if not given)')
     ap.add_argument('--config-id', default='', help='unified-token: the login configuration ID (asked if not given)')
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
+    if a.cmd in ('prepare', 'post', 'daily') and not a.path:
+        ap.error(f'{a.cmd} needs a folder')
     if a.cmd == 'system-token':
         save_system_token()
     elif a.cmd == 'fb-token':
@@ -827,6 +822,14 @@ if __name__ == '__main__':
     elif a.cmd == 'prepare':
         prepare(a.path)
     elif a.cmd == 'post':
-        print(post_next(a.path, a.dry_run, a.force) or 'Nothing left to post in this lesson.')
+        import publish
+        print(publish.cli_post(Path(a.path), a.dry_run, a.force))
     else:
-        print(daily(a.path) or 'Nothing to post now.')
+        import publish
+        if not publish.auto_step(Path(a.path)):          # each line was already printed by publish.log_line
+            print('Nothing to post now.')
+
+
+if __name__ == '__main__':
+    sys.stdout.reconfigure(encoding='utf-8')
+    main()

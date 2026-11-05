@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Channel Dashboard</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#141a26">
+<link rel="icon" href="/logo.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<svg class="sprite" aria-hidden="true">
+<symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11 12 4l9 7M5.5 9.5V20h13V9.5M10 20v-5h4v5"/></symbol>
+<symbol id="i-publish" viewBox="0 0 24 24"><path d="M21 3 3 10.5l7 2.5 2.5 7.5zM21 3 10 13"/></symbol>
+<symbol id="i-videos" viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM10 9.5v5l4.5-2.5z"/></symbol>
+<symbol id="i-stats" viewBox="0 0 24 24"><path d="M4 20h16M7 16v-5M12 16V6M17 16V9"/></symbol>
+<symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 5 12 2.5-6H21"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="i-ig" viewBox="0 0 24 24"><path d="M7.5 3.5h9a4 4 0 0 1 4 4v9a4 4 0 0 1-4 4h-9a4 4 0 0 1-4-4v-9a4 4 0 0 1 4-4zM12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zM17 7h.01"/></symbol>
+<symbol id="i-yt" viewBox="0 0 24 24"><path d="M3.5 8c.2-1.5 1.2-2.4 2.7-2.6C8 5.2 10 5 12 5s4 .2 5.8.4c1.5.2 2.5 1.1 2.7 2.6.3 2.7.3 5.3 0 8-.2 1.5-1.2 2.4-2.7 2.6-1.8.2-3.8.4-5.8.4s-4-.2-5.8-.4c-1.5-.2-2.5-1.1-2.7-2.6-.3-2.7-.3-5.3 0-8zM10 9.5v5l4.5-2.5z"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19zM12 10v4.5M12 17.5h.01"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17zM12 7.5V12l3 2"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M15 5v4M4 12h3M11 12h9M9 10v4M4 17h11M19 17h1M17 15v4"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h10v11H9zM5 15V4h10"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></symbol>
+</svg>
+<div class="wrap">
+<header class="hdr">
+<img src="/logo.png" alt="" width="44" height="44">
+<div class="hd">
+<h1 id="name">Almanca Dil Atölyesi</h1>
+<div class="sub" id="updated">Loading…</div>
+</div>
+<div class="who"><span id="me"></span><br><a href="/cdn-cgi/access/logout">Sign out</a></div>
+</header>
+<div class="health" id="health"></div>
+<div id="state"></div>
+<main id="views"></main>
+<footer>Private: only signed-in, allowed accounts. <a id="chan" target="_blank" rel="noopener" hidden>YouTube channel</a></footer>
+</div>
+<nav class="tabs" id="tabs" aria-label="Sections">
+<a href="#home" data-tab="home"><svg class="ic" aria-hidden="true"><use href="#i-home"/></svg><span>Home</span><i class="badge" hidden></i></a>
+<a href="#publish/instagram" data-tab="publish"><svg class="ic" aria-hidden="true"><use href="#i-publish"/></svg><span>Publish</span><i class="badge" hidden></i></a>
+<a href="#videos" data-tab="videos"><svg class="ic" aria-hidden="true"><use href="#i-videos"/></svg><span>Videos</span><i class="badge" hidden></i></a>
+<a href="#stats" data-tab="stats"><svg class="ic" aria-hidden="true"><use href="#i-stats"/></svg><span>Stats</span><i class="badge" hidden></i></a>
+<a href="#activity" data-tab="activity"><svg class="ic" aria-hidden="true"><use href="#i-activity"/></svg><span>Activity</span><i class="badge" hidden></i></a>
+</nav>
+</body>
+</html>

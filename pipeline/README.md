@@ -48,8 +48,9 @@ Results: `<lesson>-video.mp4` (and `-short.mp4`), Turkish + German caption track
    `python youtube.py apply "<lesson>" --dry-run`.
 
 **Instagram** (`instagram.py`, setup in `instagram-setup.md`): every Short also gets `cover-short-N.jpg` (its own photo +
-keywords, text inside the 3:4 grid crop) and a caption in `instagram.md`; the watcher posts one Reel a day after 20:00
-to Instagram (key: a system user's token from Business settings, `instagram.py system-token`, never expires, used
+keywords, text inside the 3:4 grid crop) and a caption in `instagram.md`; when automatic posting is on (dashboard >
+Publish > Settings, `publishing.json`; default one a day after 20:00, at least 20 h apart, never more than 3 in 24 h)
+the watcher posts the next waiting Reel; any Reel can also be posted by hand from the dashboard (key: a system user's token from Business settings, `instagram.py system-token`, never expires, used
 on graph.facebook.com; a Facebook Page must stay linked to Instagram, though nothing is posted there since 2026-11-03:
 `FACEBOOK_PAGE = False`). Instagram fetches video + cover through a temporary Cloudflare quick
 tunnel (its direct upload refuses Page tokens).

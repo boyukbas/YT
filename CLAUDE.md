@@ -16,8 +16,11 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
 - `pipeline/` — **Easy mode on the home PC** (Python): a lesson folder in Google Drive (`J:\My Drive\SINEM-YouTube\<lesson>`)
   in → finished video, caption tracks, 3 thumbnails, YouTube texts out. See `pipeline/README.md`. Decided 2026-10-31:
   Sinem's channel only; the PC is the worker; she uploads in the YouTube app and `youtube.py` fills in the details.
-  Max 3 Shorts per lesson, published one a day (19:00); Instagram Reels one a day (20:00) via
-  `instagram.py` (setup: `pipeline/instagram-setup.md`; Meta app "Almanca Dil Atölyesi", Facebook-login mode). No Facebook
+  Max 3 Shorts per lesson, published one a day (19:00); Instagram Reels by `publish.py` (the publishing
+  core: queue, timing rules, posting lock, audit; platforms are plug-ins: `platform_instagram.py`, `platform_fake.py`
+  for tests) on the schedule set on the dashboard (`schedule.py`, `D:\YT\easy-work\publishing.json`; default one a day
+  20:00-23:59, 20 h gap, never > 3 in 24 h; automatic posting was OFF at the v2 deploy) or by hand from the dashboard,
+  via `instagram.py` (setup: `pipeline/instagram-setup.md`; Meta app "Almanca Dil Atölyesi", Facebook-login mode). No Facebook
   posts since 2026-11-03 (Page did poorly and was deleted, Instagram well): `FACEBOOK_PAGE = False`. Publishing still
   needs *a* Page linked to Instagram (a new empty one is; without it media_publish fails "Fatal" 2207085). Key: a
   system user's token from Business settings (`instagram.py system-token`). Go slowly with Meta logins/keys: a burst of
@@ -27,8 +30,13 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   Private dashboard: https://yt.boyukbas.com (`pipeline/dashboard.py` + `pipeline/dashboard/`), served by the PC on
   127.0.0.1:8790 through a Cloudflare named tunnel, behind Cloudflare Access (Google login; the user + Sinem only).
   The server re-checks Access's signed token (aud, team, email) on every request; settings (team, aud, emails) live in
-  `D:\YT\easy-work\dashboard.json`, never in this public repo. Buttons: post next Reel now (20 h rule kept), pause/resume
-  daily Reels (`D:\YT\easy-work\instagram-paused`), retry a stopped lesson; each press logged in `dashboard.log`.
+  `D:\YT\easy-work\dashboard.json`, never in this public repo. Tabs: Home, Publish (post
+  any waiting Reel with warnings + override tick, reorder/skip/caption/mark as posted, automatic-posting settings),
+  Videos, Stats (`stats.py` → `stats.db`, hourly YouTube + Instagram numbers), Activity (`publish.db`); each press logged
+  in `dashboard.log`. `instagram-paused` is only an emergency brake now (deleting it does not turn posting on).
+  Dev copy, offline with fake data: `PIPELINE_WORK=<scratch> python -I dashboard.py serve --dev --fixtures --port 8791`
+  (refuses the real work folder). Tests: `python -I -m unittest discover -s pipeline	ests -t pipeline` (network
+  blocked by `tests/guard.py`) and `node pipeline/tests/smoke_ui.cjs` against the dev server.
   Started at logon by Task Scheduler "YT dashboard" (`pipeline/dashboard.cmd`: tunnel `yt-dashboard` with config
   `D:\YT\easy-work\cloudflared.yml` + server, each restarted 30 s after it stops; logs `tunnel.log`, `dashboard-server.log`).
   Zero Trust team `frosty-bar-63c8` (Free); boyukbas.com DNS on Cloudflare since 2026-11-04 (Spaceship email forwarding

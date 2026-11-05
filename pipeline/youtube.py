@@ -20,10 +20,11 @@ Quota: 10,000 units a day; a Short with two caption tracks costs ~900, so a less
 
 Client: %USERPROFILE%\\.shorts-pipeline\\youtube_client.json (Desktop OAuth client, project "shorts0editor").
 Token:  %USERPROFILE%\\.shorts-pipeline\\youtube_token.json (refreshed automatically; delete it to sign in again)."""
-import argparse, hashlib, json, re, sys, time
+import argparse, hashlib, json, os, re, sys, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -46,12 +47,24 @@ MANUAL = ['pin the comment', 'end screen (video + subscribe on the right half, l
 
 
 def credentials(interactive=False):
-    creds = Credentials.from_authorized_user_file(str(TOKEN), SCOPES) if TOKEN.exists() else None
+    """The signed-in credentials, refreshed (and saved) when expired. Only a refused sign-in (e.g. invalid_grant)
+    or a damaged token file asks for a login; no internet or a Google error keeps the token and raises."""
+    try:
+        creds = Credentials.from_authorized_user_file(str(TOKEN), SCOPES) if TOKEN.exists() else None
+    except ValueError:                                    # damaged file (e.g. NULs after a power cut): sign in again
+        creds = None
     if creds and creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
+        except TransportError as e:                       # no internet, DNS, timeout: the sign-in itself is fine
+            raise RuntimeError(f'YouTube not reachable right now ({type(e).__name__}); the sign-in is kept') from e
+        except RefreshError as e:
+            oauth = e.args[1] if len(e.args) > 1 and isinstance(e.args[1], dict) else None
+            if e.retryable or (oauth is None and not str(e).startswith('Reauthentication')):   # Google 5xx, JSON or HTML
+                raise RuntimeError('Google could not refresh the YouTube sign-in right now; the sign-in is kept') from e
+            creds = None                                  # refused (invalid_grant: revoked, Testing mode) → sign in again
         except Exception:
-            creds = None                                  # revoked / expired (Testing mode) → sign in again
+            creds = None
     if not creds or not creds.valid:
         if not interactive:
             raise RuntimeError('YouTube sign-in needed: run  python youtube.py login')
@@ -63,8 +76,40 @@ def credentials(interactive=False):
         if not any(i == CHANNEL_ID for i, _ in got):
             TOKEN.unlink(missing_ok=True)
             raise SystemExit(f'Signed in to {got or "no channel"}, not Almanca Dil Atölyesi. Run login again and pick that channel.')
-    TOKEN.write_text(creds.to_json())
+    text = creds.to_json()
+    try:
+        same = TOKEN.read_text(encoding='utf-8') == text
+    except (OSError, ValueError):
+        same = False
+    if not same:
+        save_token(text)
     return creds
+
+
+def save_token(text: str) -> None:
+    """Write youtube_token.json atomically and durably: a temp file, flushed and fsynced to the disk, then
+    os.replace (retried on PermissionError 5 times over about 3 s). The watcher and the dashboard both refresh
+    the token, and a half-written or empty file (a power cut right after the rename) signs YouTube out."""
+    TOKEN.parent.mkdir(parents=True, exist_ok=True)
+    tmp = TOKEN.with_name(f'{TOKEN.name}.tmp-{os.getpid()}-{os.urandom(4).hex()}')
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())                          # the data is on the disk before the rename
+        for wait in (0.2, 0.4, 0.6, 0.8, 1.0, None):       # Windows refuses while another process has it open
+            try:
+                os.replace(tmp, TOKEN)
+                return
+            except PermissionError:
+                if wait is None:
+                    raise
+                time.sleep(wait)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def api(interactive=False):

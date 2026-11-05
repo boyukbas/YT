@@ -9,8 +9,8 @@
     },
     {
       "name": "dashboard-dev",
-      "runtimeExecutable": "D:\\YT\\work\\venv\\Scripts\\python.exe",
-      "runtimeArgs": ["-I", "pipeline/dashboard.py", "serve", "--dev", "--port", "8791"],
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "set PIPELINE_WORK=D:\\YT\\dash-dev\\work&& set USERPROFILE=D:\\YT\\dash-dev\\home&& set HOME=D:\\YT\\dash-dev\\home&& mkdir D:\\YT\\dash-dev\\work D:\\YT\\dash-dev\\home 2>nul & D:\\YT\\work\\venv\\Scripts\\python.exe -I pipeline\\dashboard.py serve --dev --fixtures --port 8791"],
       "port": 8791
     }
   ]
