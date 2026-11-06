@@ -364,7 +364,7 @@ function postSheet(id) { // spec 9.4; S10: warns post only with the tick, which 
   });
   let ta, rules, tL, tick, msg, send;
   ps = { id, job: (j) => j.id === st.jid && stages(j) };
-  s.onClose = () => { ps = null; };
+  s.onClose = () => { ps = null; clearTimeout(st.timer); };
   if (live(D.job) && D.job.item === id) {
     st.jid = D.job.id;
     return stages(D.job);
@@ -413,10 +413,20 @@ function postSheet(id) { // spec 9.4; S10: warns post only with the tick, which 
     if (e === 'stale' && j.preview) show(j.preview);
     else if (/^(confirm|problems)$/.test(e)) { // the server's newer checks (and fingerprint): tick again
       [st.extra, st.pv.check, tick.checked] = [j.checks || [], j.check || st.pv.check, false];
-    } else if ([404, 409, 423, 429].includes(r.status)) st.stop = 1;
+    } else if (e === 'rate_limited' && j.retry_after > 0) { // item 14: off for the server's wait, then on again
+      st.stop = 1;
+      clearTimeout(st.timer);
+      st.timer = setTimeout(() => {
+        st.stop = 0;
+        msg.className = '';
+        msg.textContent = '';
+        check();
+      }, j.retry_after * 1e3);
+    } else if ([404, 409, 423, 429].includes(r.status)) st.stop = 1; // hard_cap: its message names the next time
     if (j.job) follow(j.job);
     msg.className = /^(stale|confirm)$/.test(e) ? 'note warn' : 'err';
-    msg.textContent = e === 'stale' ? `Something changed since you opened this (a ${N} just went out). Check again.` : j.message || `Error ${r.status}`;
+    msg.textContent = e === 'stale' ? `Something changed since you opened this (a ${N} just went out). Check again.`
+      : e === 'rate_limited' ? said(r) : j.message || `Error ${r.status}`;
     if (https(j.url)) msg.append(' ', ext('Open', j.url, 'btn link'));
     check();
   }

@@ -1067,7 +1067,23 @@ class PerDay(unittest.TestCase):
 
     def test_forecast_three_a_day(self):
         rows = S.forecast(self.three(), [], T('2026-11-04 09:00'), ['a', 'b', 'c', 'd'])
-        self.assertEqual([S.local(r['at']).strftime('%d %H:%M') for r in rows], ['04 12:00', '04 15:50', '04 19:40', '05 12:00'])   # AUTO_SLACK: 10 min early is fine
+        self.assertEqual([S.local(r['at']).strftime('%d %H:%M') for r in rows], ['04 12:00', '04 16:00', '04 20:00', '05 12:00'])   # the full gap, never AUTO_SLACK early
+
+    def test_forecast_never_closer_than_the_gap(self):
+        """Item 15: every shown pair of rows is at least min_gap_hours apart; the first row is next_auto's time and
+        next_auto itself still allows AUTO_SLACK."""
+        now = T('2026-11-04 09:00')
+        for c in (self.three(), self.three(min_gap_hours=5), cfg(), cfg(min_gap_hours=26), cfg(every_days=2)):
+            with self.subTest(c=c):
+                rows = S.forecast(c, [], now, [str(n) for n in range(8)])
+                self.assertGreater(len(rows), 2)
+                gaps = [(b['at'] - a['at']) / timedelta(hours=1) for a, b in zip(rows, rows[1:])]
+                self.assertTrue(all(g >= c['min_gap_hours'] for g in gaps), gaps)
+                self.assertEqual(rows[0]['at'], S.next_auto(c, [], now, 1)[0])
+                for r in rows:
+                    self.assertIsNone(S.slot_check(c, [], r['at']))
+        h = [P('2026-11-04 12:00')]
+        self.assertIsNone(S.slot_check(self.three(), h, T('2026-11-04 15:50')))         # next_auto/slot_check unchanged
 
     def test_manual_warnings(self):
         h = [P('2026-11-04 12:00'), P('2026-11-04 16:00')]

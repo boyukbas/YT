@@ -1650,8 +1650,9 @@ def start_post(root: Path, platform_name: str, item_id: str, caption: str, save_
         raise PublishError(422, 'problems', 'Fix these first.', checks=[_check_json(c) for c in bad])
     cap = next((c for c in checks if c.code == 'hard_cap'), None)
     if cap:                                                                         # 10
-        n = S.posts_in_24h(v.hist, now)
-        raise PublishError(429, 'hard_cap', f'{n} {p.noun}s in the last 24 hours: that is the limit.',
+        n, free = S.posts_in_24h(v.hist, now), _time(cap.data.get('next_possible'))
+        raise PublishError(429, 'hard_cap', f'{n} {p.noun}s in the last 24 hours: that is the limit.' +
+                           (f' Next possible {S.fmt(free)}.' if free else ''),      # item 14: the time, not just "no"
                            next_possible=cap.data.get('next_possible'))
     bad = [c for c in checks if c.code in ('file_missing', 'length') or (c.code == 'quota' and c.level == 'block')]
     if bad:
@@ -2113,7 +2114,14 @@ def _failed(p: Platform, row, item: Item, exc: Exception) -> None:
     """The post failed before it went live: classify, trip the breaker or mark the item failed, end the job."""
     kind = _kind(p, exc)
     error = (redact(str(exc)) or type(exc).__name__)[:500]
-    if kind in ('auth', 'permission', 'rate') and p.breaker:
+    # The one place that decides whether this failure trips the breaker (its logic stays as it is). An exception
+    # that carries 'until' says the platform itself is paused until a known time (YouTube's used-up daily quota:
+    # platform_youtube.QuotaUsedUp; publish.py never imports a platform). Its Platform.paused() hook already holds
+    # automatic and manual posts until then ('quota' preflight block, the paused card), so the breaker is left
+    # closed: tripping it would only escalate the cooling (1 h, 4 h, ...) across quota days. Every other failure
+    # trips as before (a plain 'rate' error still cools for COOL_HOURS[0]).
+    held = getattr(exc, 'until', None) is not None
+    if kind in ('auth', 'permission', 'rate') and p.breaker and not held:
         _trip(p.breaker, kind, error, row['who'])
     _end(p, row, 'failed', kind=kind, error=error, item_failed=error if kind == 'content' else None,
          queue_key=item.key if item else None, expect=_OPEN)
@@ -3015,7 +3023,7 @@ def views(root: Path, now: datetime | None = None) -> dict:
 
 
 def attention(root: Path, now: datetime | None = None, views: dict | None = None) -> list[dict]:
-    """The publishing attention items (spec 9.2, rules 4-11, and P1 rule 14) in the Attention shape. views:
+    """The publishing attention items (spec 9.2, rules 4-9, and P1 rule 14) in the Attention shape. views:
     see views()."""
     now, out, given, views = _now(now), [], views, {}
     try:
@@ -3090,20 +3098,9 @@ def attention(root: Path, now: datetime | None = None, views: dict | None = None
                              f'{"s are" if len(bad) != 1 else " is"} marked Failed',
                              f'{bad[0].file.name}: {v.row(bad[0])["failed"]} Failed {v.p.noun}s are never posted '
                              'automatically: check them in Publish, then Try again.', link(name)))
-    for name, v in views.items():                                                   # 10, 11
-        n, on = len(v.waiting()), S.effective_auto(v.loaded, name)
-        if not on[0] and on[1] in ('off', 'stopped_by_file') and n:
-            out.append(_card(f'auto_off_waiting:{name}', 'yellow', 'anyone', f'Automatic {v.p.noun}s are off',
-                             f'{n} {v.p.noun}{"s are" if n != 1 else " is"} waiting. Post one from Publish, or turn '
-                             'automatic posting on.', link(name)))
-    for name, v in views.items():
-        n = len(v.waiting())
-        if n <= 2:
-            rows = _forecast(root, v.p, v.cfg, True, v)['rows']
-            until = f' (until {S.fmt_day(_time(rows[-1]["at"]))})' if rows else ''
-            text = (f'Only {n} {v.p.noun}{"s" if n != 1 else ""} left{until}. Record the next lesson.' if n else
-                    f'No {v.p.noun}s left. Record the next lesson.')
-            out.append(_card(f'queue_low:{name}', 'yellow', 'sinem', f'Few {v.p.noun}s left', text))
+    # Rules 10 and 11 are gone (item 12, 2026-11-06): automatic posting being off is a chosen setting (the Next
+    # list says it), and the one 'few left' card for every platform is dashboard.attention's (it sees the lessons
+    # being made), from runways() below.
     with _Con() as con:                                                             # 14 (P1)
         rows = con.execute("SELECT * FROM audit WHERE kind = 'auto.missed' AND at >= ? ORDER BY id",
                            (S.iso(now - 2 * _DAY),)).fetchall()
@@ -3112,6 +3109,26 @@ def attention(root: Path, now: datetime | None = None, views: dict | None = None
         if r['platform'] in views and slot:
             out.append(_card(f'auto_missed:{r["platform"]}:{slot}', 'yellow', 'pc', 'A slot passed without a post',
                              r['text']))
+    return out
+
+
+def runways(root: Path, now: datetime | None = None, views: dict | None = None) -> list[dict]:
+    """How long each set-up platform's waiting items last, for Home's one 'few left' card (dashboard.attention):
+    [{'name', 'label', 'noun', 'verb', 'waiting', 'runway'}], runway = the Istanbul date ('YYYY-MM-DD') of the last
+    waiting item's forecast slot with the saved settings and automatic posting assumed on, or None (nothing
+    waiting, or no slot found). A platform that cannot be read is left out. views: see views(). Page bodies only."""
+    now, out = _now(now), []
+    for name, p in registry().items():
+        try:
+            if not p.set_up():
+                continue
+            v = (views or {}).get(name) or _View(Path(root), p, now, strict=False)
+            n = len(v.waiting())
+            runway = _forecast(root, p, v.cfg, True, v)['runway'] if n else None
+        except Exception:
+            continue
+        out.append({'name': name, 'label': p.label, 'noun': p.noun, 'verb': p.verb or 'post', 'waiting': n,
+                    'runway': runway})
     return out
 
 

@@ -26,7 +26,12 @@ _BAD = re.compile(r'[<>]')                   # YouTube refuses these in a title 
 
 
 class QuotaUsedUp(RuntimeError):
-    """YouTube's daily API quota is used up (a 'rate' error with a readable message)."""
+    """YouTube's daily API quota is used up (a 'rate' error with a readable message). until: when it is back (a
+    datetime); publish._failed reads it and leaves the breaker closed (the paused hook holds uploads until then)."""
+
+    def __init__(self, text: str, until: datetime | None = None):
+        super().__init__(text)
+        self.until = until
 
 
 class Refused(RuntimeError):
@@ -211,7 +216,8 @@ class YouTubePlatform(publish.Platform):
             return self._post(item, caption, journal)
         except Exception as e:
             if 'quotaExceeded' in str(e):
-                raise QuotaUsedUp(Y.quota_text(Y.quota_used_up(publish._utcnow()))) from e
+                until = Y.quota_used_up(publish._utcnow())
+                raise QuotaUsedUp(Y.quota_text(until), until) from e
             if not _google(e):
                 raise
             journal.log(f'{item.file.name}: YouTube said: {publish.redact(str(e))[:500]}')

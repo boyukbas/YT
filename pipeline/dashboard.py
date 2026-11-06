@@ -71,7 +71,7 @@ PATTERNS = {'platform': re.compile(r'[a-z]{2,20}'), 'id': re.compile(r'[0-9a-f]{
 COVER = re.compile(r'/api/cover/([a-z]{2,20})/([0-9a-f]{12})\.jpg')
 RULES = ('lesson_stopped', 'lesson_waiting', 'ready_upload', 'post_unresolved', 'post_failed', 'items_failed',
          'breaker', 'paused', 'key_refused', 'key_expiring', 'auto_suspended', 'settings_invalid', 'record_pending',
-         'auto_off_waiting', 'queue_low', 'watcher_stale', 'drive_missing', 'auto_missed')                  # spec 9.2, in order
+         'queue_low', 'watcher_stale', 'drive_missing', 'auto_missed')     # spec 9.2, in order (no auto_off_waiting)
 RANK = {**{r: n for n, r in enumerate(RULES)}, 'lessons_error': 0, 'publish_error': 3}
 SOURCES = {'youtube': 'YouTube', 'instagram': 'Instagram', 'instagram_limit': 'Instagram limit',
            'instagram_permissions': 'Instagram permissions'}
@@ -325,12 +325,20 @@ def merged(root: Path) -> tuple[list[dict], dict]:
     return found, numbers
 
 
+STATE_FIELDS = {'instagram': 'reel', 'youtube': 'upload'}      # the Videos tab's line per platform (item 13)
+
+
 def reel_states(root: Path, views: dict | None = None) -> dict[tuple[str, str], dict]:
-    """{(lesson, file name): {'platform', 'id', 'state'}} for every publish candidate (the first platform wins).
-    The queue lists waiting, failed (and checking) and skipped items in full; every other candidate is posted.
-    One candidates scan per platform (views: see _views)."""
+    """{(lesson, file name): {field: {'platform', 'id', 'state'}}} for every publish candidate, one field per
+    platform (STATE_FIELDS: 'reel' = Instagram, 'upload' = YouTube; other platforms are not shown), so a video's
+    YouTube state never hides its Instagram one or the other way round. The queue lists waiting, failed (and
+    checking) and skipped items in full; every other candidate is posted. One candidates scan per platform
+    (views: see _views)."""
     out, views = {}, _views(root) if views is None else views
     for name in _registry():
+        field = STATE_FIELDS.get(name)
+        if field is None:
+            continue
         try:
             v = views.get(name)
             found = v.items if v is not None else publish.items(root, name)[0]
@@ -340,8 +348,8 @@ def reel_states(root: Path, views: dict | None = None) -> dict[tuple[str, str], 
             continue
         states = {j['id']: j['state'] for g in ('waiting', 'failed', 'skipped', 'posted') for j in q.get(g) or []}
         for it in found:
-            out.setdefault((it.lesson, it.file.name), {'platform': name, 'id': it.id,
-                                                       'state': states.get(it.id, 'posted')})
+            out.setdefault((it.lesson, it.file.name), {}).setdefault(field, {'platform': name, 'id': it.id,
+                                                                             'state': states.get(it.id, 'posted')})
     return out
 
 
@@ -363,15 +371,17 @@ def cover_ids(root: Path, views: dict | None = None) -> dict[tuple[str, str], di
 
 def videos_view(root: Path) -> dict:
     """The GET /api/videos body. items() merged with stats.youtube_cache() exactly as build() merged the old
-    cache, sorted newest first. Each video gets 'reel' {'platform', 'id', 'state'} when it is a publish
-    candidate (matched on lesson and file name), else null, and 'cover' {'platform', 'id'} (for
-    /api/cover/<platform>/<id>.jpg) when one of its candidates has a cover on Drive, else null."""
+    cache, sorted newest first. Each video gets 'reel' {'platform', 'id', 'state'} when it is an Instagram
+    candidate (matched on lesson and file name), else null; 'upload' the same for YouTube; and 'cover'
+    {'platform', 'id'} (for /api/cover/<platform>/<id>.jpg) when one of its candidates has a cover on Drive,
+    else null."""
     found, numbers = merged(root)
     views = _views(root)
     reels, covers = reel_states(root, views), cover_ids(root, views)
     for it in found:
         key = (it['lesson'], it['file']) if it.get('file') else None
-        it['reel'] = reels.get(key) if key else None
+        got = (reels.get(key) or {}) if key else {}
+        it['reel'], it['upload'] = got.get('reel'), got.get('upload')
         it['cover'] = covers.get(key) if key else None
     ch = numbers.get('_channel') if isinstance(numbers.get('_channel'), dict) else {}
     at = numbers.get('_at')
@@ -423,11 +433,45 @@ def lesson_cards(found: list[dict]) -> list[dict]:
                                it.get('step') or 'Waiting for a Claude answer.'))
         elif state == 'ready':
             ready[name] = ready.get(name, 0) + 1
-    for name, n in ready.items():
+    for name, n in ready.items():                 # the PC can upload it too now (item 12): Publish first
         cards.append(_card(f'ready_upload:{name}', 'yellow', 'sinem', f"'{name}' is ready",
-                           f'{n} video{"s" if n != 1 else ""} ready to upload in the YouTube app',
-                           {'kind': 'link', 'label': 'Open Videos', 'href': '#videos/ready'}))
+                           'Upload it in Publish or in the YouTube app.' if n == 1 else
+                           f'{n} videos are ready. Upload them in Publish or in the YouTube app.',
+                           {'kind': 'link', 'label': 'Open Publish', 'href': '#publish/youtube'}))
     return cards
+
+
+QUEUE_LOW_DAYS = 2      # the 'few left' card: a platform's last waiting item goes out at most this many days from today
+MAKING = ('new', 'making', 'waiting')       # a lesson on its way: more posts are coming, so no 'few left' card
+
+
+def queue_low(root: Path, found: list[dict], now: datetime | None = None, views: dict | None = None) -> list[dict]:
+    """The one 'few left' card for every set-up platform (item 12, 2026-11-06), worded in days, or []. Only while
+    no lesson is new, being made or waiting (found: items()), since those bring more. views: see _views."""
+    if any(it.get('kind') == 'lesson' and it.get('state') in MAKING for it in found):
+        return []
+    now = _now(now)
+    today, low = S.local(now).date(), []
+    for r in publish.runways(root, now, views):
+        days = (datetime.fromisoformat(r['runway']).date() - today).days if r['runway'] else None
+        if r['waiting'] == 0 or (days is not None and days <= QUEUE_LOW_DAYS):
+            low.append({**r, 'days': 0 if r['waiting'] == 0 else max(days, 0)})
+    if not low:
+        return []
+    nouns = [f"{r['noun']}s" for r in low]                     # 'Reels', 'videos'
+    title = (f"No {' or '.join(nouns)} left" if all(r['waiting'] == 0 for r in low) else
+             f"Few {' and '.join(nouns)} left")
+    lines = []
+    for r in low:
+        n, what = r['waiting'], f"{r['label']} {r['noun']}"
+        if n == 0:
+            lines.append(f"No {what}s left to {r['verb']}.")
+        else:
+            day = S.fmt_day(S.at_local(r['runway'], '12:00'))
+            lines.append(f"{n} {what}{'s' if n != 1 else ''} left to {r['verb']}: " +
+                         (f'enough for today ({day}).' if r['days'] == 0 else f'enough until tomorrow ({day}).'
+                          if r['days'] == 1 else f"enough for {r['days']} more days (until {day})."))
+    return [_card('queue_low', 'yellow', 'sinem', title, ' '.join(lines) + ' Record the next lesson.')]
 
 
 def watcher(now: datetime | None = None) -> dict:
@@ -446,10 +490,12 @@ def watcher(now: datetime | None = None) -> dict:
 def attention(root: Path | None, now: datetime | None = None, found: list[dict] | None = None,
               views: dict | None = None) -> list[dict]:
     """Home's attention list: lesson rules 1-3, watcher_stale and drive_missing (spec 9.2), then
-    publish.attention(root). Red items first; within a level, the rule order. found: items() already read;
-    views: see _views."""
+    publish.attention(root) and the one queue_low card. Red items first; within a level, the rule order. found:
+    items() already read; views: see _views."""
     now = _now(now)
-    cards = lesson_cards(found if found is not None else merged(root)[0]) if root is not None else []
+    if root is not None and found is None:
+        found = merged(root)[0]
+    cards = lesson_cards(found) if root is not None else []
     w = watcher(now)
     if w['stale']:
         seen = f'Its last run was {ago(_time(w["at"]), now)}.' if w['at'] else 'No run of it was seen yet.'
@@ -465,6 +511,10 @@ def attention(root: Path | None, now: datetime | None = None, found: list[dict] 
             cards += publish.attention(root, now, views=views)
         except Exception as e:
             cards.append(_card('publish_error', 'red', 'pc', 'Publishing could not be read', _short(e)))
+        try:
+            cards += queue_low(root, found, now, views)
+        except Exception as e:
+            _say('queue_low not read', e)
     cards += key_cards(now)
     return sorted(cards, key=_order)
 

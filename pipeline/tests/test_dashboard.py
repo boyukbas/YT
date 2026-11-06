@@ -797,6 +797,7 @@ class Endpoints(DevCase):
         conforms(self, d, VIDEOS)
         for v in d['videos']:
             conforms(self, v['reel'], REEL, f'$.videos[{v.get("file")}].reel')
+            conforms(self, v['upload'], REEL, f'$.videos[{v.get("file")}].upload')
             self.assertTrue({'lesson', 'kind', 'state', 'time'} <= set(v), v)
         self.assertEqual(len(d['videos']), 13)
         self.assertEqual(d['channel']['name'], dashboard.CHANNEL_NAME)
@@ -1080,11 +1081,12 @@ class FromA1(DevCase):
 
     def test_F7_items_failed_card_order(self):
         c = lambda cid, level='yellow': dashboard._card(cid, level, 'pc', 't', 'x')
-        cards = [c('queue_low:instagram'), c('auto_off_waiting:instagram'), c('items_failed:instagram'),
+        cards = [c('queue_low'), c('items_failed:instagram'),
                  c('record_pending:j1'), c('post_failed:j2', 'red'), c('breaker:meta', 'red')]
         self.assertEqual(dashboard.RULES.index('items_failed'), dashboard.RULES.index('post_failed') + 1)
         self.assertEqual([x['id'].split(':')[0] for x in sorted(cards, key=dashboard._order)],
-                         ['post_failed', 'breaker', 'items_failed', 'record_pending', 'auto_off_waiting', 'queue_low'])
+                         ['post_failed', 'breaker', 'items_failed', 'record_pending', 'queue_low'])
+        self.assertNotIn('auto_off_waiting', dashboard.RULES)                # item 12: a chosen setting, no card
 
     def test_G1_resolve_codes_pass_through(self):
         for code in ('published', 'check_first', 'too_early', 'not_sent', 'posted', 'not_unresolved'):
@@ -1641,12 +1643,16 @@ class HomeParts(Case):
                          ('yellow', 'pc', 'Needs a Claude answer: texts', None))
         ready = cards['ready_upload:new']
         self.assertEqual((ready['level'], ready['who'], ready['text']),
-                         ('yellow', 'sinem', '1 video ready to upload in the YouTube app'))
-        self.assertEqual(ready['action'], {'kind': 'link', 'label': 'Open Videos', 'href': '#videos/ready'})
+                         ('yellow', 'sinem', 'Upload it in Publish or in the YouTube app.'))
+        self.assertEqual(ready['action'], {'kind': 'link', 'label': 'Open Publish', 'href': '#publish/youtube'})
         for c in cards.values():
             conforms(self, c, ATTENTION)
         self.assertNotIn('watcher_stale', cards)
         self.assertNotIn('drive_missing', cards)
+
+    def test_no_queue_low_while_a_lesson_is_on_its_way(self):
+        self.beat(4)
+        self.assertNotIn('queue_low', {c['id'] for c in dashboard.attention(self.root, NOW)})    # 'Waiting lesson'
 
     def test_retry_asked(self):
         self.beat(4)
@@ -1661,7 +1667,7 @@ class HomeParts(Case):
         self.pause()
         ids = [c['id'] for c in dashboard.attention(self.root, NOW)]        # no watcher.json: stale
         self.assertEqual(ids, ['lesson_stopped:Broken lesson', 'watcher_stale', 'lesson_waiting:Waiting lesson',
-                               'ready_upload:new', 'auto_off_waiting:instagram'])
+                               'ready_upload:new'])                  # no auto_off_waiting (item 12)
         cards = dashboard.attention(self.root, NOW)
         rank = [(c['level'] != 'red', dashboard.RULES.index(c['id'].split(':')[0])) for c in cards]
         self.assertEqual(rank, sorted(rank))
@@ -1817,6 +1823,37 @@ class VideosView(Case):
         publish.queue_op(self.root, 'instagram', 'skip', 0, 'dev@localhost', item_id=ID[7])
         v = {x['file']: x for x in dashboard.videos_view(self.root)['videos']}
         self.assertEqual(v['new-short-7.mp4']['reel']['state'], 'skipped')
+        self.assertTrue(all(x['upload'] is None for x in v.values()))        # no YouTube platform: no upload state
+
+    def test_states_per_platform(self):
+        """Item 13: 'reel' is Instagram's state only, 'upload' YouTube's; a long video has no Reel but its upload."""
+        yt = fixtures.fake_youtube_platform(self.root)
+        publish.set_registry({'instagram': fixtures.fake_platform(self.root), 'youtube': yt})
+        v = {x['file']: x for x in dashboard.videos_view(self.root)['videos']}
+        long = v['zu-infinitiv-video.mp4']                  # horizontal: no Reel (before: its YouTube state as 'reel')
+        self.assertIsNone(long['reel'])
+        self.assertEqual((long['upload']['platform'], long['upload']['state']), ('youtube', 'waiting'))
+        self.assertEqual(long['youtube'], 'FAKE_yt_013')    # the hand-made note: on YouTube, so the page shows no line
+        self.assertIsNone(v['new-video.mp4']['reel'])
+        self.assertEqual(v['new-video.mp4']['upload']['state'], 'posted')
+        short9 = v['new-short-9.mp4']                                          # ready on YouTube, waiting on Instagram
+        self.assertEqual((short9['reel']['platform'], short9['reel']['state']), ('instagram', 'waiting'))
+        self.assertEqual((short9['upload']['platform'], short9['upload']['state']), ('youtube', 'waiting'))
+        self.assertNotIn('youtube', short9)
+        self.assertEqual((v['new-short-6.mp4']['reel']['state'], v['new-short-6.mp4']['upload']['state']),
+                         ('waiting', 'posted'))              # before: the first platform (Instagram) hid YouTube's
+        ready = short9
+        for f, x in v.items():
+            conforms(self, x['reel'], REEL, f)
+            conforms(self, x['upload'], REEL, f)
+            if x['reel']:
+                self.assertEqual(x['reel']['platform'], 'instagram', f)
+        yid = next(it.id for it in publish.items(self.root, 'youtube')[0] if it.file.name == ready['file'])
+        publish.queue_op(self.root, 'youtube', 'skip', publish.queue(self.root, 'youtube', now=NOW)['rev'],
+                         'dev@localhost', item_id=yid)
+        v = {x['file']: x for x in dashboard.videos_view(self.root)['videos']}
+        self.assertEqual(v[ready['file']]['upload']['state'], 'skipped')
+        self.assertEqual(v[ready['file']]['reel']['state'], 'waiting')        # Instagram's own state is untouched
 
     def test_covers_before_youtube(self):
         """A video not on YouTube yet shows the cover from Drive: YouTube's candidate first, else another platform's."""
@@ -1854,6 +1891,79 @@ class VideosView(Case):
         with mock.patch.object(dashboard.stats, 'youtube_cache', side_effect=RuntimeError('no db')):
             d = dashboard.videos_view(self.root)
         self.assertEqual((d['counts_at'], d['channel']['subscribers'], len(d['videos'])), (None, None, 13))
+
+
+class QueueLow(Case):
+    """Item 12: one 'few left' card for every platform, worded in days, only while no lesson is on its way."""
+
+    @classmethod
+    def setUpClass(cls):
+        guard.reset()
+        cls.base = Path(tempfile.mkdtemp(prefix='low-', dir=guard.TMP))
+        cls.root = fixtures.make_root(cls.base)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.base, ignore_errors=True)
+
+    def setUp(self):
+        super().setUp()
+        publish.set_registry({'instagram': fixtures.fake_platform(self.root)})
+
+    def low(self, found=()):
+        return [c for c in dashboard.queue_low(self.root, list(found), NOW) if c['id'] == 'queue_low']
+
+    def test_wording_in_days(self):
+        r = lambda name, label, noun, verb, n, runway: {'name': name, 'label': label, 'noun': noun, 'verb': verb,
+                                                        'waiting': n, 'runway': runway}
+        for runs, title, text in (
+                ([r('instagram', 'Instagram', 'Reel', 'post', 1, '2026-11-04')], 'Few Reels left',
+                 '1 Instagram Reel left to post: enough for today (Wed 4 Nov). Record the next lesson.'),
+                ([r('instagram', 'Instagram', 'Reel', 'post', 2, '2026-11-05'),
+                  r('youtube', 'YouTube', 'video', 'upload', 9, '2026-11-20')], 'Few Reels left',
+                 '2 Instagram Reels left to post: enough until tomorrow (Thu 5 Nov). Record the next lesson.'),
+                ([r('instagram', 'Instagram', 'Reel', 'post', 3, '2026-11-06'),
+                  r('youtube', 'YouTube', 'video', 'upload', 0, None)], 'Few Reels and videos left',
+                 '3 Instagram Reels left to post: enough for 2 more days (until Fri 6 Nov). '
+                 'No YouTube videos left to upload. Record the next lesson.'),
+                ([r('instagram', 'Instagram', 'Reel', 'post', 0, None),
+                  r('youtube', 'YouTube', 'video', 'upload', 0, None)], 'No Reels or videos left',
+                 'No Instagram Reels left to post. No YouTube videos left to upload. Record the next lesson.'),
+                ([r('instagram', 'Instagram', 'Reel', 'post', 4, '2026-11-07'),
+                  r('youtube', 'YouTube', 'video', 'upload', 5, None)], None, None)):     # 3 days; no slot: unknown
+            with self.subTest(title=title, text=text):
+                with mock.patch.object(publish, 'runways', return_value=runs):
+                    cards = dashboard.queue_low(self.root, [], NOW)
+                if title is None:
+                    self.assertEqual(cards, [])
+                    continue
+                self.assertEqual([(c['id'], c['level'], c['who'], c['title'], c['text'], c['action']) for c in cards],
+                                 [('queue_low', 'yellow', 'sinem', title, text, None)])
+                conforms(self, cards[0], ATTENTION)
+
+    def test_only_when_no_lesson_is_on_its_way(self):
+        runs = [{'name': 'instagram', 'label': 'Instagram', 'noun': 'Reel', 'verb': 'post', 'waiting': 0, 'runway': None}]
+        with mock.patch.object(publish, 'runways', return_value=runs):
+            self.assertEqual(len(self.low()), 1)
+            for state in ('new', 'making', 'waiting'):
+                with self.subTest(state=state):
+                    self.assertEqual(self.low([{'lesson': 'x', 'kind': 'lesson', 'state': state}]), [])
+            self.assertEqual(len(self.low([{'lesson': 'x', 'kind': 'lesson', 'state': 'stopped'},
+                                           {'lesson': 'y', 'kind': 'video', 'state': 'ready'}])), 1)
+
+    def test_from_the_real_queue_on_home(self):
+        cards = {c['id'] for c in dashboard.attention(self.root, NOW)}
+        self.assertNotIn('queue_low', cards)                                   # 6 Reels waiting
+        self.assertFalse(any(c.startswith(('queue_low:', 'auto_off_waiting')) for c in cards), cards)
+        q = publish.queue(self.root, 'instagram', now=NOW)
+        for j in q['waiting'][2:]:
+            publish.queue_op(self.root, 'instagram', 'skip', publish.queue(self.root, 'instagram', now=NOW)['rev'],
+                             'dev@localhost', item_id=j['id'])
+        card = next(c for c in dashboard.attention(self.root, NOW) if c['id'] == 'queue_low')
+        self.assertEqual((card['title'], card['text']), ('Few Reels left', '2 Instagram Reels left to post: enough for '
+                                                         '2 more days (until Fri 6 Nov). Record the next lesson.'))
+        body = dashboard.home(self.root, 'dev@localhost', NOW)
+        self.assertEqual([c['id'] for c in body['attention']].count('queue_low'), 1)
 
 
 class LogTail(Case):

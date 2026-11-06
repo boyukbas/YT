@@ -168,6 +168,8 @@ instagram.py~~ done; (5) ~~studio layout for horizontal recordings~~ done;
   a shared candidate scanner; multi-part posts (X threads) need per-part journal state first.
 
 ## Backlog / ideas (not done)
+- **Home page grouping (owner, 2026-11-06, "for later"):** put the Instagram Reels counts together with Instagram followers
+  and likes in one group under the real Instagram logo; the same for YouTube (its video counts + subscribers/views).
 - **Thumbnail maker in the Share tab, in the approved format** (user asked for it, "not now", 2026-10-29).
   Reference (archived 2026-11-05 to `G:\My Drive\YT archive (PC)`): `work (first hand-made videos)\scripts\thumbnail.py` → `V1\output\thumbnail_youtube.jpg`; the pipeline's own version is `pipeline/thumbnail.py`. 1280×720, dark navy
   + soft yellow glow, cut-out presenter right (white outline), red level badge ("B2 ALMANCA"), the lesson's German

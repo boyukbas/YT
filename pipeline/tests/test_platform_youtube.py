@@ -217,6 +217,14 @@ class Upload(Case):
         self.assertEqual([c[0] for c in self.tube.calls], ['find_upload'])                # nothing went up
         quota = [c for c in P.preview(self.root, 'youtube', P.item_id(NEW9), now=self.now)['checks'] if c['code'] == 'quota']
         self.assertEqual([c['level'] for c in quota], ['block'])                  # the button says so before trying
+        back = Y.quota_until(self.now)                                           # item 16: the paused hook waits,
+        self.assertEqual(job['error'], Y.quota_text(back))                      # not the breaker
+        self.assertEqual(P.breaker('google')['state'], 'closed')
+        with P._Con() as con:
+            self.assertIsNone(con.execute("SELECT * FROM breakers WHERE name = 'google'").fetchone())
+        cards = {c['id']: c for c in P.attention(self.root, now=self.now)}
+        self.assertEqual(sorted(cards), ['paused:youtube'])                      # one yellow card, one time
+        self.assertEqual(cards['paused:youtube']['title'], f'YouTube uploads wait until {P.S.fmt(back)}')
 
     def test_quota_note_from_the_watcher_blocks_upload_too(self):
         self.addCleanup((guard.WORK / Y.QUOTA_FILE).unlink, missing_ok=True)
@@ -361,6 +369,45 @@ class Paused(Case):
                              [c['code'] for c in pv['checks'] if c['level'] == 'warn'], WHO)
         self.assertEqual((e.exception.status, e.exception.code), (422, 'problems'))
         self.assertEqual([c['code'] for c in e.exception.extra['checks']], ['length'])
+
+    def test_quota_error_carries_its_time(self):
+        """Item 16: QuotaUsedUp has 'until' (publish._failed reads it without importing YouTube)."""
+        e = PY.QuotaUsedUp('x', self.now)
+        self.assertEqual((str(e), e.until), ('x', self.now))
+        self.assertIsNone(PY.QuotaUsedUp('x').until)
+        self.assertEqual(PY.classify(e), 'rate')
+        import ast
+        tree = ast.parse(Path(P.__file__).read_text(encoding='utf-8'))
+        names = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        names |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+        self.assertFalse({'platform_youtube', 'youtube'} & names, names)
+
+    def test_automatic_upload_hit_by_the_quota_leaves_the_breaker_closed_and_waits(self):
+        """Item 16: an automatic upload that runs into the quota fails plainly, leaves the breaker closed, and the
+        next watcher runs hold the queue (the 'quota' block) until the limit is back; no breaker escalation."""
+        class Used(FakeTube):
+            def find_upload(self, yt, mp4, taken):
+                self.calls.append(('find_upload', mp4.name))
+                raise RuntimeError('<HttpError 403 ... "quotaExceeded">')
+        self.faked(Used())
+        P.save_settings('youtube', {'auto': True}, P.settings(self.root).doc['rev'], ['auto_on'], WHO, root=self.root)
+        hist = self.p.history(self.root)
+        cfg = P.S.platform_settings(P.settings(self.root), 'youtube')
+        for days in range(1, 8):
+            t = (self.now + P.timedelta(days=days)).replace(hour=17, minute=5)
+            if P.S.slot_open(cfg, hist, t)[0]:
+                break
+        self.now = t
+        with mock.patch.object(P, '_utcnow', lambda: self.now):
+            lines = P.auto_step(self.root, log=lambda *a: None, now=self.now)
+            self.assertTrue(any('not posted (rate)' in line and 'daily limit is used up' in line for line in lines), lines)
+            self.assertEqual(P.breaker('google')['state'], 'closed')
+            later = self.now + P.timedelta(minutes=10)
+            lines = P.auto_step(self.root, log=lambda *a: None, now=later)
+        self.assertTrue(all('posting ' not in line for line in lines), lines)    # held: no second job
+        with P._Con() as con:
+            self.assertEqual(con.execute('SELECT COUNT(*) FROM jobs').fetchone()[0], 1)
+            self.assertIsNone(con.execute("SELECT * FROM breakers WHERE name = 'google'").fetchone())
 
     def test_automatic_uploads_wait_on_a_quota_day(self):
         P.save_settings('youtube', {'auto': True}, P.settings(self.root).doc['rev'], ['auto_on'], WHO, root=self.root)

@@ -645,7 +645,10 @@ def forecast(cfg: dict, history: list[Post], now: datetime, keys: list[str], lim
              ) -> list[dict]:
     """Where the waiting keys (queue order) would go if automatic posting were on and every post succeeded at
     its earliest time: [{'key', 'at', 'slot'}], each simulated post added to the history; stops at a slot after
-    today + limit_days (Istanbul dates: next_auto's horizon) or when next_auto finds no slot."""
+    today + limit_days (Istanbul dates: next_auto's horizon) or when next_auto finds no slot. The first row is
+    next_auto's own time; each later one is searched from the previous row + min_gap_hours, so the list never
+    shows two posts closer than the gap (next_auto may go AUTO_SLACK early, which read as 15:50 after 12:00 with
+    a 4 h gap; 2026-11-06)."""
     now = _utc(now)
     last_day = (local(now).date() + timedelta(days=limit_days)).isoformat()
     hist, rows, t = list(history), [], now
@@ -655,7 +658,7 @@ def forecast(cfg: dict, history: list[Post], now: datetime, keys: list[str], lim
             break
         rows.append({'key': key, 'at': at, 'slot': slot})
         hist.append(Post(at=at, by='auto', key=key))
-        t = at
+        t = at + timedelta(hours=cfg['min_gap_hours'])
     return rows
 
 

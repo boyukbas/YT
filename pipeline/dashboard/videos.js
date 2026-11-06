@@ -6,6 +6,7 @@ const STATES = { public: 'Public', scheduled: 'Scheduled', uploaded: 'Uploaded (
 const FILTERS = [['all', 'All'], ['public', 'Public'], ['coming', 'Coming up'], ['ready', 'Ready to upload'],
   ['short', 'Shorts'], ['video', 'Videos']];
 const REEL = { skipped: 'Reel skipped', failed: 'Reel failed', checking: 'Reel being checked' };
+const UPLOAD = { failed: 'Last upload failed', checking: 'Upload being checked' }; // + waiting (its own button)
 const KEY = 'dashFilter', TZ = 'Europe/Istanbul', YT_ID = /^[\w-]{11}$/;
 const DAY = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const CLOCK = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
@@ -51,6 +52,16 @@ function reel(v) {
   return line;
 }
 
+function upload(v) { // item 13: YouTube's state, apart from the Reel's; none once the video is on YouTube
+  const r = v.upload, line = el('div', 'reel');
+  if (!reelOk(r) || YT_ID.test(v.youtube || '') || !(r.state === 'waiting' || UPLOAD[r.state])) return '';
+  line.append(icon('yt'));
+  if (r.state === 'waiting') {
+    line.append(el('span', null, 'Upload waiting ·'), btn('Upload', 'small primary', () => go(`#publish/${r.platform}/post/${r.id}`)));
+  } else line.append(el('span', null, UPLOAD[r.state]), Object.assign(el('a', 'btn small', 'Open Publish'), { href: `#publish/${r.platform}` }));
+  return line;
+}
+
 function retry(v) {
   const b = btn(v.retry ? 'Retry asked: waiting for the PC' : 'Retry this lesson', 'danger small', async () => {
     if (!(await confirmSheet({ title: 'Retry this lesson', text: `Run '${v.lesson}' again from the start?`, okLabel: 'Retry' }))) return;
@@ -82,7 +93,7 @@ function card(v) {
   if (v.clips) meta.append(el('span', null, `${v.clips} clip${v.clips === 1 ? '' : 's'}`));
   if (v.seconds) meta.append(el('span', null, len(v.seconds)));
   if (v.views != null) meta.append(count(v.views, 'view'), v.likes ? count(v.likes, 'like') : '', v.comments ? count(v.comments, 'comment') : '');
-  body.append(top, t, meta, reel(v), v.error ? el('div', 'err', v.error) : '');
+  body.append(top, t, meta, reel(v), upload(v), v.error ? el('div', 'err', v.error) : '');
   if (v.state === 'stopped') body.appendChild(el('div', 'row')).append(retry(v));
   c.append(thumb(v), body);
   return c;

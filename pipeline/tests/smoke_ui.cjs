@@ -222,8 +222,8 @@ async function settings(page, vp) { // the dry run 400 ms after the sheet opens;
   noErrors(page, label);
 }
 
-// Regression checks for the review findings (F4, F5, F12-F16, F38, F44, F46-F49, F54, G25, G26, G28) and the error
-// wording follow-ups (U3-U11). In these pages
+// Regression checks for the review findings (F4, F5, F12-F16, F38, F44, F46-F49, F54, G25, G26, G28), the error
+// wording follow-ups (U3-U11) and the later items (L12-L14). In these pages
 // every POST is answered here and never reaches the server; GET answers may be changed (fx), replaced (raw), delayed
 // (slow) or failed (dead) here.
 const SHEETS = () => [...document.querySelectorAll('dialog[open]')].map((d) => {
@@ -669,6 +669,73 @@ const REGRESS = {
     await until(page, () => document.querySelectorAll('section.view[data-view="activity"] .act-t').length === 2, 8000);
     const rows = await page.locator('section.view[data-view="activity"] .act-t').allInnerTexts();
     check('U10 activity rows name the platform', rows.length === 2 && / · YouTube · pc$/.test(rows[0]) && / · Instagram · pc$/.test(rows[1]), JSON.stringify(rows));
+  },
+  async L12(page) { // Home: no card for a chosen setting; the ready card opens Publish (YouTube); one 'few left' card
+    page.o.fx['/api/home'] = (j) => {
+      j.attention = (j.attention || []).concat({ id: 'queue_low', level: 'yellow', who: 'sinem', title: 'Few Reels and videos left', action: null,
+        text: '2 Instagram Reels left to post: enough until tomorrow (Sat 7 Nov). No YouTube videos left to upload. Record the next lesson.' });
+    };
+    await at(page, '#home');
+    const v = page.locator('section.view[data-view="home"]'), t = (await v.locator('.attn').allInnerTexts()).join(' | ');
+    check('L12 Home: no "Automatic ... are off" card (the Next list says it)', t && !/Automatic \w+s are off/.test(t), t.slice(0, 300));
+    const ready = v.locator('.attn', { hasText: 'is ready' }).first();
+    const [rt, href] = [await ready.innerText().catch(() => ''), await ready.locator('a.btn').getAttribute('href').catch(() => null)];
+    check('L12 the ready card: "Upload it in Publish or in the YouTube app" and Open Publish (YouTube)',
+      /Upload (it|them) in Publish or in the YouTube app/.test(rt) && /Open Publish/.test(rt) && href === '#publish/youtube', `${href} :: ${rt}`);
+    check('L12 one "few left" card', (await v.locator('.attn', { hasText: 'left to post' }).count()) === 1);
+    await ready.locator('a.btn').click();
+    check('L12 Open Publish goes to YouTube', await until(page, () => location.hash === '#publish/youtube', 8000), await page.evaluate(() => location.hash));
+  },
+  async L13(page) { // Videos: YouTube's state on its own line; none for a video already on YouTube
+    page.o.fx['/api/videos'] = (j) => {
+      const at = iso(-3600e3), base = { kind: 'video', seconds: 300, reel: null, cover: null, time: at };
+      j.videos = [{ ...base, lesson: 'L13 failed', file: 'l13-failed.mp4', state: 'ready', upload: { platform: 'youtube', id: '0123456789ab', state: 'failed' } },
+        { ...base, lesson: 'L13 on YouTube', file: 'l13-on.mp4', state: 'uploaded', youtube: 'ABCDEFGHIJK', upload: { platform: 'youtube', id: '0123456789ac', state: 'waiting' } },
+        ...(j.videos || [])];
+    };
+    await at(page, '#videos');
+    const card = (name) => page.locator('section.view[data-view="videos"] .card', { hasText: name }).first();
+    const wait = page.locator('section.view[data-view="videos"] .card', { has: page.locator('.reel', { hasText: 'Upload waiting' }) }).first();
+    check('L13 a video not on YouTube yet: "Upload waiting · Upload"', (await wait.count()) === 1 && /Upload waiting ·\s*Upload/.test(await wait.innerText()),
+      await page.locator('section.view[data-view="videos"]').innerText().then((x) => x.slice(0, 400)));
+    const f = await card('L13 failed').innerText();
+    check('L13 a failed upload: "Last upload failed · Open Publish"', /Last upload failed\s*Open Publish/.test(f) && !/Reel/.test(f), f);
+    check('L13 the failed line opens Publish (YouTube)', (await card('L13 failed').locator('.reel a.btn').getAttribute('href')) === '#publish/youtube');
+    check('L13 a video already on YouTube: no Upload line', !(await card('L13 on YouTube').locator('.reel').count()), await card('L13 on YouTube').innerText());
+    const zu = await card('ZU + INFINITIV').innerText().catch(() => '');
+    check('L13 the long ZU video: no "Reel waiting" for its YouTube state', !!zu && !/Reel waiting|Upload waiting/.test(zu), zu);
+    const h = await wait.locator('.reel button', { hasText: 'Upload' }).evaluate((b) => b.getBoundingClientRect().height);
+    check('L13 the Upload button is at least 44 px high on a phone', h >= 44, h);
+    await wait.locator('.reel button', { hasText: 'Upload' }).click();
+    const opened = await until(page, () => /^#publish\/youtube\/post\/[0-9a-f]{12}$/.test(location.hash) && !!document.querySelector('dialog[open]'), 10000);
+    check('L13 Upload opens the video\'s upload sheet', opened && /Upload to YouTube/.test(await page.locator(`${DLG} .sheet-title`).innerText().catch(() => '')),
+      await page.evaluate(() => location.hash));
+  },
+  async L14(page) { // after a 429 the post button comes back by itself; the daily cap names the next time
+    page.o.fx['/api/preview'] = (j) => { j.checks = []; };
+    let n = 0;
+    page.o.answer = (p) => (p !== '/api/post' ? null : ++n === 1
+      ? [429, { error: 'rate_limited', message: 'Wait 2 s before posting again.', retry_after: 2 }]
+      : [429, { error: 'hard_cap', message: '6 Reels in the last 24 hours: that is the limit. Next possible Sat 7 Nov 20:00.', next_possible: iso(864e5) }]);
+    await at(page, '#publish/instagram');
+    await waitingCard(page, 0).locator('button', { hasText: 'Post' }).click();
+    await until(page, () => !!document.querySelector('dialog[open] textarea'), 10000);
+    const send = page.locator(`${DLG} .sheet-foot button.primary`), err = page.locator(`${DLG} .sheet-body > p.err`);
+    await send.click();
+    await sleep(500);
+    check('L14 a 429: says how long, and the button is off', /Wait 2 s before posting again/.test(await err.innerText().catch(() => '')) && await send.isDisabled(),
+      await err.innerText().catch(() => 'no message'));
+    const back = await until(page, () => {
+      const b = document.querySelector('dialog[open] .sheet-foot button.primary');
+      return !!b && !b.disabled;
+    }, 6000);
+    check('L14 ... and on again after retry_after, without reopening the sheet', back && !(await err.count()) || back && !(await err.innerText()).trim(),
+      await err.innerText().catch(() => ''));
+    await send.click();
+    await sleep(2500);
+    const t = await err.innerText().catch(() => '');
+    check('L14 the 24 h cap: the message names the next time and the button stays off', /Next possible \w{3} \d+ \w{3} \d\d:\d\d/.test(t) && await send.isDisabled(), t);
+    check('L14 two POSTs were sent', page.posts.filter((x) => x[0] === '/api/post').length === 2);
   },
 };
 

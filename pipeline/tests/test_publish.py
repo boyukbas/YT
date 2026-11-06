@@ -323,8 +323,9 @@ class RefusalOrder(Case):
         self.cap_full()
         self.item().file.unlink()
         e = self.refused((429, 'hard_cap'))
-        self.assertEqual(e.message, '3 Reels in the last 24 hours: that is the limit.')
-        self.assertEqual(e.extra['next_possible'], S.iso(fixtures.LAST_POST + timedelta(hours=24)))
+        free = fixtures.LAST_POST + timedelta(hours=24)
+        self.assertEqual(e.message, f'3 Reels in the last 24 hours: that is the limit. Next possible {S.fmt(free)}.')
+        self.assertEqual(e.extra['next_possible'], S.iso(free))
 
     def test_10_file_missing(self):
         self.item().file.unlink()
@@ -407,6 +408,34 @@ class FakeOutcomes(Case):
                 self.assertEqual(P.breaker('meta')['state'],
                                  {'auth': 'stopped', 'permission': 'stopped', 'rate': 'cooling'}.get(kind, 'closed'))
                 self.assertEqual(P.queue(self.root, IG, now=self.now)['waiting'][0]['key'], NEW6)
+
+    def test_a_platform_pause_leaves_the_breaker_closed(self):
+        """Item 16: a failure whose exception carries 'until' (the platform itself says wait: YouTube's used-up
+        quota) ends the job failed as before but never trips the breaker; a plain 'rate' failure still cools for
+        COOL_HOURS[0] = 1 h, and auth still stops."""
+        held = F.FakeError('rate')
+        held.until = self.now + timedelta(hours=12)
+        jid, caption = self.cli_job()
+        with mock.patch.object(self.fake, 'post', side_effect=held):
+            j = P.run_post(jid, self.root, caption)
+        self.assertEqual((j['state'], j['kind'], j['error']), ('failed', 'rate', str(held)))
+        self.assertEqual(j['result'], f'Not posted: {held}')
+        self.assertEqual(P.breaker('meta')['state'], 'closed')
+        with P._Con() as con:
+            self.assertIsNone(con.execute("SELECT * FROM breakers WHERE name = 'meta'").fetchone())   # no step either
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM audit WHERE kind = 'breaker.open'").fetchone()[0], 0)
+        self.assertEqual(P.queue(self.root, IG, now=self.now)['waiting'][0]['key'], NEW6)              # still waiting
+        j = self.go('rate')
+        b = P.breaker('meta')
+        self.assertEqual((j['kind'], b['state'], b['until']), ('rate', 'cooling', S.iso(self.now + timedelta(hours=1))))
+        with P._Con(write=True) as con:
+            con.execute('DELETE FROM breakers')
+        none = F.FakeError('auth')
+        none.until = None                                   # 'until' None is not a pause: the breaker trips as before
+        jid, caption = self.cli_job()
+        with mock.patch.object(self.fake, 'post', side_effect=none):
+            P.run_post(jid, self.root, caption)
+        self.assertEqual(P.breaker('meta')['state'], 'stopped')
 
     def test_content_marks_the_item_failed(self):
         j = self.go('content')
@@ -1494,14 +1523,15 @@ class StateBodies(Case):
     def test_attention(self):
         self.assertEqual(P.attention(self.root, now=self.now), [])
         P.save_settings(IG, {'auto': False}, P.settings(self.root).doc['rev'], [], WHO, root=self.root)
-        self.assertEqual(P.attention(self.root, now=self.now), [{
-            'id': 'auto_off_waiting:instagram', 'level': 'yellow', 'who': 'anyone', 'title': 'Automatic Reels are off',
-            'text': '6 Reels are waiting. Post one from Publish, or turn automatic posting on.',
-            'action': {'kind': 'link', 'label': 'Open Publish', 'href': '#publish/instagram'}}])
+        self.assertEqual(P.attention(self.root, now=self.now), [])     # item 12: off is a chosen setting, no card
         for key in WAITING[2:]:
             P.queue_op(self.root, IG, 'skip', P.queue(self.root, IG, now=self.now)['rev'], WHO, item_id=P.item_id(key))
-        low = next(a for a in P.attention(self.root, now=self.now) if a['id'] == 'queue_low:instagram')
-        self.assertEqual((low['who'], low['text']), ('sinem', 'Only 2 Reels left (until Fri 6 Nov). Record the next lesson.'))
+        self.assertEqual(P.attention(self.root, now=self.now), [])     # 'few left' is dashboard.queue_low's now
+        self.assertEqual(P.runways(self.root, now=self.now), [{'name': IG, 'label': 'Instagram', 'noun': 'Reel',
+                                                              'verb': 'post', 'waiting': 2, 'runway': '2026-11-06'}])
+        self.fake.ready = False                                         # not set up: left out
+        self.assertEqual(P.runways(self.root, now=self.now), [])
+        self.fake.ready = True
         self.fake.script = ['transient']
         jid, caption = self.cli_job()
         P.run_post(jid, self.root, caption)
