@@ -138,6 +138,12 @@ function badges() {
 }
 
 const live = (j) => !!j && (j.state === 'queued' || j.state === 'running');
+export function cut(t, n) { // at most n characters, cut at a space, with '…'
+  const s = String(t ?? '').replace(/\s+/g, ' ').trim();
+  if (s.length <= n) return s;
+  const i = s.lastIndexOf(' ', n - 1);
+  return `${s.slice(0, i > n / 2 ? i : n - 1).replace(/[\s.,;:]+$/, '')}…`;
+}
 export function noteJob(job) {
   S.job = live(job) ? job : null;
   badges();
@@ -147,7 +153,7 @@ function watchJob() {
   S.jobBusy = true;
   S.jobAt = Date.now();
   api(`/api/job?id=${encodeURIComponent(S.job.id)}`).then((r) => {
-    if (S.tab !== 'publish' && r.job && !live(r.job)) toast(r.job.result || 'The post has ended: see Publish.');
+    if (S.tab !== 'publish' && r.job && !live(r.job)) toast(`${cut(r.job.result || 'The post has ended.', 120)} See Publish.`);
     S.jobFails = 0;
     noteJob(r.job);
   }, (e) => {
@@ -207,6 +213,7 @@ export function toast(text) {
   for (const t of document.querySelectorAll('.toast')) t.remove();
   const t = el('div', 'toast', text);
   t.setAttribute('role', 'status');
+  t.onclick = () => t.remove(); // a tap dismisses it
   (stack.length ? stack[stack.length - 1].dialog : document.body).append(t);
   setTimeout(() => t.remove(), 3500 + Math.min(4000, String(text).length * 40));
 }
@@ -242,6 +249,7 @@ export function openSheet(build) {
     onClose: null, close: () => closeSheet(s) };
   s.title.id = `sheet-${++seq}`;
   d.setAttribute('aria-labelledby', s.title.id);
+  [d.tabIndex, d.autofocus] = [-1, true]; // the sheet takes the focus, not its X (WebKit rings the X after a tap)
   Object.assign(x, { type: 'button', ariaLabel: 'Close' });
   x.append(icon('x'));
   x.addEventListener('click', s.close);

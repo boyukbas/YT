@@ -30,7 +30,7 @@ _TILES = {'yt_subscribers': ('YouTube subscribers', 'youtube', 'subscribers'),
 _COLS = ('title', 'url', 'published', 'privacy', 'lesson', 'file')
 _ID = re.compile(r'[A-Za-z0-9_-]{1,64}')
 _HAND = re.compile(r'https://youtu\.be/([\w-]{11})')                  # a hand-made lesson's note (as dashboard.items)
-_QUOTA = 'quotaExceeded: the daily YouTube quota is used up until midnight Pacific time'
+_QUOTA = "YouTube's daily limit is used up"
 _HAS_INSIGHTS = 'The key has instagram_manage_insights. Reach and plays are not collected in this build.'
 _NO_INSIGHTS = ('Reach and plays need the instagram_manage_insights permission, which this key does not have. '
                 'Make a new system-user key with instagram_manage_insights ticked, then run instagram.py '
@@ -204,9 +204,10 @@ def _jload(p: Path) -> dict:
 
 
 def _short(e: BaseException) -> str:
-    """A one-line reason for the Stats source line: type and message, secrets hidden, at most 160 characters."""
-    text = publish.redact(f'{type(e).__name__}: {" ".join(str(e).split())}')
-    return text if len(text) <= 160 else text[:159] + '…'
+    """A one-line reason for the Stats source line: the message in plain words (publish.plain: Google's raw
+    errors as one sentence), secrets hidden, at most 160 characters; the error's type when it has no message."""
+    msg = publish.plain(publish.redact(' '.join(str(e).split())), 160)
+    return msg or type(e).__name__
 
 
 # ---------- the old cache, the pipeline's YouTube ids ----------
@@ -668,5 +669,15 @@ def sources() -> list[dict]:
         r = rows.get(s)
         out.append({'source': s, 'last_ok': r['last_ok'] if r else None, 'last_try': r['last_try'] if r else None,
                     'next_try': r['next_try'] if r else None, 'fails': r['fails'] if r else 0,
-                    'error': r['last_error'] if r else None})
+                    'error': _shown(r['last_error']) if r else None})
     return out
+
+
+def _shown(text: str | None) -> str | None:
+    """Display only: an error the old _short stored ('HttpError: <HttpError ...', 'quotaExceeded: ...') in
+    today's words; newer ones come back as they are."""
+    if not text:
+        return text
+    if text.startswith('quotaExceeded:'):
+        return _QUOTA
+    return publish.plain(re.sub(r'^\w+: (?=<HttpError )', '', text), 160)

@@ -70,8 +70,8 @@ PATTERNS = {'platform': re.compile(r'[a-z]{2,20}'), 'id': re.compile(r'[0-9a-f]{
             'job': re.compile(r'j[0-9a-f]{10}'), 'check': re.compile(r'[0-9a-f]{16}')}     # spec 8.1 (fullmatch)
 COVER = re.compile(r'/api/cover/([a-z]{2,20})/([0-9a-f]{12})\.jpg')
 RULES = ('lesson_stopped', 'lesson_waiting', 'ready_upload', 'post_unresolved', 'post_failed', 'items_failed',
-         'breaker', 'key_refused', 'key_expiring', 'auto_suspended', 'settings_invalid', 'record_pending', 'auto_off_waiting',
-         'queue_low', 'watcher_stale', 'drive_missing', 'auto_missed')                  # spec 9.2, in order
+         'breaker', 'paused', 'key_refused', 'key_expiring', 'auto_suspended', 'settings_invalid', 'record_pending',
+         'auto_off_waiting', 'queue_low', 'watcher_stale', 'drive_missing', 'auto_missed')                  # spec 9.2, in order
 RANK = {**{r: n for n, r in enumerate(RULES)}, 'lessons_error': 0, 'publish_error': 3}
 SOURCES = {'youtube': 'YouTube', 'instagram': 'Instagram', 'instagram_limit': 'Instagram limit',
            'instagram_permissions': 'Instagram permissions'}
@@ -345,14 +345,34 @@ def reel_states(root: Path, views: dict | None = None) -> dict[tuple[str, str], 
     return out
 
 
+def cover_ids(root: Path, views: dict | None = None) -> dict[tuple[str, str], dict]:
+    """{(lesson, file name): {'platform', 'id'}} of a publish candidate whose cover file exists on Drive, YouTube's
+    first (the picture YouTube will get), for the Videos tab before YouTube has its own thumbnail (2026-11-06)."""
+    out, views = {}, _views(root) if views is None else views
+    for name in sorted(_registry(), key=lambda n: n != 'youtube'):
+        try:
+            v = views.get(name)
+            p = publish.platform(name)
+            for it in (v.items if v is not None else publish.items(root, name)[0]):
+                if (it.lesson, it.file.name) not in out and p.cover(it) is not None:
+                    out[(it.lesson, it.file.name)] = {'platform': name, 'id': it.id}
+        except Exception as e:
+            _say(f'{name} covers not read', e)
+    return out
+
+
 def videos_view(root: Path) -> dict:
     """The GET /api/videos body. items() merged with stats.youtube_cache() exactly as build() merged the old
     cache, sorted newest first. Each video gets 'reel' {'platform', 'id', 'state'} when it is a publish
-    candidate (matched on lesson and file name), else null."""
+    candidate (matched on lesson and file name), else null, and 'cover' {'platform', 'id'} (for
+    /api/cover/<platform>/<id>.jpg) when one of its candidates has a cover on Drive, else null."""
     found, numbers = merged(root)
-    reels = reel_states(root)
+    views = _views(root)
+    reels, covers = reel_states(root, views), cover_ids(root, views)
     for it in found:
-        it['reel'] = reels.get((it['lesson'], it['file'])) if it.get('file') else None
+        key = (it['lesson'], it['file']) if it.get('file') else None
+        it['reel'] = reels.get(key) if key else None
+        it['cover'] = covers.get(key) if key else None
     ch = numbers.get('_channel') if isinstance(numbers.get('_channel'), dict) else {}
     at = numbers.get('_at')
     return {'generated': S.iso(_utcnow()),
@@ -459,7 +479,8 @@ def drive_health(root: Path | None) -> dict:
 
 def platform_health(now: datetime | None = None) -> list[dict]:
     """Each platform's set_up() and breaker as {'name', 'ok', 'set_up', 'breaker', 'text'}; a platform module that
-    does not load shows as not available. A key that ends soon (key_warning) shows instead of 'key OK' (F52)."""
+    does not load shows as not available. A key that ends soon (key_warning) shows instead of 'key OK' (F52), and
+    a platform that says wait (publish's paused hook: YouTube's used-up daily quota) instead of both."""
     plats, out = _registry(), []
     for name in [*plats, *(n for n in publish.PLATFORMS if n not in plats)]:
         p = plats.get(name)
@@ -474,14 +495,24 @@ def platform_health(now: datetime | None = None) -> list[dict]:
             continue
         state, until = b['state'], _time(b.get('until'))
         refused = up and state == 'closed' and _refused(p) is not None
+        held = state == 'closed' or (state == 'cooling' and b.get('kind') == 'rate')   # one cause, one time
+        wait = _time((publish._paused(p, _now(now)) or {}).get('until')) if up and held else None
+        wait = max(wait, until) if wait and until else wait
         text = (f'{p.label} not set up' if not up else f'{p.label} stopped: test the connection' if state == 'stopped'
+                else f'{p.label} daily limit used up · back {_when(wait, now)}' if wait and state == 'cooling'
                 else f'{p.label} paused until {S.local(until):%H:%M}' if state == 'cooling' and until
                 else f'{p.label} paused' if state != 'closed'
                 else f'{p.label} key refused: test the connection' if refused
+                else f'{p.label} daily limit used up · back {_when(wait, now)}' if wait
                 else _key_warning(p, now) or f'{p.label} key OK')
-        out.append({'name': name, 'ok': up and state == 'closed' and not refused, 'set_up': up, 'breaker': state,
-                    'text': text})
+        out.append({'name': name, 'ok': up and state == 'closed' and not refused and not wait, 'set_up': up,
+                    'breaker': state, 'text': text})
     return out
+
+
+def _when(t: datetime, now: datetime | None = None) -> str:
+    """'11:00' today, else 'Sat 7 Nov 11:00' (Istanbul time), so a time tomorrow never reads as one already past."""
+    return f'{S.local(t):%H:%M}' if S.local(t).date() == S.local(_now(now)).date() else S.fmt(t)
 
 
 def _refused(p) -> str | None:

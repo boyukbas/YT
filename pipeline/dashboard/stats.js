@@ -31,7 +31,7 @@ function sources(list = []) {
     const name = NAME[s.source];
     if (i) line.append(' · ');
     line.append(s.fails > 0 || (s.error && !s.last_ok)
-      ? el('span', 'err', `${name}${/_/.test(s.source) ? '' : ' numbers'} not read ${s.last_ok ? `since ${when(s.last_ok)}` : 'yet'}: ${s.error || 'unknown error'}`)
+      ? el('span', 'err', `${name}${/_/.test(s.source) ? '' : ' numbers'} not read ${s.last_ok ? `since ${when(s.last_ok)}` : 'yet'}: ${s.error || 'unknown error'}${s.next_try ? ` · next read ${when(s.next_try)}` : ''}`)
       : s.last_ok ? `${name}${i ? '' : ' numbers'} from ${when(s.last_ok)}` : `${name}: not read yet`);
   });
   return line;

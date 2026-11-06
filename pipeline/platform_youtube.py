@@ -29,6 +29,10 @@ class QuotaUsedUp(RuntimeError):
     """YouTube's daily API quota is used up (a 'rate' error with a readable message)."""
 
 
+class Refused(RuntimeError):
+    """A Google error, worded plainly; the original is __cause__."""
+
+
 class Rejected(RuntimeError):
     """YouTube rejected or failed the upload (its status says so): a content problem, not sent again."""
 
@@ -93,9 +97,19 @@ class YouTubePlatform(publish.Platform):
         return f"{item.entry.get('title', '')}\n\n{item.entry.get('description', '')}".strip()
 
     def cover(self, item):
-        """The thumbnail YouTube gets (lesson video), or the Short's vertical cover for the preview; None if none."""
+        """The thumbnail YouTube gets (lesson video; a vertical one gets the vertical cover, as youtube.apply_video
+        does), or the Short's vertical cover for the preview; None if none."""
         x = tools.extras(item.out)
-        names = [f'cover-short-{item.part}.jpg', 'thumbnail-short.jpg'] if Y.is_short(item.file) else ['thumbnail-1.jpg']
+        if Y.is_short(item.file):
+            names = [f'cover-short-{item.part}.jpg', 'thumbnail-short.jpg']
+        else:
+            names = ['thumbnail-1.jpg']
+            try:
+                p = publish.probe_cached(item.file)
+                if int(p['height']) > int(p['width']):
+                    names.insert(0, 'thumbnail-short.jpg')
+            except Exception:                            # unreadable: the lesson thumbnail
+                pass
         return next((x / n for n in names if (x / n).is_file()), None)
 
     def preflight(self, item, caption: str, fresh: bool = False) -> list:
@@ -183,16 +197,25 @@ class YouTubePlatform(publish.Platform):
     def classify(self, exc: BaseException) -> str:
         return classify(exc)
 
+    def paused(self, now) -> dict | None:
+        """While YouTube's daily quota is used up (the shared note): {'until', 'text'}, else None."""
+        until = Y.quota_until(now)
+        return {'until': publish.S.iso(until), 'text': Y.quota_text(until)} if until else None
+
     # ----- NETWORK -----
 
     def post(self, item, caption: str, journal) -> dict:
-        """_post, with YouTube's quotaExceeded turned into a plain sentence (and the shared quota note)."""
+        """_post, with YouTube's quotaExceeded turned into a plain sentence (and the shared quota note), and any
+        other Google error into Refused (plain words; the raw text goes to youtube.log through the journal)."""
         try:
             return self._post(item, caption, journal)
         except Exception as e:
-            if 'quotaExceeded' not in str(e):
+            if 'quotaExceeded' in str(e):
+                raise QuotaUsedUp(Y.quota_text(Y.quota_used_up(publish._utcnow()))) from e
+            if not _google(e):
                 raise
-            raise QuotaUsedUp(Y.quota_text(Y.quota_used_up(publish._utcnow()))) from e
+            journal.log(f'{item.file.name}: YouTube said: {publish.redact(str(e))[:500]}')
+            raise Refused(publish.plain(publish.redact(str(e)))) from e
 
     def _post(self, item, caption: str, journal) -> dict:
         yt, name = self.yt(), item.file.name
@@ -321,6 +344,8 @@ def classify(exc: BaseException) -> str:
     403 'permission'; 400 'content'; 5xx, timeouts and connection errors 'transient'; Rejected 'content';
     a local file problem 'local'; anything else 'unknown'."""
     from googleapiclient.errors import HttpError
+    if isinstance(exc, Refused) and exc.__cause__ is not None:
+        return classify(exc.__cause__)
     if isinstance(exc, Rejected):
         return 'content'
     if isinstance(exc, QuotaUsedUp):
@@ -346,6 +371,12 @@ def classify(exc: BaseException) -> str:
                                                                        r'Connection(Reset|Aborted|Refused)', text):
         return 'transient'
     return 'local' if isinstance(exc, OSError) else 'unknown'
+
+
+def _google(e: BaseException) -> bool:
+    """True for a Google API error (an HttpError, or its text)."""
+    from googleapiclient.errors import HttpError
+    return isinstance(e, HttpError) or str(e).startswith('<HttpError')
 
 
 def _applied(out: Path) -> dict:

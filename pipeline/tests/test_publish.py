@@ -1017,6 +1017,21 @@ class Suspension(Case):
         P.auto_step(self.root, now=self.now)
         self.assertEqual(len(self.posts()), 4)
 
+    def test_suspension_stores_the_raw_error_not_the_page_text(self):
+        """plain() is for the page only: suspended_why, the audit row and the log keep Meta's whole text."""
+        long = 'Meta 400: ' + 'Kelime uzun ' * 30 + 'see https://developers.facebook.com/docs/graph-api (code 100)'
+        self.fake.script = ['unknown'] * 3
+        lines = []
+        with mock.patch.dict(F._TEXTS, {'unknown': long}):
+            for day in ('2026-11-05', '2026-11-06', '2026-11-07'):
+                self.now = T(f'{day} 20:05')
+                lines = P.auto_step(self.root, now=self.now)
+        raw = self.rows('SELECT error FROM jobs ORDER BY created DESC')[0]['error']
+        self.assertIn('(code 100)', raw)
+        self.assertEqual(self.rows('SELECT suspended_why FROM auto_state')[0]['suspended_why'], raw)
+        self.assertIn(raw, self.rows("SELECT text FROM audit WHERE kind = 'auto.suspended'")[0]['text'])
+        self.assertTrue(any(line.endswith(raw) for line in lines), lines)
+
     def test_a_success_resets_the_count(self):
         self.fake.script = ['transient', 'transient']
         for t in ('2026-11-05 20:05', '2026-11-05 20:40'):
@@ -1041,7 +1056,8 @@ class BreakerKinds(Case):
         self.assertEqual((e.exception.status, e.exception.code), (423, 'breaker'))
         self.assertEqual(P.auto_step(self.root, now=self.now), [])
         self.assertEqual(P.cli_post(self.root / 'new', force=True),
-                         'Not posted: Posting is stopped: Instagram refused the permission (code 10).')
+                         'Not posted: Posting is stopped: Instagram refused the permission (code 10). '
+                         'Test the connection in Publish.')
         self.assertEqual(self.fake.calls, [])
         P.trip('meta', 'rate', 'Instagram says: too many calls (code 4).')
         b = P.breaker('meta')                                   # a rate error never shortens a stop
@@ -1443,7 +1459,7 @@ class StateBodies(Case):
         st = P.state(self.root, IG, now=self.now)
         self.assertEqual(set(st), {'platform', 'label', 'noun', 'verb', 'setup_hint', 'platforms', 'set_up', 'account_url', 'now', 'settings', 'settings_rev',
                                    'settings_problems', 'presets', 'auto', 'breaker', 'last_post', 'posts_24h',
-                                   'next_possible', 'counts', 'forecast', 'job', 'unresolved', 'queue'})
+                                   'next_possible', 'counts', 'forecast', 'job', 'unresolved', 'queue', 'paused'})
         self.assertEqual((st['account_url'], st['now'], st['posts_24h'], st['next_possible'], st['job']),
                          ('https://www.instagram.com/example_account/', S.iso(self.now), 1, None, None))
         self.assertEqual(st['counts'], {'waiting': 6, 'skipped': 0, 'failed': 0, 'posted': 5, 'by_lesson': [
@@ -1490,7 +1506,9 @@ class StateBodies(Case):
         jid, caption = self.cli_job()
         P.run_post(jid, self.root, caption)
         card = next(a for a in P.attention(self.root, now=self.now) if a['id'] == f'post_failed:{jid}')
-        self.assertEqual((card['level'], card['text']), ('red', 'new-short-6.mp4: Instagram did not answer (HTTP 503).'))
+        self.assertEqual((card['level'], card['title'], card['text']),
+                         ('red', 'The last Instagram Reel was not posted',
+                          'new-short-6.mp4 (Wed 4 Nov 22:40): Instagram did not answer (HTTP 503).'))
 
     def test_activity(self):
         self.post()
@@ -1508,6 +1526,105 @@ class StateBodies(Case):
                 P.activity(**bad)
             self.assertEqual((e.exception.status, e.exception.code, e.exception.message),
                              (400, 'bad_request', 'Unknown activity filter.'))
+
+
+# The 2026-11-06 09:48 upload: Google's answer as str(HttpError) (a quotaExceeded at the first request).
+RAW = ('<HttpError 403 when requesting https://youtube.googleapis.com/youtube/v3/channels?part=contentDetails&mine=true'
+       '&alt=json returned "The request cannot be completed because you have exceeded your <a href="/youtube/v3/'
+       'getting-started#quota">quota</a>.". Details: "[{\'message\': \'The request cannot be completed because you have '
+       'exceeded your <a href="/youtube/v3/getting-started#quota">quota</a>.\', \'domain\': \'youtube.quota\', '
+       '\'reason\': \'quotaExceeded\'}]">')
+QUOTA = "YouTube's daily limit for the PC's requests was used up."
+
+
+class Plain(unittest.TestCase):
+    """publish.plain(): Google's raw HttpError text as one short sentence, for the page only."""
+    def test_plain(self):
+        for raw in (RAW, RAW[:500], RAW[:300], P._sentence(RAW)):
+            with self.subTest(n=len(raw)):
+                got = P.plain(raw)
+                self.assertEqual(got, QUOTA)
+                for bad in ('http', '<', 'Details'):
+                    self.assertNotIn(bad, got)
+        for raw, want in (
+                ('<HttpError 401 when requesting https://x/y returned "Request had invalid authentication '
+                 'credentials.". Details: "[{\'reason\': \'authError\'}]">', "YouTube refused the PC's sign-in."),
+                ('<HttpError 503 when requesting https://x/y returned "Backend Error">', 'YouTube did not answer (error 503).'),
+                ('<HttpError 403 when requesting https://x/y returned "The caller does not have <b>permission</b>.". '
+                 'Details: "[{\'message\': \'x\', \'domain\': \'youtube\', \'reason\': \'forbidden\'}]">',
+                 'YouTube refused the request (error 403): The caller does not have permission.'),
+                ('<HttpError 403 when requesting https://x/y returned "Too many". Details: "[{\'reason\': '
+                 '\'rateLimitExceeded\'}]">', 'YouTube asked for a pause (too many requests).'),
+                ('<HttpError 403 "x">', 'YouTube refused the request (error 403): x.')):
+            with self.subTest(raw=raw[:40]):
+                self.assertEqual(P.plain(raw), want)
+        meta = 'Meta 400: Invalid parameter (code 100)'
+        self.assertEqual(P.plain(meta), meta)
+        self.assertEqual(P.plain(None), '')
+        long = P.plain('word ' * 100)
+        self.assertTrue(long.endswith('…') and len(long) <= 200, long)
+        self.assertEqual(P.plain('x' * 300, 50), 'x' * 49 + '…')
+        for x in (RAW, meta, 'word ' * 100, 'a <b>b</b> https://example.com/x c'):
+            self.assertEqual(P.plain(P.plain(x)), P.plain(x))
+
+    def test_sentence_cuts_at_a_word(self):
+        got = P._sentence('word ' * 100)
+        self.assertTrue(got.endswith('word…') and len(got) <= 300, got)
+        self.assertEqual(P._sentence('short'), 'short.')
+
+
+class PlainPages(Case):
+    """Rows stored before plain() (raw Google text in publish.db) read plainly on every page body."""
+    def test_old_raw_rows_read_plainly(self):
+        jid = self.add_job(state='failed', kind='rate', error=RAW[:500], result=f'Not posted: {RAW[:500]}',
+                           finished=S.iso(self.now - timedelta(minutes=5)))
+        P.trip('meta', 'rate', RAW)                                  # stored as _sentence(): cut at 300
+        P.audit('watcher', 'post.failed', f'new-short-6.mp4: not posted: {RAW}', platform=IG)
+        j = P.job(jid)
+        self.assertEqual((j['error'], j['result']), (QUOTA, f'Not posted: {QUOTA}'))
+        texts = [json.dumps(x) for x in (j, P.state(self.root, IG, now=self.now)['breaker'],
+                                         P.attention(self.root, now=self.now), P.activity()['items'])]
+        for t in texts:
+            self.assertNotIn('HttpError', t)
+            self.assertNotIn('http', t)
+        cards = {c['id'].split(':')[0]: c for c in P.attention(self.root, now=self.now)}
+        self.assertNotIn('post_failed', cards)                       # a rate failure: the breaker card says it
+        self.assertEqual(cards['breaker']['text'], f'{QUOTA} Posting starts again after Wed 4 Nov 23:40.')
+
+
+class FailedCard(Case):
+    """Home's 'The last ... was not posted' card: only while the video still waits; not for breaker kinds."""
+    def test_failed_card_hides_for_rate_and_after_mark_posted(self):
+        self.fake.script = ['transient']
+        jid, caption = self.cli_job()
+        P.run_post(jid, self.root, caption)
+        self.assertIn(f'post_failed:{jid}', [c['id'] for c in P.attention(self.root, now=self.now)])
+        P.queue_op(self.root, IG, 'mark_posted', P.queue(self.root, IG, now=self.now)['rev'], WHO,
+                   item_id=P.item_id(NEW6), permalink='https://www.instagram.com/reel/FAKEHAND1/')
+        self.assertNotIn(f'post_failed:{jid}', [c['id'] for c in P.attention(self.root, now=self.now)])
+        self.fake.script = ['rate']
+        jid, caption = self.cli_job(NEW7, override=('gap', 'same_day', 'hard_cap'))
+        self.assertEqual(P.run_post(jid, self.root, caption)['kind'], 'rate')
+        cards = {c['id']: c for c in P.attention(self.root, now=self.now)}
+        self.assertNotIn(f'post_failed:{jid}', cards)
+        b = cards['breaker:meta']
+        self.assertEqual((b['level'], b['who'], b['title'], b['action']), ('yellow', 'anyone', 'Instagram is paused', None))
+        self.assertTrue(b['text'].endswith('Posting starts again after Wed 4 Nov 23:40.'), b['text'])
+        P.trip('meta', 'auth', 'Instagram refused the key (code 190).')
+        b = {c['id']: c for c in P.attention(self.root, now=self.now)}['breaker:meta']
+        self.assertEqual((b['level'], b['who'], b['title'], b['text']),
+                         ('red', 'pc', 'Instagram is stopped', 'Instagram refused the key (code 190). Test the connection '
+                          'in Publish.'))
+
+    def test_activity_rows_carry_the_platform_label(self):
+        self.post()
+        P.trip('meta', 'rate', 'Instagram says: too many calls (code 4).')
+        rows = P.activity()['items']
+        b = next(r for r in rows if r['kind'] == 'breaker.open')
+        self.assertEqual((b['platform'], b['label']), (None, 'Instagram'))
+        self.assertEqual(b['text'], 'Posting paused (until 23:40): Instagram says: too many calls (code 4).')
+        self.assertEqual(next(r for r in rows if r['kind'] == 'post.done')['label'], 'Instagram')
+        self.assertIsNone(next(r for r in rows if r['kind'] == 'settings.migrated')['label'])
 
 
 class Isolation(Case):

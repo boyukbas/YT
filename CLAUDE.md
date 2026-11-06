@@ -40,6 +40,10 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   Dev copy, offline with fake data: `PIPELINE_WORK=<scratch> python -I dashboard.py serve --dev --fixtures --port 8791`
   (refuses the real work folder). Tests: `python -I -m unittest discover -s pipeline/tests -t pipeline` (network
   blocked by `tests/guard.py`) and `node pipeline/tests/smoke_ui.cjs` against the dev server.
+  The dashboard is used mostly on an **iPhone 16 (Safari)**: the smoke test also runs an iPhone pass in WebKit when it is
+  installed (no sideways scroll, fields >= 16 px); keep safe areas, dvh and 44 px taps. Errors on the page go through
+  `publish.plain()` (display only; raw text stays stored); YouTube's used-up quota shows as a pause (`Platform.paused`), not a failure.
+  Videos tab: a video not on YouTube yet shows its Drive cover (`dashboard.cover_ids`).
   Started at logon by Task Scheduler "YT dashboard" (`pipeline/dashboard.cmd`: tunnel `yt-dashboard` with config
   `D:\YT\easy-work\cloudflared.yml` + server, each restarted 30 s after it stops; logs `tunnel.log`, `dashboard-server.log`).
   Zero Trust team `frosty-bar-63c8` (Free); boyukbas.com DNS on Cloudflare since 2026-11-04 (Spaceship email forwarding

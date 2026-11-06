@@ -107,7 +107,7 @@ def lesson_block(lesson, now):
         if timedelta(0) <= now - t < timedelta(days=3):
             L.append('  By hand in Studio (if not done yet): pin the comment' +
                      (', end screen' if (data.get('chapters') or not data) else ''))
-    if st.get('youtube', '').startswith(("YouTube's daily API limit", 'YouTube step failed')):
+    if st.get('youtube', '').startswith(("YouTube's daily limit", "YouTube's daily API limit", 'YouTube step failed')):
         L.append(f'  ⚠ {st["youtube"][:200]}')
     return key, L
 

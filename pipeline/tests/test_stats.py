@@ -268,19 +268,19 @@ class Collect(Case):
 
     def test_default_youtube_goes_through_youtube_api(self):
         res = self.collect(yt=None)                                        # the guard blocks youtube.api()
-        self.assertTrue(res['youtube'].startswith('error: NetworkBlocked: youtube.api()'), res['youtube'])
+        self.assertTrue(res['youtube'].startswith('error: youtube.api()'), res['youtube'])
         self.assertEqual(res['instagram'], 'ok')
 
     def test_never_raises(self):
         with mock.patch.object(stats, 'due', side_effect=RuntimeError('made-up database failure')):
-            self.assertEqual(self.collect(), {s: 'error: RuntimeError: made-up database failure' for s in SOURCES})
+            self.assertEqual(self.collect(), {s: 'error: made-up database failure' for s in SOURCES})
 
     def test_a_failed_youtube_read_stores_nothing(self):
         class HalfBroken(fixtures.FakeYouTube):
             def channels(self):
                 raise RuntimeError('made-up channel failure')
         res = self.collect(yt=HalfBroken(fixtures.YT_VIDEOS, fixtures.YT_CHANNEL))
-        self.assertEqual(res['youtube'], 'error: RuntimeError: made-up channel failure')
+        self.assertEqual(res['youtube'], 'error: made-up channel failure')
         self.assertEqual(self.rows("SELECT * FROM samples WHERE platform = 'youtube'"), [])
         self.assertEqual(self.rows("SELECT ok, calls FROM fetches WHERE source = 'youtube'"), [{'ok': 0, 'calls': 2}])
 
@@ -313,7 +313,7 @@ class Collect(Case):
     def test_bad_limit_answer_is_an_error(self):
         self.fake.read_limit = lambda: {'used': None, 'total': 100}
         self.assertEqual(self.collect()['instagram_limit'],
-                         'error: ValueError: the publishing limit answer has no used/total numbers')
+                         'error: the publishing limit answer has no used/total numbers')
         self.assertIsNone(stats.summary(self.root, T0)['limit'])
 
 
@@ -334,10 +334,10 @@ class Due(Case):
     def test_errors_back_off_1_3_6_hours_then_a_success_resets(self):
         t = T0
         for n, hours in enumerate((1, 3, 6, 6), 1):
-            self.assertEqual(self.collect(t, yt=Broken())['youtube'], 'error: RuntimeError: made-up YouTube failure')
+            self.assertEqual(self.collect(t, yt=Broken())['youtube'], 'error: made-up YouTube failure')
             src = self.source('youtube')
             self.assertEqual((src['fails'], src['next_try'], src['error']),
-                             (n, S.iso(t + hours * HOUR), 'RuntimeError: made-up YouTube failure'))
+                             (n, S.iso(t + hours * HOUR), 'made-up YouTube failure'))
             self.assertFalse(stats.due('youtube', t + hours * HOUR - timedelta(seconds=1)))
             t += hours * HOUR
         self.assertEqual(self.collect(t)['youtube'], 'ok')
@@ -422,7 +422,7 @@ class MetaGuards(Case):
             with stats._Con(write=True) as con:
                 con.execute('DELETE FROM sources')                                 # every source due again
             res = self.collect(t)
-            self.assertEqual({res[s] for s in stats._META}, {f'error: FakeError: {F.FakeError(kind)}'})
+            self.assertEqual({res[s] for s in stats._META}, {f'error: {F.FakeError(kind)}'})
             self.assertEqual(P.breaker('meta')['state'], 'closed')
             t += MIN
         with P._Con() as con:
@@ -466,7 +466,7 @@ class MetaGuards(Case):
         self.fake.read_stats = boom
         t = T0
         for n, hours in enumerate((1, 3, 6, 6), 1):
-            self.assertEqual(self.collect(t)['instagram'], 'error: FakeError: Instagram did not answer (HTTP 503).')
+            self.assertEqual(self.collect(t)['instagram'], 'error: Instagram did not answer (HTTP 503).')
             self.assertEqual(self.collect(t + hours * HOUR - timedelta(seconds=1))['instagram'], 'skipped')
             src = self.source('instagram')
             self.assertEqual((src['fails'], src['next_try']), (n, S.iso(t + hours * HOUR)))
@@ -510,6 +510,32 @@ class QuotaWait(Case):
         self.assertEqual(len(quota.calls), 1)
         self.assertEqual(self.collect(T('2026-11-05 11:00'))['youtube'], 'ok')
         self.assertEqual(P.breaker('meta')['state'], 'closed')
+
+    def test_a_google_error_reads_plainly(self):
+        raw = ('<HttpError 503 when requesting https://youtube.googleapis.com/youtube/v3/channels?part=statistics'
+               '&mine=true&alt=json returned "Backend Error". Details: "[{\'reason\': \'backendError\'}]">')
+        self.assertEqual(stats._short(RuntimeError(raw)), 'YouTube did not answer (error 503).')
+        self.assertEqual(stats._short(TimeoutError()), 'TimeoutError')               # no message: the type
+        for text in (stats._short(RuntimeError(raw)), stats._QUOTA):
+            self.assertNotIn('HttpError', text)
+            self.assertNotIn('http', text)
+
+    def test_old_stored_errors_read_plainly(self):
+        raw = ('<HttpError 403 when requesting https://youtube.googleapis.com/youtube/v3/channels?part=contentDetails'
+               '&mine=true&alt=json returned "The request cannot be completed because you have exceeded your <a href='
+               '"/youtube/data/getting-started#quota">quota</a>.". Details: "[{\'reason\': \'quotaExceeded\'}]">')
+        for old, want in ((('HttpError: ' + raw)[:159] + '…', None),     # the old _short: type, message, cut
+                          ('HttpError: ' + raw[:300], None),
+                          ('quotaExceeded: the daily YouTube quota is used up until midnight Pacific time', stats._QUOTA)):
+            with self.subTest(old=old[:40]):
+                with stats._Con(write=True) as con:
+                    con.execute("INSERT INTO sources (source, fails, last_error) VALUES ('youtube', 1, ?) "
+                                'ON CONFLICT(source) DO UPDATE SET last_error = excluded.last_error', (old,))
+                got = self.source('youtube')['error']
+                for bad in ('HttpError', 'http', '<', 'quotaExceeded', '….'):
+                    self.assertNotIn(bad, got)
+                if want:
+                    self.assertEqual(got, want)
 
     def test_quota_shortly_before_midnight_still_waits_55_minutes(self):
         quota = fixtures.fake_youtube_api(fixtures.YT_VIDEOS, None)
@@ -668,7 +694,7 @@ class Summary(Case):
         self.collect(T0 + HOUR)
         src = {s['source']: s for s in stats.summary(self.root, T0 + HOUR)['sources']}['instagram']
         self.assertEqual((src['last_ok'], src['fails'], src['error']),
-                         ('2026-11-04T19:40:00Z', 1, 'FakeError: Instagram refused the key (code 190).'))
+                         ('2026-11-04T19:40:00Z', 1, 'Instagram refused the key (code 190).'))
 
     def test_secrets_never_reach_the_reason(self):
         self.fake.read_stats = mock.Mock(side_effect=RuntimeError('GET /me?access_token=EAAFAKEFAKEFAKE123 failed'))
@@ -897,7 +923,7 @@ class StaleNumbers(Case):
         lim = stats.summary(self.root, self.now)['limit']
         self.assertEqual(lim, {'used': 0, 'total': 100, 'at': S.iso(T0), 'stale': True})
         src = self.source('instagram_limit')
-        self.assertEqual((src['last_ok'], src['error']), (S.iso(T0), 'FakeError: Instagram did not answer (HTTP 503).'))
+        self.assertEqual((src['last_ok'], src['error']), (S.iso(T0), 'Instagram did not answer (HTTP 503).'))
 
     def test_F44_d24_is_the_last_24_hours_not_since_midnight(self):
         for when, value in (('2026-10-28 00:00', 90), ('2026-11-04 00:00', 100), ('2026-11-04 23:00', 105),
@@ -1041,7 +1067,7 @@ class RefreshFailure(unittest.TestCase):
         with mock.patch.object(Y, 'api', guard.REAL['youtube.api']), \
              mock.patch.object(Y, 'Request', lambda: FakeTokenServer(None)):
             self.assertEqual(stats.collect(root, T0)['youtube'],
-                             'error: RuntimeError: YouTube not reachable right now (TransportError); the sign-in is kept')
+                             'error: YouTube not reachable right now (TransportError); the sign-in is kept')
         src = next(s for s in stats.sources() if s['source'] == 'youtube')
         self.assertEqual((src['fails'], src['next_try']), (1, S.iso(T0 + HOUR)))
         self.assertNotIn('login', src['error'])

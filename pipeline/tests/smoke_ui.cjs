@@ -11,7 +11,8 @@
 // First, at 360x760, the regression checks for the review findings (REGRESS below): every POST in them is answered by
 // the test itself and never reaches the server. SMOKE_ONLY=all (or F4,F13,...) runs only those, at SMOKE_W x SMOKE_H
 // (default 412x915), or on WebKit iPhone 13 with SMOKE_WEBKIT=1.
-// Every page: no console errors, no horizontal scroll. Nothing leaves 127.0.0.1: Google Fonts and YouTube thumbnails are
+// Then, when WebKit is installed, every tab, the post and settings sheets on WebKit iPhone 15 (no sideways scroll, fields
+// >= 16 px so Safari does not zoom in; nothing is posted). Every page: no console errors, no horizontal scroll. Nothing leaves 127.0.0.1: Google Fonts and YouTube thumbnails are
 // answered here with empty stand-ins; any other request is blocked and fails the run. The only changes it may make are
 // that one post and settings dry runs (checked at the end).
 // Safety: it refuses an address that is not loopback, port 8790 (the live dashboard), and any server that does not say
@@ -64,7 +65,7 @@ async function until(page, fn, ms, arg) { // page.waitForFunction needs eval, wh
 }
 
 async function context(browser, vp) {
-  const ctx = await browser.newContext({ viewport: { width: vp.w, height: vp.h }, isMobile: vp.mobile, hasTouch: vp.mobile });
+  const ctx = await browser.newContext(vp.device || { viewport: { width: vp.w, height: vp.h }, isMobile: vp.mobile, hasTouch: vp.mobile });
   await ctx.route('**/*', (route) => {
     const u = new URL(route.request().url());
     if (u.origin === ROOT) return route.continue();
@@ -160,6 +161,49 @@ async function peek(page, vp) { // wide pass: open the post sheet, then Cancel
   noErrors(page, label);
 }
 
+async function iosFit(page, label) { // Safari zooms into a field under 16 px; nothing wider than the screen
+  const [sw, iw, small] = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth,
+    [...document.querySelectorAll('input:not([type=checkbox]):not([type=radio]), select, textarea')].filter((e) => e.offsetParent)
+      .map((e) => `${e.type}:${getComputedStyle(e).fontSize}`).filter((x) => parseFloat(x.split(':')[1]) < 16)]);
+  check(`${label}: no horizontal scroll`, sw <= iw, `scrollWidth ${sw} > innerWidth ${iw}`);
+  check(`${label}: fields are at least 16 px (no zoom on focus)`, !small.length, small.join(' '));
+}
+
+async function iphone(pw) { // WebKit (Safari's engine) at iPhone 15/16 size; skipped when WebKit is not installed
+  let browser;
+  try {
+    browser = await pw.webkit.launch();
+  } catch (e) {
+    return console.log(`SKIP iphone (WebKit): ${e.message.split('\n')[0]}`);
+  }
+  const vp = { name: 'iphone', device: pw.devices['iPhone 15'] };
+  const [ctx, page] = await context(browser, vp);
+  try {
+    for (const t of Object.keys(TABS)) await loadTab(page, vp, t);
+    await loadTab(page, vp, 'publish');
+    await page.locator(`${PUB} [data-section="waiting"] .qcard button`).first().click();
+    if (check(`${vp.name} post sheet: opens`, await until(page, () => !!document.querySelector('dialog[open] textarea'), 15000))) {
+      await iosFit(page, `${vp.name} post sheet`);
+      await shot(page, vp, 'post-sheet');
+    }
+    await page.locator(`${DLG} .sheet-foot button`, { hasText: 'Cancel' }).click().catch(() => {});
+    await until(page, () => !document.querySelector('dialog[open]'), 5000);
+    await page.locator(`${PUB} .panel button`, { hasText: 'Settings' }).first().click();
+    if (check(`${vp.name} settings: opens`, await until(page, () => !!document.querySelector('dialog[open] .stepper'), 10000))) {
+      await iosFit(page, `${vp.name} settings`);
+      await shot(page, vp, 'settings');
+    }
+    await page.locator(`${DLG} .sheet-foot button`, { hasText: 'Cancel' }).click().catch(() => {});
+  } catch (e) {
+    check(`${vp.name}: ran to the end`, false, e.message.split('\n')[0]);
+  }
+  noErrors(page, vp.name);
+  const sent = page.posts.filter(([p, body]) => !(p === '/api/settings' && /"dry_run":\s*true/.test(body)));
+  check(`${vp.name}: sent nothing but settings dry runs`, !sent.length, sent.map(([p]) => p).join(' '));
+  await ctx.close();
+  await browser.close();
+}
+
 async function settings(page, vp) { // the dry run 400 ms after the sheet opens; Cancel saves nothing
   const label = `${vp.name} settings`;
   const dry = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/settings' && /"dry_run":\s*true/.test(r.request().postData() || ''),
@@ -178,7 +222,8 @@ async function settings(page, vp) { // the dry run 400 ms after the sheet opens;
   noErrors(page, label);
 }
 
-// Regression checks for the review findings (F4, F5, F12-F16, F38, F44, F46-F49, F54, G25, G26, G28). In these pages
+// Regression checks for the review findings (F4, F5, F12-F16, F38, F44, F46-F49, F54, G25, G26, G28) and the error
+// wording follow-ups (U3-U11). In these pages
 // every POST is answered here and never reaches the server; GET answers may be changed (fx), replaced (raw), delayed
 // (slow) or failed (dead) here.
 const SHEETS = () => [...document.querySelectorAll('dialog[open]')].map((d) => {
@@ -244,6 +289,8 @@ const openItem = async (page, n = 0) => {
   return until(page, () => [...document.querySelectorAll('dialog[open] button')].some((b) => /Edit caption/.test(b.innerText) && !b.disabled), 10000);
 };
 const sheetButton = (page, text) => page.locator(`${DLG} button`, { hasText: text }).last();
+const iso = (ms = 0) => new Date(Date.now() + ms).toISOString();
+const hhmm = (t) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(t));
 const hasText = (page, sel, re) => until(page, ([s, r]) => [...document.querySelectorAll(s)].some((e) => new RegExp(r).test(e.innerText)), 6000, [sel, re]);
 
 const REGRESS = {
@@ -530,6 +577,99 @@ const REGRESS = {
     await page.locator('nav.tabs a[data-tab="activity"]').click();
     check('G28 a tab that cannot load asks for a reload', await hasText(page, '#state', 'Reload'), await page.locator('#state').innerText());
   },
+  // The error wording follow-ups (plan items 3, 4, 6-11). The answers are made up here, so they pass with an older server too.
+  async U3(page) { // the job box: the reason once, with its time and the next step
+    const t = iso(-5 * 60e3);
+    page.o.fx['/api/publish'] = (j) => {
+      j.job = { id: 'FAKEJOB00003', state: 'failed', kind: 'rate', stage: 'sharing', key: 'new/Output/new.mp4', item: j.queue.waiting[0]?.id,
+        created: t, started: t, finished: t, result: 'Not uploaded: X.', error: 'X.' };
+      Object.assign(j, { paused: null, breaker: { name: 'google', state: 'closed' } });
+    };
+    await at(page, '#publish/youtube');
+    const r = await page.locator(`${PUB} .result`).first().innerText().catch(() => '');
+    check('U3 the job box gives the reason once', r.split('X.').length === 2, r);
+    check('U3 the job box says nothing was published, and when', /Nothing was published/.test(r) && /\d\d:\d\d/.test(r), r);
+  },
+  async U4(page) { // the daily limit: one time on the status card, the waiting buttons are not the main button
+    const back = iso(20 * 3600e3), hm = hhmm(back), text = `YouTube's daily limit is used up; it is back at ${hm} tomorrow.`;
+    page.o.fx['/api/publish'] = (j) => {
+      Object.assign(j, { paused: { until: back, text }, last_post: null, job: null });
+      j.breaker = { name: 'google', state: 'cooling', kind: 'rate', until: iso(3600e3), message: `YouTube's daily limit is used up; it is back at ${hhmm(iso(3600e3))}.` };
+      j.auto.next = null;
+    };
+    await at(page, '#publish/youtube');
+    const card = await page.locator(`${PUB} .panel`, { has: page.locator('.big') }).first().innerText();
+    const times = [...new Set(card.match(/\d\d:\d\d/g) || [])];
+    check('U4 paused: the status card shows one time', times.length === 1 && times[0] === hm && card.includes(text), `${times} :: ${card.slice(0, 300)}`);
+    const cls = await page.locator(`${PUB} [data-section="waiting"] .qcard button`).evaluateAll((bs) => bs.map((b) => b.className));
+    check('U4 paused: the waiting buttons are not primary', cls.length > 0 && cls.every((c) => !/primary/.test(c)), JSON.stringify(cls));
+    check('U4 paused: a "Paused until" chip', await hasText(page, `${PUB} [data-section="waiting"] .chip`, `^Paused until ${hm}|^Paused until \\w{3} \\d+ \\w{3} ${hm}`));
+    await openItem(page);
+    const now = await sheetButton(page, 'Upload now').getAttribute('class');
+    check('U4 paused: "Upload now" in the video\'s sheet is not primary', !/primary/.test(now || ''), now);
+  },
+  async U6(page) { // a long suspended reason stays out of the heading and never pushes the page sideways
+    const why = `YouTube refused: https://youtube.googleapis.com/upload/youtube/v3/videos?${'a'.repeat(440)}`.slice(0, 500);
+    page.o.fx['/api/publish'] = (j) => { Object.assign(j.auto, { setting: true, effective: false, reason: 'suspended', suspended: { since: iso(-3600e3), why } }); };
+    await at(page, '#publish/youtube');
+    const big = await page.locator(`${PUB} .big`).innerText();
+    check('U6 suspended: a short heading', /SUSPENDED after 3 failed tries$/.test(big) && !/http/.test(big), big.slice(0, 200));
+    check('U6 suspended: the reason is shown below it', await hasText(page, `${PUB} .panel p.err`, '^Last try .*googleapis'));
+    const [sw, iw] = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+    check('U6 suspended: no horizontal scroll', sw <= iw, `scrollWidth ${sw} > innerWidth ${iw}`);
+  },
+  async U7(page) { // toasts: the job-ended one is cut, any toast is at most 30 % of the screen high, a tap dismisses it
+    const t0 = iso(-60e3), long = `Not posted: ${'Instagram said something long and winding about the request. '.repeat(8)}`;
+    let st = 'running';
+    const job = () => ({ id: 'FAKEJOB00007', state: st, stage: 'sharing', key: 'new/Output/new-short-6.mp4', created: t0, started: t0,
+      ...(st === 'failed' ? { finished: iso(), result: long, error: 'x', kind: 'transient' } : { result: 'Sending…' }) });
+    page.o.raw['/api/job'] = () => [200, { job: job() }];
+    page.o.fx['/api/publish'] = (j) => { j.job = { ...job(), item: j.queue.waiting[0]?.id }; };
+    await at(page, '#publish/instagram');
+    await page.locator('nav.tabs a[data-tab="home"]').click();
+    await sleep(500);
+    st = 'failed';
+    const shown = await until(page, () => !!document.querySelector('.toast'), 12000);
+    const txt = shown ? await page.locator('.toast').innerText() : '';
+    check('U7 the job-ended toast is cut short and points to Publish', shown && txt.length <= 135 && /…\s*See Publish\.$/.test(txt), txt);
+    await page.locator('.toast').click().catch(() => {});
+    check('U7 a tap dismisses the toast', await until(page, () => !document.querySelector('.toast'), 2000));
+    page.o.raw['/api/job'] = null;
+    page.o.fx['/api/publish'] = null;
+    page.o.answer = (p) => (p === '/api/queue' ? [200, { ok: true, message: `Moved. ${'A very long answer. '.repeat(80)}` }] : null);
+    await at(page, '#publish/instagram');
+    await openItem(page);
+    await sheetButton(page, 'Move to top').click();
+    await until(page, () => !!document.querySelector('.toast'), 5000);
+    await sleep(500);
+    const [h, vh] = await page.evaluate(() => [document.querySelector('.toast')?.getBoundingClientRect().height || 0, innerHeight]);
+    check('U7 a long toast is at most 30 % of the screen high', h > 0 && h <= 0.3 * vh + 1, `${h} of ${vh}`);
+  },
+  async U8(page) { // YouTube words on YouTube; the settings sheet names the platform; 44 px switch
+    await at(page, '#publish/youtube');
+    const hs = await page.locator(`${PUB} .seg .chip`).evaluateAll((cs) => cs.map((c) => c.getBoundingClientRect().height));
+    check('U11 the platform switch is at least 44 px high', hs.length >= 2 && hs.every((h) => h >= 44), JSON.stringify(hs));
+    await page.locator(`${PUB} .panel button`, { hasText: 'Settings' }).first().click();
+    await until(page, () => !!document.querySelector('dialog[open] .stepper'), 5000);
+    const t = await page.locator(DLG).innerText();
+    check('U8 YouTube settings: names YouTube, says "Upload every", not "Post every"', /YouTube/.test(t) && /Upload every/.test(t) && !/Post every/.test(t), t.slice(0, 300));
+  },
+  async U9(page) { // stats: a failing source says when it is read next; activity rows name the platform
+    page.o.fx['/api/stats'] = (j) => {
+      const s = (j.sources || []).find((x) => x.source === 'youtube');
+      if (s) Object.assign(s, { fails: 2, error: "YouTube's daily limit is used up", next_try: iso(3 * 3600e3) });
+    };
+    await at(page, '#stats');
+    const src = await page.locator('section.view[data-view="stats"] .srcline').innerText();
+    check('U9 a failing source says when it is read next', /daily limit is used up · next read (\w{3} \d+ \w{3} )?\d\d:\d\d/.test(src), src);
+    page.o.raw['/api/activity'] = () => [200, { more: false, logs: {}, items: [
+      { id: 2, at: iso(), who: 'pc', kind: 'breaker.open', platform: null, label: 'YouTube', text: 'Posting paused (12:00): YouTube asked for a pause.' },
+      { id: 1, at: iso(), who: 'pc', kind: 'post.failed', platform: 'instagram', label: 'Instagram', text: 'Not posted: x.' }] }];
+    await page.locator('nav.tabs a[data-tab="activity"]').click();
+    await until(page, () => document.querySelectorAll('section.view[data-view="activity"] .act-t').length === 2, 8000);
+    const rows = await page.locator('section.view[data-view="activity"] .act-t').allInnerTexts();
+    check('U10 activity rows name the platform', rows.length === 2 && / · YouTube · pc$/.test(rows[0]) && / · Instagram · pc$/.test(rows[1]), JSON.stringify(rows));
+  },
 };
 
 async function regress(type, dev, only) {
@@ -581,6 +721,7 @@ async function regress(type, dev, only) {
   } finally {
     await browser.close();
   }
+  await iphone(pw);
   const other = posts.filter(([p, body]) => !(p === '/api/settings' && /"dry_run":\s*true/.test(body)) && p !== '/api/post');
   check('only the one post and settings dry runs were sent', posts.filter(([p]) => p === '/api/post').length <= 1 && !other.length,
     posts.map(([p, b]) => `${p} ${b.slice(0, 80)}`).join(' | '));

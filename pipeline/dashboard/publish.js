@@ -32,7 +32,13 @@ function switcher(d) { // one link per platform when there is more than one (Ins
   }
   return nav;
 }
-const checking = () => `This ${N}'s last post was interrupted. Check it first.`;
+const checking = () => `This ${N}'s last ${VB()} was interrupted. Check it first.`;
+const later = (a, b) => { // the later of two ISO times, or null
+  const x = Date.parse(a) || 0, y = Date.parse(b) || 0;
+  return x || y ? new Date(Math.max(x, y)).toISOString() : null;
+};
+const held = (d = D) => !!((d.breaker?.state && d.breaker.state !== 'closed') || d.paused); // then waiting buttons are not primary
+const holdUntil = (d = D) => later(d.breaker?.state === 'cooling' && d.breaker.until, d.paused?.until);
 const reload = () => go(`#publish/${P}`);
 const toPost = (it) => (e) => { e.currentTarget.disabled = true; go(`#publish/${P}/post/${it.id}`); };
 const beyond = (x) => x.more > 0 && x.rows?.length && `+${many(x.more, `more ${N}`)} after ${fmtDay(x.rows[x.rows.length - 1].at)}`; // F37
@@ -71,11 +77,19 @@ function since(j) {
 }
 const tock = () => document.querySelectorAll('[data-since]').forEach((e) => { e.textContent = len(Math.max(0, Date.now() - e.dataset.since) / 1e3); });
 
-function result(j) {
-  const ok = j.state === 'done', r = el('div', `result ${ok ? 'ok' : 'bad'}`), x = ok ? j.record_pending && 'The record on Drive is written later.' : j.error;
-  r.append(el('b', null, ok ? 'Posted.' : j.result || 'Not posted.'));
+function result(j) { // the reason once, the time, and what to do next
+  const ok = j.state === 'done', r = el('div', `result ${ok ? 'ok' : 'bad'}`);
+  const head = ok ? `${up1(done())}.` : j.result || `Not ${done()}.`;
+  const x = ok ? j.record_pending && 'The record on Drive is written later.'
+    : j.error && !String(head).includes(j.error) ? j.error : '';
+  r.append(el('b', null, head), j.finished ? el('span', 'muted', ` (${clock(j.finished)})`) : '');
   if (ok && https(j.url)) r.append(' ', ext(`Open on ${L}`, j.url, 'btn link'));
   if (x) r.append(el('div', 'small', x));
+  const t = holdUntil(), again = 'Nothing was published. You can try again now.'; // the hint only while its cause lasts
+  const test = D.breaker?.state === 'stopped' ? 'Nothing was published. Test the connection on this page.' : again;
+  const next = !ok && { rate: t ? `Nothing was published. Try again after ${when(t)}.` : again,
+    auth: test, permission: test, transient: 'Nothing was published. Try again in a few minutes.' }[j.kind];
+  if (next) r.append(el('div', 'small', next));
   return r;
 }
 
@@ -88,7 +102,7 @@ function jobBox(j) {
   if (!j || /^(interrupted|unknown)$/.test(j.state)) return;
   if (!live(j)) return JB.append(result(j));
   const b = JB.appendChild(el('div', 'panel job')), dots = el('div', 'dots');
-  b.appendChild(el('div', 'job-line', `Posting ${stem(j.key)} · ${i < 0 ? j.result || 'Waiting to start…'
+  b.appendChild(el('div', 'job-line', `${up1(VB())}ing ${stem(j.key)} · ${i < 0 ? j.result || 'Waiting to start…'
     : `${i === 2 ? `Processing on ${L}` : up1(j.stage)} (step ${i + 1} of 5)`} · `)).append(since(j));
   dots.append(...ST.map((_, n) => el('i', n < i ? 'done' : n === i && 'now')));
   b.append(dots, gone ? el('p', 'err', LOST) : '');
@@ -121,35 +135,41 @@ function follow(j, fresh) {
 function statusCard(d) {
   const a = d.auto, b = d.breaker, open = b.state && b.state !== 'closed', c = el('div', 'panel'), row = el('div', 'row'), lp = d.last_post || {};
   const p = (t, k = 'muted') => t && c.append(el('p', k, t)), add = (...x) => row.append(btn(...x)), probs = d.settings_problems || [], pf = a.pause_file?.since;
-  const set = (s, ack, ask) => () => act('/api/settings', { platform: P, rev: d.settings_rev, settings: s, ack }, ask);
-  const big = { off: 'Automatic posting: OFF', invalid: 'Automatic posting: OFF (the settings file has a problem)',
+  const set = (s, ack, ask) => () => act('/api/settings', { platform: P, rev: d.settings_rev, settings: s, ack }, ask), V1 = VB(), AU = `Automatic ${V1}ing`;
+  const why = { rate: `${L} is paused`, auth: `${L} refused the PC's key`, permission: `${L} refused a permission` }[b.kind] || `${L} stopped answering`;
+  const pz = d.paused?.text ? d.paused : null; // one cause (the daily limit): one line, one time, unless the breaker waits longer
+  const one = pz && open && b.kind === 'rate' && !(Date.parse(b.until) > Date.parse(pz.until));
+  const bm = `${why}: ${one ? pz.text : b.message}`;
+  const big = { off: `${AU}: OFF`, invalid: `${AU}: OFF (the settings file has a problem)`,
     stopped_by_file: `ON in settings, but stopped by the pause file${pf ? ` (since ${when(pf)})` : ''}`,
-    suspended: `SUSPENDED after 3 failed tries: ${a.suspended?.why}`, breaker: `${L} stopped answering: ${b.message}`,
-    unresolved: 'ON, but waiting: an earlier post was interrupted' }[a.reason];
-  c.append(el('div', `big ${/^(suspended|breaker|invalid)$/.test(a.reason) ? 'is-bad' : big ? '' : 'is-on'}`, big || `ON · ${a.summary}`));
+    suspended: `${AU}: SUSPENDED after 3 failed tries`, breaker: bm,
+    unresolved: `ON, but waiting: an earlier ${V1} was interrupted` }[a.reason];
+  c.append(el('div', `big ${/^(suspended|breaker|invalid)$/.test(a.reason) ? 'is-bad' : big || pz ? '' : 'is-on'}`, big || `ON · ${a.summary}`));
+  if (a.suspended) p(`Last try ${when(a.suspended.since)}: ${a.suspended.why}`, 'err');
   p(a.next?.text && a.next.text + IST);
-  if (open && a.reason !== 'breaker') p(`${L} stopped answering: ${b.message}`, 'err');
+  if (open && a.reason !== 'breaker') p(bm, 'err');
+  if (pz && !one) p(pz.text, 'err');
   probs.forEach((x) => p(x, 'err'));
   if (lp.at) {
     const t = `Last ${N}: ${fmt(lp.at)} (${ago(lp.at)})`;
-    c.appendChild(el('p', 'muted')).append(https(lp.url) ? ext(t, lp.url, null) : t);
+    c.appendChild(el('p', 'muted')).append(https(lp.url) ? ext(t, lp.url, 'tall') : t);
   }
   if (probs.length) add('Reset to defaults', null, () => act('/api/settings/reset', { ack: ['reset_settings'] }, { title: 'Reset the settings', okLabel: 'Reset', tick: 'Yes, reset the settings to the defaults' }));
   else {
     add('Settings', null, () => settings(), 'sliders');
     if (!a.setting) add('Turn on', null, () => settings(1));
-    else add('Turn off', null, set({ auto: false }, [], { title: 'Turn off automatic posting', okLabel: 'Turn off', danger: true,
-      text: `Stop automatic posting? Nothing is posted until you post a ${N} yourself or turn it on again.` }));
+    else add('Turn off', null, set({ auto: false }, [], { title: `Turn off automatic ${V1}ing`, okLabel: 'Turn off', danger: true,
+      text: `Stop automatic ${V1}ing? Nothing is ${done()} until you ${V1} a ${N} yourself or turn it on again.` }));
   }
   if (a.reason === 'stopped_by_file') {
-    add('Remove the pause file', null, set({ auto: true }, ['auto_on'], { title: 'Remove the pause file', okLabel: 'Remove', tick: 'Start posting automatically',
-      text: `Automatic posting starts again: ${a.summary}.` }));
+    add('Remove the pause file', null, set({ auto: true }, ['auto_on'], { title: 'Remove the pause file', okLabel: 'Remove', tick: `Start ${V1}ing automatically`,
+      text: `${AU} starts again: ${a.summary}.` }));
   }
   if (a.suspended) {
-    add('Resume…', null, () => act('/api/auto/resume', { platform: P, ack: ['resume_auto'] }, { title: 'Resume automatic posting', okLabel: 'Resume',
-      text: `Automatic posting stopped after 3 failed tries (last: ${a.suspended.why}).`, tick: 'I checked the problem' }));
+    add('Resume…', null, () => act('/api/auto/resume', { platform: P, ack: ['resume_auto'] }, { title: `Resume automatic ${V1}ing`, okLabel: 'Resume',
+      text: `${AU} stopped after 3 failed tries (last: ${a.suspended.why}).`, tick: 'I checked the problem' }));
   }
-  if (b.state === 'cooling') p(`Posting starts again after ${fmt(b.until)}${IST}.`); // S9: it ends on its own, no test
+  if (b.state === 'cooling') { if (!one) p(`${up1(V1)}ing starts again after ${fmt(holdUntil(d))}${IST}.`); } // S9: ends on its own; one: the line above has the time
   else if (open) { // F14: after a 429 the button waits until the server allows the next test
     const w = waits('/api/platform/test');
     row.appendChild(btn(w ? `Test again at ${clock(w)}` : 'Test connection', null, () => act('/api/platform/test', { platform: P }))).disabled = !!w;
@@ -198,11 +218,13 @@ function draw() {
   out.push(statusCard(d), (JB = el('div')));
   JB.setAttribute('aria-live', 'polite');
   for (const j of d.unresolved || (/^(interrupted|unknown)$/.test(d.job?.state) ? [d.job] : [])) out.push(unresolved(j));
-  out.push(countStrip(`${N}s`, null, [box('Waiting', 'waiting', 'yellow'), box('Skipped', 'skipped'), box('Failed', 'failed', c.failed > 0 && 'red'), box(up1(done()), 'posted')]));
-  for (const t of [(c.by_lesson || []).map((x) => `${x.lesson} ${x.waiting}`).join(' · '), fc.runway_text && fc.runway_text + (fc.assumes_on ? (d.auto.effective ? ' (once automatic posting runs again)' : ' (if automatic posting were on)') : ''), beyond(fc),
+  out.push(countStrip(up1(`${N}s`), null, [box('Waiting', 'waiting', 'yellow'), box('Skipped', 'skipped'), box('Failed', 'failed', c.failed > 0 && 'red'), box(up1(done()), 'posted')]));
+  for (const t of [(c.by_lesson || []).map((x) => `${x.lesson} ${x.waiting}`).join(' · '), fc.runway_text && fc.runway_text + (fc.assumes_on ? (d.auto.effective ? ` (once automatic ${VB()}ing runs again)` : ` (if automatic ${VB()}ing were on)`) : ''), beyond(fc),
     pr.length && `${many(pr.length, 'lesson')} could not be read: ${pr.map((x) => `${x.lesson}: ${x.error}`).join('; ')}`]) if (t) out.push(el('p', 'note', t));
-  const ws = list('waiting', 'Waiting', W, (it) => card(it, Object.assign(btn(Vb(), 'small primary', toPost(it)), { ariaLabel: `${Vb()} ${it.title || it.file}` })),
+  const hd = held(d), ht = hd && holdUntil(d); // paused: the buttons still open the sheet, which says why
+  const ws = list('waiting', 'Waiting', W, (it) => card(it, Object.assign(btn(Vb(), hd ? 'small' : 'small primary', toPost(it)), { ariaLabel: `${Vb()} ${it.title || it.file}` })),
     W.some((i) => i.top) && btn('Reset order', 'small', () => op('reset_order')));
+  if (ht) ws.querySelector('.list-head .label').after(el('span', 'chip c-yellow', `Paused until ${when(ht)}`));
   if (!W.length) ws.append(el('div', 'panel empty', `Nothing waiting. New ${N}s appear here when a lesson is finished.`));
   list('failed', 'Failed', q.failed || [], (it) => (it.state === 'checking' ? card(it, 0, el('div', 'err', checking()))
     : card(it, btn('Try again', 'small', () => op('clear_failed', it)), el('div', 'err', `${it.failed?.reason || 'Failed'}${it.failed?.at ? ` (${fmt(it.failed.at)})` : ''}`))));
@@ -270,7 +292,7 @@ function itemSheet(it) {
     if (pic(it)) s.body.append(cover(it, wide(it) ? 'cover-wide' : 'cover-lg'));
     s.body.append(el('p', 'muted', line(it)), st);
     if (it.state === 'checking') st.before(el('p', 'err', checking()));
-    else st.append(btn(`${Vb()} now`, 'primary', toPost(it), 'publish'));
+    else st.append(btn(`${Vb()} now`, held() ? null : 'primary', toPost(it), 'publish'));
     if (w) st.append(btn(it.top ? 'Back to normal order' : 'Move to top', null, () => op(it.top ? 'untop' : 'top', it), 'up'));
     if (w || it.state === 'skipped') st.append(btn(w ? `Skip this ${N}` : 'Unskip', null, () => op(w ? 'skip' : 'unskip', it)));
     e.disabled = cp.disabled = true;
@@ -337,7 +359,7 @@ function capSheet(it, pv) {
 
 function postSheet(id) { // spec 9.4; S10: warns post only with the tick, which sends them as override
   const st = {}, lim = {}, s = openSheet((s) => {
-    s.title.textContent = `${Vb()} on ${L}`;
+    s.title.textContent = `${Vb()} ${P === 'youtube' ? 'to' : 'on'} ${L}`;
     s.body.append(el('p', 'loading', 'Loading…'));
   });
   let ta, rules, tL, tick, msg, send;
@@ -363,7 +385,7 @@ function postSheet(id) { // spec 9.4; S10: warns post only with the tick, which 
     tick.onchange = check;
     // F15: the rules first and the tick beside the button, so the reason the button is off is on the first screen
     s.body.replaceChildren((rules = el('div', 'rules')), (msg = el('p')), ...out, el('div', 'title', it.title || it.file), el('p', 'muted small', line(it)), ...cb.nodes);
-    s.foot.replaceChildren(tL, btn('Cancel', null, () => s.close()), (send = btn(`${Vb()} on ${L} now`, 'primary', fire)));
+    s.foot.replaceChildren(tL, btn('Cancel', null, () => s.close()), (send = btn(`${Vb()} ${P === 'youtube' ? 'to' : 'on'} ${L} now`, 'primary', fire)));
     check();
   }
 
@@ -428,7 +450,7 @@ function stepper(min, max, step, v, show, set) {
 function settings(on) { // S14: the auto_on and gap_under_20 ticks; a dry run 400 ms after a change
   let cur = D.settings || {}, rev = D.settings_rev, f, fx = D.forecast, need = [], timer, n = 0, shut, gL, gB, oL, oB, warn, fc, pb = [];
   const errs = {}, save = btn('Save', 'primary', () => send()), s = openSheet((s) => {
-    s.title.textContent = 'Automatic posting';
+    s.title.textContent = `Automatic ${VB()}ing: ${L}`;
     s.foot.append(btn('Cancel', null, () => s.close()), save);
   });
   const needOn = () => f.auto && (!D.auto.effective || need.includes('auto_on'));
@@ -444,7 +466,7 @@ function settings(on) { // S14: the auto_on and gap_under_20 ticks; a dry run 40
       w.append(el('label', null, label), ...x, (errs[k] = el('div', 'field-err')));
       return w;
     };
-    const ch = (k, v) => { f[k] = v; changed(); }, press = (b, x) => (b.setAttribute('aria-pressed', x), b), [aL, aB] = tickBox('Post automatically');
+    const ch = (k, v) => { f[k] = v; changed(); }, press = (b, x) => (b.setAttribute('aria-pressed', x), b), [aL, aB] = tickBox(`${Vb()} automatically`);
     const pre = el('div', 'filters'), days = el('div', 'days'), win = el('div', 'inline'), sd = el('div', 'inline');
     pb = (D.presets || []).map((p) => [pre.appendChild(btn(p.label, null, () => { Object.assign(f, p.values); build(); })), p.values]);
     for (const d of DAYS) {
@@ -456,11 +478,11 @@ function settings(on) { // S14: the auto_on and gap_under_20 ticks; a dry run 40
     win.append(t1, 'and', t2);
     sd.append(dt, btn('Clear', 'small', () => { dt.value = ''; ch('start_date', null); }));
     warn = el('p', 'note warn', `Less than 20 h between ${N}s can flood followers.`);
-    [[gL, gB], [oL, oB]] = [tickBox(`Yes, post ${N}s less than 20 h apart`), tickBox('Start posting automatically')];
+    [[gL, gB], [oL, oB]] = [tickBox(`Yes, ${VB()} ${N}s less than 20 h apart`), tickBox(`Start ${VB()}ing automatically`)];
     gB.onchange = oB.onchange = sync;
-    s.body.replaceChildren(aL, (errs.auto = el('div', 'field-err')), pre, fld('every_days', 'Post every', stepper(1, 7, 1, f.every_days, (v) => many(v, 'day'), (v) => ch('every_days', v))),
+    s.body.replaceChildren(el('p', 'muted small', 'Each platform has its own settings.'), aL, (errs.auto = el('div', 'field-err')), pre, fld('every_days', `${Vb()} every`, stepper(1, 7, 1, f.every_days, (v) => many(v, 'day'), (v) => ch('every_days', v))),
       fld('per_day', `${up1(N)}s on such a day`, stepper(1, 5, 1, f.per_day ?? 1, (v) => `up to ${v}`, (v) => ch('per_day', v))),
-      fld('days', 'On these days', days), fld('post_after', `Post between${IST}`, win, (errs.post_before = el('div', 'field-err'))),
+      fld('days', 'On these days', days), fld('post_after', `${Vb()} between${IST}`, win, (errs.post_before = el('div', 'field-err'))),
       fld('min_gap_hours', `At least this long between ${N}s`, stepper(1, 168, 0.5, f.min_gap_hours, (v) => `${v} h`, (v) => ch('min_gap_hours', v)), warn), gL,
       el('p', 'note', `At most ${cur.hard_cap_24h} ${N}s in any 24 hours (change on the PC in publishing.json).`), fld('start_date', 'Start date', sd),
       fld('forecast', 'Forecast', (fc = el('div'))));
@@ -490,7 +512,7 @@ function settings(on) { // S14: the auto_on and gap_under_20 ticks; a dry run 40
     fx = x;
     if (!rows.length) return fc.replaceChildren(el('p', 'note', D.counts.waiting ? `No ${N} could go out in the next 15 days with these settings.` : 'Nothing is waiting.'));
     ol.append(...rows.map((r) => el('li', null, `${fmt(r.at)} · ${name[r.id] || r.id}`)));
-    fc.replaceChildren(el('p', 'note', `With these settings${x.assumes_on ? ' (if automatic posting were on)' : ''}${IST}:`), ol, x.runway ? el('p', 'note', `Enough until ${fmtDay(x.runway)}.`) : '', beyond(x) ? el('p', 'note', beyond(x)) : '');
+    fc.replaceChildren(el('p', 'note', `With these settings${x.assumes_on ? ` (if automatic ${VB()}ing were on)` : ''}${IST}:`), ol, x.runway ? el('p', 'note', `Enough until ${fmtDay(x.runway)}.`) : '', beyond(x) ? el('p', 'note', beyond(x)) : '');
   }
 
   async function send(dry) {

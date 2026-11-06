@@ -72,9 +72,10 @@ def quota_until(now=None):
 
 
 def quota_text(until):
-    """The plain sentence for a used-up quota."""
-    return (f"YouTube's daily API limit is used up; it is back at {until.astimezone(ISTANBUL):%H:%M} "
-            "(midnight Pacific time).")
+    """The plain sentence for a used-up quota, with the day (it is stored in job rows and STATUS.txt, where
+    'tomorrow' would go stale): "YouTube's daily limit is used up; it is back at 11:00 on Fri 6 Nov."."""
+    t = until.astimezone(ISTANBUL)
+    return f"YouTube's daily limit is used up; it is back at {t:%H:%M} on {t:%a} {t.day} {t:%b}."
 
 
 def credentials(interactive=False):

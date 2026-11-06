@@ -8,7 +8,7 @@ const opened = {};
 
 function row(a) {
   const r = el('div', 'act'), x = el('div', 'act-x', a.text);
-  r.append(el('div', 'act-t', [fmt(a.at), a.who].filter(Boolean).join(' · ')), x);
+  r.append(el('div', 'act-t', [fmt(a.at), a.label, a.who].filter(Boolean).join(' · ')), x);
   if (https(a.url)) x.append(' ', ext('open', a.url, null));
   return r;
 }

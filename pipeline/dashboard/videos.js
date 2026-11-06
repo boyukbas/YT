@@ -29,6 +29,9 @@ function thumb(v) {
   if (YT_ID.test(v.youtube || '')) {
     th.append(Object.assign(el('img'), { alt: '', loading: 'lazy', onerror: () => { th.textContent = word; },
       src: `https://i.ytimg.com/vi/${v.youtube}/mqdefault.jpg` }));
+  } else if (reelOk(v.cover)) { // not on YouTube yet: the cover it will get, from Drive (2026-11-06)
+    th.append(Object.assign(el('img'), { alt: '', loading: 'lazy', onerror: () => { th.textContent = word; },
+      src: `/api/cover/${v.cover.platform}/${v.cover.id}.jpg` }));
   } else if (v.kind === 'lesson') th.append(icon(v.state === 'stopped' ? 'warn' : 'clock'));
   else th.textContent = word;
   return th;

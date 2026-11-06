@@ -99,7 +99,8 @@ PUBLISH = {'platform': 'instagram', 'label': str, 'noun': str, 'verb': str, 'set
            'last_post': LAST_POST, 'posts_24h': int, 'next_possible': T_,
            'counts': {'waiting': int, 'skipped': int, 'failed': int, 'posted': int,
                       'by_lesson': [{'lesson': str, 'waiting': int}]},
-           'forecast': FORECAST, 'job': (None, JOB), 'unresolved': [JOB], 'queue': QUEUE}
+           'forecast': FORECAST, 'job': (None, JOB), 'unresolved': [JOB], 'queue': QUEUE,
+           'paused': (None, {'until': TIME, 'text': str})}
 CHECK = {'code': str, 'level': {'block', 'warn', 'info'}, 'text': str, 'data': dict}
 PREVIEW = {'platform': 'instagram', 'item': ITEM, 'caption': str, 'default_caption': str,
            'caption_limits': {'chars': int, 'tags_hard': int, 'tags_suggested': int, 'visible': int},
@@ -120,8 +121,8 @@ STATS = {'now': TIME, 'sources': [{'source': str, 'last_ok': T_, 'last_try': T_,
          'pairs': [{'lesson': str, 'file': str, 'youtube': dict, 'instagram': dict}],
          'insights': (None, {'available': bool, 'checked': T_, 'text': (str, None)}),      # None: never checked
          'limit': (None, {'used': NUM_, 'total': NUM_, 'at': T_, 'stale': bool})}
-ACTIVITY = {'items': [{'id': int, 'at': TIME, 'who': str, 'kind': str, 'platform': (str, None), 'text': str,
-                       'url': (str, None)}],
+ACTIVITY = {'items': [{'id': int, 'at': TIME, 'who': str, 'kind': str, 'platform': (str, None), 'label': (str, None),
+                       'text': str, 'url': (str, None)}],
             'more': bool, 'logs': {'watch': [str], 'instagram': [str], 'youtube': [str]}}
 
 
@@ -1816,6 +1817,21 @@ class VideosView(Case):
         publish.queue_op(self.root, 'instagram', 'skip', 0, 'dev@localhost', item_id=ID[7])
         v = {x['file']: x for x in dashboard.videos_view(self.root)['videos']}
         self.assertEqual(v['new-short-7.mp4']['reel']['state'], 'skipped')
+
+    def test_covers_before_youtube(self):
+        """A video not on YouTube yet shows the cover from Drive: YouTube's candidate first, else another platform's."""
+        yt = fixtures.fake_youtube_platform(self.root)
+        publish.set_registry({'instagram': fixtures.fake_platform(self.root), 'youtube': yt})
+        v = {x['file']: x for x in dashboard.videos_view(self.root)['videos']}
+        withcover = {f: x['cover'] for f, x in v.items() if x.get('cover')}
+        self.assertTrue(withcover)
+        for f, c in withcover.items():
+            self.assertRegex(c['id'], r'^[0-9a-f]{12}$', f)
+            p, item = dashboard._cover_item(self.root, c['platform'], c['id'])
+            self.assertIsNotNone(p.cover(item), f)                       # the picture really exists
+        yt_files = {it.file.name for it in publish.items(self.root, 'youtube')[0] if yt.cover(it) is not None}
+        for f in yt_files & set(withcover):
+            self.assertEqual(withcover[f]['platform'], 'youtube', f)
 
     def test_numbers_merged(self):
         um = 'FAKE_yt_011'

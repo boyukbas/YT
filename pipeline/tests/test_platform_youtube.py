@@ -129,6 +129,20 @@ class Candidates(Case):
         self.assertNotIn(VID, [p.id for p in self.p.history(self.root)])
 
 
+class Cover(Case):
+    def test_a_vertical_lesson_video_shows_the_vertical_cover(self):
+        """Like youtube.apply_video: a vertical main video gets thumbnail-short.jpg, a horizontal one thumbnail-1.jpg."""
+        item = next(i for i in self.items().values() if not Y.is_short(i.file))
+        x = tools.extras(item.out)
+        for n in ('thumbnail-1.jpg', 'thumbnail-short.jpg'):
+            if not (x / n).exists():
+                (x / n).write_bytes(b'jpg')
+        for size, want in (({'width': 1080, 'height': 1920, 'duration': 30}, 'thumbnail-short.jpg'),
+                           ({'width': 1920, 'height': 1080, 'duration': 30}, 'thumbnail-1.jpg')):
+            with self.subTest(size=size), mock.patch.object(P, 'probe_cached', lambda f, size=size: size):
+                self.assertEqual(self.p.cover(item).name, want)
+
+
 class Upload(Case):
     def test_upload_processing_public_and_the_record(self):
         self.faked()
@@ -197,7 +211,8 @@ class Upload(Case):
         self.addCleanup((guard.WORK / Y.QUOTA_FILE).unlink, missing_ok=True)
         job = self.upload()
         self.assertEqual((job['state'], job['kind']), ('failed', 'rate'), job)
-        self.assertTrue(job['error'].startswith("YouTube's daily API limit is used up; it is back at "), job['error'])
+        self.assertTrue(job['error'].startswith("YouTube's daily limit is used up; it is back at "), job['error'])
+        self.assertTrue(job['result'].startswith('Not uploaded: '), job['result'])
         self.assertNotIn('HttpError', job['error'])
         self.assertEqual([c[0] for c in self.tube.calls], ['find_upload'])                # nothing went up
         quota = [c for c in P.preview(self.root, 'youtube', P.item_id(NEW9), now=self.now)['checks'] if c['code'] == 'quota']
@@ -228,6 +243,163 @@ class Upload(Case):
         self.assertIn('make_public', [c[0] for c in self.tube.calls])
 
 
+class GoogleErrors(Case):
+    """A Google error other than the quota: plain words on the page, the raw text in youtube.log, the same kind
+    (so the same breaker) as before."""
+    def test_a_refused_upload_reads_plainly(self):
+        import httplib2
+        from googleapiclient.errors import HttpError
+
+        class Refusing(FakeTube):
+            def find_upload(self, yt, mp4, taken):
+                self.calls.append(('find_upload', mp4.name))
+                raise HttpError(httplib2.Response({'status': 403}),
+                                b'{"error":{"errors":[{"reason":"forbidden"}],"message":"x"}}')
+        self.faked(Refusing())
+        job = self.upload()
+        self.assertEqual((job['state'], job['kind']), ('failed', 'permission'), job)
+        self.assertEqual(job['error'], 'YouTube refused the request (error 403): x.')
+        self.assertEqual(job['result'], f'Not uploaded: {job["error"]}')
+        self.assertEqual(P.breaker('google')['state'], 'stopped')
+        log = (guard.WORK / 'youtube.log').read_text(encoding='utf-8')
+        self.assertIn('YouTube said: <HttpError 403', log)
+        rows = P.activity()['items']
+        self.assertEqual(next(r for r in rows if r['kind'] == 'breaker.open')['label'], 'YouTube')
+        self.assertEqual(next(r for r in rows if r['kind'] == 'post.failed')['label'], 'YouTube')
+        self.assertNotIn('HttpError', json.dumps(rows))
+
+    def test_a_done_upload_says_uploaded(self):
+        self.faked()
+        self.assertEqual(self.upload()['result'], 'Uploaded on YouTube.')
+
+
+class Paused(Case):
+    """A used-up quota (the shared note): one block, one time, a yellow Home card, and automatic uploads wait."""
+    def setUp(self):
+        super().setUp()
+        self.addCleanup((guard.WORK / Y.QUOTA_FILE).unlink, missing_ok=True)
+
+    def test_quota_hides_breaker_block(self):
+        P.trip('google', 'rate', 'YouTube asked for a pause.')
+        Y.quota_used_up(self.now)
+        codes = [c['code'] for c in P.preview(self.root, 'youtube', P.item_id(NEW9), now=self.now)['checks']]
+        self.assertIn('quota', codes)
+        self.assertNotIn('breaker', codes)
+        P.trip('google', 'auth', 'YouTube refused the sign-in.')          # another cause: both are shown
+        codes = [c['code'] for c in P.preview(self.root, 'youtube', P.item_id(NEW9), now=self.now)['checks']]
+        self.assertIn('breaker', codes)
+
+    def test_paused_in_publish_body_and_attention(self):
+        import dashboard
+        back = Y.quota_used_up(self.now)
+        P.trip('google', 'rate', 'YouTube asked for a pause.')
+        body = P.state(self.root, 'youtube', now=self.now)
+        self.assertEqual(body['paused'], {'until': P.S.iso(back), 'text': Y.quota_text(back)})
+        cards = {c['id']: c for c in P.attention(self.root, now=self.now)}
+        self.assertNotIn('breaker:google', cards)
+        card = cards['paused:youtube']
+        self.assertEqual((card['level'], card['who'], card['title']),
+                         ('yellow', 'anyone', 'YouTube uploads wait until Thu 5 Nov 11:00'))
+        self.assertTrue(card['text'].endswith('Nothing to do; it starts again by itself.'), card['text'])
+        self.assertIn('paused', dashboard.RULES)
+        self.assertEqual(dashboard.RULES.index('paused'), dashboard.RULES.index('breaker') + 1)
+        health = next(h for h in dashboard.platform_health(self.now) if h['name'] == 'youtube')
+        self.assertEqual((health['ok'], health['text']), (False, 'YouTube daily limit used up · back Thu 5 Nov 11:00'))
+        P.trip('google', 'auth', 'x')                                    # closed below, so the note shows
+        with P._Con(write=True) as con:
+            con.execute("UPDATE breakers SET state = 'closed' WHERE name = 'google'")
+        health = next(h for h in dashboard.platform_health(self.now) if h['name'] == 'youtube')
+        self.assertEqual((health['ok'], health['text']), (False, 'YouTube daily limit used up · back Thu 5 Nov 11:00'))
+        (guard.WORK / Y.QUOTA_FILE).unlink()
+        self.assertIsNone(P.state(self.root, 'youtube', now=self.now)['paused'])
+        health = next(h for h in dashboard.platform_health(self.now) if h['name'] == 'youtube')
+        self.assertEqual(health['text'], 'YouTube key OK')
+
+    def test_a_breaker_that_waits_longer_gives_the_card_its_time(self):
+        back = Y.quota_used_up(self.now)                                  # Thu 5 Nov 11:00
+        for _ in range(5):                                                # cooling grows: ends after 11:00
+            b = P.trip('google', 'rate', Y.quota_text(back))
+        until = P._time(b['until'])
+        self.assertGreater(until, back)
+        cards = {c['id']: c for c in P.attention(self.root, now=self.now)}
+        self.assertNotIn('breaker:google', cards)
+        card = cards['paused:youtube']
+        self.assertEqual(card['title'], f'YouTube uploads wait until {P.S.fmt(until)}')
+        self.assertIn(f'until {P.S.fmt(until)}.', card['text'])
+        self.assertTrue(card['text'].endswith('Nothing to do; it starts again by itself.'), card['text'])
+
+    def test_quota_breaker_row_names_one_time(self):
+        back = Y.quota_used_up(self.now)
+        P.trip('google', 'rate', Y.quota_text(back))                     # 1 h: ends before the quota is back
+        with P._Con() as con:
+            row = con.execute("SELECT text, data FROM audit WHERE kind = 'breaker.open' ORDER BY id DESC").fetchone()
+        self.assertEqual(row['text'], f'Uploads paused: {Y.quota_text(back)}')
+        self.assertEqual(json.loads(row['data'])['kind'], 'rate')
+        P.trip('google', 'rate', 'YouTube asked for a pause.')           # no time in the message: the time stays
+        with P._Con() as con:
+            text = con.execute("SELECT text FROM audit WHERE kind = 'breaker.open' ORDER BY id DESC").fetchone()['text']
+        self.assertTrue(text.startswith('Posting paused (until '), text)
+
+    def test_upload_during_the_quota_is_refused_before_a_job(self):
+        Y.quota_used_up(self.now)
+        pv = P.preview(self.root, 'youtube', P.item_id(NEW9), now=self.now)
+        with self.assertRaises(P.PublishError) as e:
+            P.start_post(self.root, 'youtube', P.item_id(NEW9), pv['caption'], False, pv['check'],
+                         [c['code'] for c in pv['checks'] if c['level'] == 'warn'], WHO)
+        self.assertEqual((e.exception.status, e.exception.code), (422, 'problems'))
+        self.assertEqual([c['code'] for c in e.exception.extra['checks']], ['quota'])
+        with P._Con() as con:
+            self.assertEqual(con.execute('SELECT COUNT(*) FROM jobs').fetchone()[0], 0)
+
+    def test_a_video_over_15_minutes_is_still_refused_by_hand(self):
+        """As on main: a manual Upload refuses any length check (the 'info' one for over 15 minutes too)."""
+        with mock.patch.object(P, 'probe_cached', lambda f: {'duration': 16 * 60}):
+            pv = P.preview(self.root, 'youtube', P.item_id(NEW9), now=self.now)
+            self.assertIn(('length', 'info'), {(c['code'], c['level']) for c in pv['checks']})
+            with self.assertRaises(P.PublishError) as e:
+                P.start_post(self.root, 'youtube', P.item_id(NEW9), pv['caption'], False, pv['check'],
+                             [c['code'] for c in pv['checks'] if c['level'] == 'warn'], WHO)
+        self.assertEqual((e.exception.status, e.exception.code), (422, 'problems'))
+        self.assertEqual([c['code'] for c in e.exception.extra['checks']], ['length'])
+
+    def test_automatic_uploads_wait_on_a_quota_day(self):
+        P.save_settings('youtube', {'auto': True}, P.settings(self.root).doc['rev'], ['auto_on'], WHO, root=self.root)
+        hist = self.p.history(self.root)
+        cfg = P.S.platform_settings(P.settings(self.root), 'youtube')
+        for days in range(1, 8):                                     # the first evening with an open slot
+            t = (self.now + P.timedelta(days=days)).replace(hour=17, minute=5)
+            if P.S.slot_open(cfg, hist, t)[0]:
+                break
+        self.now = t
+        waiting = len(P.queue(self.root, 'youtube', now=self.now)['waiting'])
+        Y.quota_used_up(self.now)
+        lines = P.auto_step(self.root, log=lambda *a: None, now=self.now)
+        self.assertTrue(any(' waits: ' in line for line in lines), lines)
+        with P._Con() as con:
+            self.assertEqual(con.execute('SELECT COUNT(*) FROM jobs').fetchone()[0], 0)
+            self.assertEqual(con.execute("SELECT COUNT(*) FROM audit WHERE kind = 'item.failed'").fetchone()[0], 0)
+        self.assertEqual(len(P.queue(self.root, 'youtube', now=self.now)['waiting']), waiting)
+        self.assertGreater(waiting, 0)
+
+    def test_quota_day_never_promises_an_upload_before_the_limit_is_back(self):
+        self.now = (self.now + P.timedelta(days=1)).replace(hour=13, minute=10)     # 16:10, before the evening slot
+        back = Y.quota_used_up(self.now)
+        P.trip('google', 'rate', Y.quota_text(back))
+        self.now += P.timedelta(hours=1, minutes=5)                                # the 1 h breaker is over
+        with mock.patch.object(P, '_utcnow', lambda: self.now):
+            body = P.save_settings('youtube', {'auto': True}, P.settings(self.root).doc['rev'], ['auto_on'], WHO,
+                                   root=self.root)
+        at = P._time(body['auto']['next']['at'])
+        self.assertGreaterEqual(at, back)
+        self.assertIn(P._after(at), body['message'])
+        nxt = P.state(self.root, 'youtube', now=self.now)['auto']['next']
+        self.assertGreaterEqual(P._time(nxt['at']), back)
+        entry = next(e for e in P.next_run(self.root, now=self.now) if e['platform'] == 'youtube')
+        self.assertGreaterEqual(P._time(entry['at']), back)
+        rows = P.state(self.root, 'youtube', now=self.now)['forecast']['rows']
+        self.assertTrue(rows and all(P._time(r['at']) >= back for r in rows), rows)
+
+
 class Records(Case):
     def test_writes_only_under_the_lock(self):
         it = self.items()[NEW9]
@@ -253,6 +425,22 @@ class Records(Case):
 
 
 class Status(Case):
+    def test_failed_auth_test_names_youtubes_own_command(self):
+        from googleapiclient.errors import HttpError
+
+        class Resp(dict):
+            def __init__(self):
+                super().__init__(status='401')
+                self.status, self.reason = 401, 'x'
+
+        def refuse(self):
+            raise HttpError(Resp(), b'{"error": {"errors": [{"reason": "authError"}]}}')
+        with mock.patch.object(PY.YouTubePlatform, 'test', refuse), self.assertRaises(P.PublishError) as e:
+            P.test_platform('youtube', WHO)
+        self.assertEqual(e.exception.code, 'test_failed')
+        self.assertTrue(e.exception.message.endswith('Make a new key on the PC (youtube.py login).'), e.exception.message)
+        self.assertNotIn('instagram', e.exception.message)
+
     def test_container_states(self):
         for st, want in (({'privacy': 'public', 'upload': 'processed'}, 'PUBLISHED'),
                          ({'privacy': 'private', 'upload': 'processed'}, 'FINISHED'),
@@ -378,8 +566,7 @@ class QuotaSaving(unittest.TestCase):
         self.assertEqual(back, datetime(2026, 11, 6, 8, 0, tzinfo=timezone.utc))         # 11:00 Istanbul
         self.assertEqual(Y.quota_until(datetime(2026, 11, 6, 7, 59, tzinfo=timezone.utc)), back)
         self.assertIsNone(Y.quota_until(datetime(2026, 11, 6, 8, 0, tzinfo=timezone.utc)))
-        self.assertEqual(Y.quota_text(back), "YouTube's daily API limit is used up; it is back at 11:00 "
-                                             "(midnight Pacific time).")
+        self.assertEqual(Y.quota_text(back), "YouTube's daily limit is used up; it is back at 11:00 on Fri 6 Nov.")
         (guard.WORK / Y.QUOTA_FILE).write_text('garbage', encoding='utf-8')
         self.assertIsNone(Y.quota_until())
 
@@ -402,6 +589,6 @@ class QuotaSaving(unittest.TestCase):
             self.assertEqual(calls, ['lesson'])
             self.assertTrue(Y.quota_until())
             said = json.loads((tools.extras(self.out) / easy.OURS).read_text(encoding='utf-8'))['youtube']
-            self.assertIn("daily API limit is used up; it is back at", said)
+            self.assertIn("daily limit is used up; it is back at", said)
             easy.youtube_step(lesson)                                    # the next run: no request at all
             self.assertEqual(calls, ['lesson'])

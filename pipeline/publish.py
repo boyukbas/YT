@@ -151,6 +151,12 @@ class Platform:
         """A warning when the platform's key ends within 14 days (local check), else None. Never raises."""
         return None
 
+    def paused(self, now: datetime) -> dict | None:
+        """{'until': ISO UTC, 'text': one plain sentence} while the platform itself says wait (YouTube: its daily
+        quota is used up), else None. Local check. Only shown and used to hold automatic posts; the breaker is
+        never written from it."""
+        return None
+
     def write_record(self, item: Item, record: dict, retry: bool = True) -> None:
         """Set the item's record in its Drive record file atomically, keeping every other key and the old
         record's extra keys. The caller holds the PostLock. Raises OSError when Drive stays unwritable after
@@ -476,6 +482,56 @@ def redact(text: str) -> str:
     return text
 
 
+_HTTPERR = re.compile(r'<HttpError (\d{3})(?: when requesting \S+ returned)? "(.*?)(?:"(?:\. Details: "(.*?)(?:">)?|>)?)?'
+                      r'\s*$', re.S)                  # also matches old rows cut at 500 or 300 characters
+_REASON = re.compile(r'''['"]reason['"]\s*:\s*['"](\w+)''')
+_LIMITS = re.compile(r'quotaExceeded|userRateLimitExceeded|rateLimitExceeded|uploadLimitExceeded')
+_TAG = re.compile(r'</?[a-z][a-z0-9]*(?:\s[^<>]*)?>', re.I)
+_URL = re.compile(r'https?://\S+')
+_GOOGLE = {'quotaExceeded': "YouTube's daily limit for the PC's requests was used up.",
+           'rateLimitExceeded': 'YouTube asked for a pause (too many requests).',
+           'userRateLimitExceeded': 'YouTube asked for a pause (too many requests).',
+           'uploadLimitExceeded': "YouTube's daily upload limit was reached."}
+
+
+def _google(m: re.Match) -> str:
+    """One plain sentence for a matched '<HttpError ...>' text."""
+    status, message, details = int(m.group(1)), m.group(2) or '', m.group(3) or ''
+    said, limit = _REASON.search(m.group(0)), _LIMITS.search(m.group(0))
+    reason = limit.group(0) if limit else said.group(1) if said else ''
+    if not reason and re.fullmatch(r'\w+', details.strip()):
+        reason = details.strip()
+    if reason not in _GOOGLE and 'exceeded' in message.lower() and 'quota' in message.lower():
+        reason = 'quotaExceeded'                      # cut before the reason (old rows)
+    if reason in _GOOGLE:
+        return _GOOGLE[reason]
+    if status == 401:
+        return "YouTube refused the PC's sign-in."
+    if status >= 500:
+        return f'YouTube did not answer (error {status}).'
+    message = re.sub(r'<[^<>]*$', '', _TAG.sub('', message))            # a tag cut off at the end too
+    said = ' '.join(_URL.sub('', message).split()).rstrip('.').strip()
+    end = '' if said.endswith('…') else '.'                              # an old row cut mid-message
+    return f'YouTube refused the request (error {status})' + (f': {said}{end}' if said else '.')
+
+
+def plain(text, limit: int = 200) -> str:
+    """Display only: Google's raw '<HttpError ...>' text as one short sentence; HTML tags and links removed; cut at
+    a word boundary. Never stored. Other texts (Meta's 'Meta 400: ... (code 100)', links too) come back as they are."""
+    text = '' if text is None else str(text)
+    m = _HTTPERR.search(text)
+    html = bool(m or _TAG.search(text))                  # links go only with Google's HTML page text
+    if m:
+        text = text[:m.start()] + _google(m) + text[m.end():]
+    text = _TAG.sub('', text)
+    text = ' '.join((_URL.sub('', text) if html else text).split())
+    if len(text) > limit:
+        cut = text[:limit - 1]
+        i = cut.rfind(' ')
+        text = (cut[:i] if i > limit // 2 else cut).rstrip(' ,;:.') + '…'
+    return text
+
+
 def log_line(platform_name: str, text: str) -> None:
     """Append 'YYYY-MM-DD HH:MM <text>' (Istanbul time, redacted) to WORK/<platform>.log, and print it."""
     line = f'{S.local(_utcnow()):%Y-%m-%d %H:%M} {redact(text)}'
@@ -527,16 +583,35 @@ def activity(kind: str = 'all', before: int | None = None, limit: int = 50) -> d
     with _Con() as con:
         rows = con.execute(sql + ' ORDER BY id DESC LIMIT ?', [*([before] if before is not None else []), limit + 1]).fetchall()
     items = [{'id': r['id'], 'at': r['at'], 'who': r['who'], 'kind': r['kind'], 'platform': r['platform'],
-              'text': r['text'], 'url': _url_of(r['data'])} for r in rows[:limit]]
+              'label': _row_label(r), 'text': plain(r['text'], 300), 'url': _url_of(r['data'])} for r in rows[:limit]]
     return {'items': items, 'more': len(rows) > limit}
 
 
-def _url_of(data) -> str | None:
+def _data(data) -> dict:
     try:
         d = json.loads(data) if data else {}
     except ValueError:
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def _url_of(data) -> str | None:
+    return _data(data).get('url') or None
+
+
+def _row_label(r) -> str | None:
+    """The platform label of an audit row; a breaker row (no platform) gets the labels of the platforms that share
+    its breaker ('data.name'). None for a row of no platform (settings, the migration)."""
+    if r['platform']:
+        return _label(r['platform'])
+    name = _data(r['data']).get('name') if str(r['kind']).startswith('breaker.') else None
+    if not name:
         return None
-    return d.get('url') or None if isinstance(d, dict) else None
+    try:
+        labels = [p.label for p in registry().values() if p.breaker == name]
+    except Exception:
+        labels = []
+    return ' and '.join(labels) or None
 
 
 def _head(text) -> str:
@@ -577,6 +652,12 @@ def _result(stage: str, platform_name: str) -> str:
     return {'queued': 'Waiting to start…', 'preparing': 'Getting the video ready…',
             'sharing': f'Sending the video to {label}…', 'processing': f'{label} is processing the video…',
             'publishing': f'Publishing on {label}…', 'saving': 'Saving the record…'}.get(stage, '')
+
+
+def _past(p: Platform) -> str:
+    """The platform's verb in the past: 'posted' (Instagram), 'uploaded' (YouTube)."""
+    verb = p.verb or 'post'
+    return verb + ('d' if verb.endswith('e') else 'ed')
 
 
 def _label(platform_name: str) -> str:
@@ -1129,8 +1210,19 @@ def _job_json(r) -> dict:
     return {'id': r['id'], 'platform': r['platform'], 'item': item_id(r['item_key']), 'key': r['item_key'],
             'title': r['title'], 'by': r['by'], 'who': r['who'], 'state': r['state'], 'stage': r['stage'],
             'stages': list(STAGES), 'created': r['created'], 'started': r['started'], 'finished': r['finished'],
-            'url': r['permalink'] or None, 'kind': r['kind'], 'error': r['error'], 'result': r['result'],
+            'url': r['permalink'] or None, 'kind': r['kind'], **_shown(r['error'], r['result']),
             'record_pending': bool(r['record_pending'])}
+
+
+def _shown(error, result) -> dict:
+    """A job's error and result as the page shows them (plain()); a result that ends with the error ends with
+    exactly the same plain error, so the page can tell it is already said."""
+    err = plain(error) if error else error
+    if result and error and result.endswith(error):
+        result = result[:len(result) - len(error)] + err
+    elif result:
+        result = plain(result, 300)
+    return {'error': err, 'result': result}
 
 
 def job(job_id: str) -> dict:
@@ -1215,11 +1307,19 @@ def _not_before(name: str, now: datetime) -> datetime:
     return t
 
 
+def _shown_from(p: Platform, now: datetime) -> datetime:
+    """Display only (the next automatic post, the forecast): _not_before(), and not before the time a paused
+    platform may go on (YouTube's used-up quota: auto_step holds its slots until then)."""
+    t, pz = _not_before(p.name, now), _paused(p, now)
+    back = _time(pz['until']) if pz else None
+    return max(t, back) if back else t
+
+
 def _plan(v: '_View', cfg: dict, wait: list[Item]) -> tuple[list[dict], list[dict]]:
     """(the whole simulated queue, its rows within the search horizon): S.forecast from the time auto_step may
     try next, up to a year, so the runway counts every waiting item (addendum C5: the list says how many it
     leaves out)."""
-    t = _not_before(v.p.name, v.now)
+    t = _shown_from(v.p, v.now)
     full = S.forecast(cfg, v.hist, t, [i.key for i in wait], limit_days=366)
     last = (S.local(t).date() + timedelta(days=S.SEARCH_DAYS)).isoformat()
     return full, [r for r in full if r['slot'] <= last]
@@ -1242,7 +1342,7 @@ def _auto(root, p: Platform, now: datetime, loaded: S.Loaded | None = None, v: _
             try:
                 v = v or _View(root, p, now, strict=False)
                 wait = v.waiting()
-                at, slot, reason = S.next_auto(cfg, v.hist, _not_before(p.name, now), len(wait))
+                at, slot, reason = S.next_auto(cfg, v.hist, _shown_from(p, now), len(wait))
             except Exception:
                 at, slot, reason, wait = None, None, 'no_slot', []
             text = {'scheduled': f'Next automatic {p.noun}: {_after(at)}', 'empty': f'No {p.noun}s are waiting.'
@@ -1252,7 +1352,7 @@ def _auto(root, p: Platform, now: datetime, loaded: S.Loaded | None = None, v: _
     return {'setting': bool(cfg['auto']), 'effective': on, 'reason': reason,
             'text': 'Automatic posting is on.' if on else 'Automatic posting is off.',
             'summary': S.summary(cfg, p.noun), 'pause_file': S.pause_info(p.name),
-            'suspended': {'since': st['suspended'], 'why': st['suspended_why']} if st and st['suspended'] else None,
+            'suspended': {'since': st['suspended'], 'why': plain(st['suspended_why'])} if st and st['suspended'] else None,
             'next': nxt}
 
 
@@ -1267,7 +1367,7 @@ def _checks(v: _View, item: Item, caption: str, *, fresh: bool = False, busy: bo
         out.append(Check('not_set_up', 'block', f'{p.label} is not set up on this PC.'))
     b = breaker(p.breaker)
     if b['state'] != 'closed':
-        out.append(Check('breaker', 'block', f'Posting is stopped: {b["message"]}', {'state': b['state'], 'until': b['until']}))
+        out.append(Check('breaker', 'block', _stopped(b), {'state': b['state'], 'until': b['until']}))
     if any(not _same(j, item) for j in v.unresolved):
         out.append(Check('unresolved', 'block', 'An earlier post was interrupted. Check it first.'))
     if busy is None:
@@ -1283,6 +1383,8 @@ def _checks(v: _View, item: Item, caption: str, *, fresh: bool = False, busy: bo
         out.append(Check('checking', 'block', f"This {p.noun}'s last post was interrupted. Check it first."))
     out += S.spacing_checks(v.cfg, v.hist, v.now, p.noun)
     out += p.preflight(item, caption, fresh)
+    if b['kind'] == 'rate' and any(c.code == 'quota' and c.level == 'block' for c in out):
+        out = [c for c in out if c.code != 'breaker']       # one cause, one block: the quota one says when it is back
     dup = v.duplicate(item, caption)
     if dup:
         out.append(Check('duplicate', 'warn', f'A {p.noun} with this caption is already on {p.label} '
@@ -1309,9 +1411,39 @@ def fingerprint(platform_name: str, item: Item, history: list[Post], now: dateti
 
 def _stopped(b: dict) -> str:
     """The 423 message for an open breaker."""
-    hint = (' Test the connection in Publish.' if b['state'] == 'stopped' else
+    return f'Posting is stopped: {plain(b["message"])}{_hint(b)}'
+
+
+def _hint(b: dict) -> str:
+    """' Test the connection in Publish.' (stopped) or ' Posting starts again after <time>.' (cooling)."""
+    return (' Test the connection in Publish.' if b['state'] == 'stopped' else
             f' Posting starts again after {S.fmt(_time(b["until"]))}.')
-    return f'Posting is stopped: {b["message"]}{hint}'
+
+
+def _shown_breaker(b: dict) -> dict:
+    """breaker() for a page body: the message plain()."""
+    return {**b, 'message': plain(b['message']) if b.get('message') else b.get('message')}
+
+
+def _paused(p: Platform, now: datetime) -> dict | None:
+    """p.paused(now) ({'until', 'text'}: the platform says wait, e.g. YouTube's used-up daily quota), or None.
+    Never raises."""
+    try:
+        got = p.paused(now)
+    except Exception:
+        return None
+    return got if isinstance(got, dict) and got.get('until') else None
+
+
+def _held_until(p: Platform, pz: dict) -> tuple[datetime, str]:
+    """Display only, for a paused platform: (when it may go on, the sentence). A cooling 'rate' breaker that ends
+    later than the pause (the card for it is hidden then) gives the later time, so a page shows one time."""
+    until, text = _time(pz['until']), pz['text']
+    b = breaker(p.breaker)
+    later = _time(b.get('until')) if b['state'] == 'cooling' and b.get('kind') == 'rate' else None
+    if later and later > until:
+        until, text = later, f'{text} After the refused tries the PC waits a little longer, until {S.fmt(later)}.'
+    return until, text
 
 
 # ---------- the queue ----------
@@ -1499,7 +1631,7 @@ def start_post(root: Path, platform_name: str, item_id: str, caption: str, save_
                            job=_job_json(v.unresolved[0]))
     b = breaker(p.breaker)
     if b['state'] != 'closed':                                                      # 6
-        raise PublishError(423, 'breaker', _stopped(b), breaker=b)
+        raise PublishError(423, 'breaker', _stopped(b), breaker=_shown_breaker(b))
     if v.open or _holder_after_wait() is not None:                                  # 7
         raise PublishError(409, 'busy', f'A {p.noun} is being posted right now.',
                            job=_job_json(v.open[-1]) if v.open else None)
@@ -1521,7 +1653,7 @@ def start_post(root: Path, platform_name: str, item_id: str, caption: str, save_
         n = S.posts_in_24h(v.hist, now)
         raise PublishError(429, 'hard_cap', f'{n} {p.noun}s in the last 24 hours: that is the limit.',
                            next_possible=cap.data.get('next_possible'))
-    bad = [c for c in checks if c.code in ('file_missing', 'length')]
+    bad = [c for c in checks if c.code in ('file_missing', 'length') or (c.code == 'quota' and c.level == 'block')]
     if bad:
         raise PublishError(422, 'problems', 'Fix these first.', checks=[_check_json(c) for c in bad])
     fp = fingerprint(p.name, item, v.hist, now, checks)
@@ -1948,7 +2080,7 @@ def _recheck(v: _View, item: Item | None, row, caption: str) -> str | None:
         return 'An earlier post was interrupted. Check it first.'
     b = breaker(p.breaker)
     if b['state'] != 'closed':
-        return f'Posting is stopped: {b["message"]}'
+        return f'Posting is stopped: {plain(b["message"])}'
     n = S.posts_in_24h(v.hist, v.now)
     if n >= v.cfg['hard_cap_24h']:
         return f'{n} {p.noun}s in the last 24 hours: that is the limit.'
@@ -2033,19 +2165,19 @@ def _end(p: Platform, row, state: str, *, kind: str | None = None, error: str | 
     clear_failed clears its Failed mark (queue_key: the item's key now, else the queue row with the job's sig).
     expect: the states the job must still be in (compare-and-set: two processes or two phones never both end
     it); returns False, changing nothing, when it is not."""
-    name, label = Path(row['item_key']).name, p.label
+    name, label, past = Path(row['item_key']).name, p.label, _past(p)
     if state == 'done':
-        result = f'Posted on {label}.' + (' The Drive record is saved later.' if record_pending else '')
-        text = f'{name}: posted on {label}.'
+        result = f'{past[:1].upper()}{past[1:]} on {label}.' + (' The Drive record is saved later.' if record_pending else '')
+        text = f'{name}: {past} on {label}.'
     elif state == 'failed' and item_failed:
-        result = f'Not posted. The {p.noun} is marked Failed; check the file, then Try again.'
-        text = f'{name}: not posted: {error}'
+        result = f'Not {past}. The {p.noun} is marked Failed; check the file, then Try again.'
+        text = f'{name}: not {past}: {error}'
     elif state == 'unknown':
         result = text = f'{name}: not clear whether it went out. Check {label}.'
     elif state == 'interrupted':
         result, text = 'The post was interrupted. Check it first.', f'{name}: the post was interrupted.'
     else:
-        result, text = f'Not posted: {error}', f'{name}: not posted: {error}'
+        result, text = f'Not {past}: {error}', f'{name}: not {past}: {error}'
     now = S.iso(_utcnow())
     guard = f' AND state IN ({", ".join("?" * len(expect))})' if expect else ''
     with _Con(write=True) as con:
@@ -2094,8 +2226,13 @@ def trip(name: str, kind: str, message: str) -> dict:
 
 
 def _sentence(text: str) -> str:
-    text = ' '.join(str(text or '').split())[:300]
-    return text if not text or text[-1] in '.!?' else text + '.'
+    """One line of at most 300 characters ending in '.', or cut at a word with '…'."""
+    text = ' '.join(str(text or '').split())
+    if len(text) > 300:
+        cut = text[:300]
+        i = cut.rfind(' ')
+        return (cut[:i] if i > 150 else cut[:299]).rstrip(' ,;:') + '…'
+    return text if not text or text[-1] in '.!?…' else text + '.'
 
 
 def _trip(name: str, kind: str, message: str, who: str) -> dict:
@@ -2115,9 +2252,27 @@ def _trip(name: str, kind: str, message: str, who: str) -> dict:
                     'ON CONFLICT(name) DO UPDATE SET state = excluded.state, until = excluded.until, step = excluded.step, '
                     'kind = excluded.kind, message = excluded.message, since = excluded.since',
                     (name, state, until, step, kind, message, S.iso(now)))
-        _audit(con, who, 'breaker.open', f'Posting stopped ({kind}): {message}', data={'name': name, 'state': state,
+        said = _said_back(name, message, _time(until), now) if state == 'cooling' else None
+        text = (f'{said.verb.title()}s paused: {message}' if said else       # the message has the time: one time
+                f'Posting paused (until {S.local(_time(until)):%H:%M}): {message}' if state == 'cooling' else
+                f'Posting stopped: {message}')
+        _audit(con, who, 'breaker.open', text, data={'name': name, 'state': state, 'kind': kind,
                                                                                          'until': until, 'step': step})
     return breaker(name)
+
+
+def _said_back(name: str, message: str, until: datetime | None, now: datetime) -> 'Platform | None':
+    """Text only, for the breaker.open row: the platform on breaker name whose pause sentence (p.paused: YouTube's
+    'back at 11:00 on ...') is in message and lasts at least as long as the breaker, else None. Never raises."""
+    try:
+        for p in registry().values():
+            pz = _paused(p, now) if p.breaker == name else None
+            back = _time(pz['until']) if pz else None
+            if back and until and until <= back and pz.get('text') and pz['text'] in message:
+                return p
+    except Exception:
+        pass
+    return None
 
 
 def test_platform(platform_name: str, by: str) -> dict:
@@ -2146,8 +2301,9 @@ def test_platform(platform_name: str, by: str) -> dict:
         b = _trip(p.breaker, kind, msg, by)
         audit(by, 'platform.test', f'{p.label} connection test failed ({kind}): {msg}', platform=p.name,
               data={'kind': kind})
-        text = f'{msg} Make a new key on the PC (instagram.py system-token).' if kind == 'auth' else msg
-        raise PublishError(502, 'test_failed', text, kind=kind, breaker=b, retry_after=TEST_EVERY) from None
+        fix = p.setup_hint or 'instagram.py system-token'       # the platform's own command (YouTube: youtube.py login)
+        text = f'{plain(msg)} Make a new key on the PC ({fix}).' if kind == 'auth' else plain(msg, 300)
+        raise PublishError(502, 'test_failed', text, kind=kind, breaker=_shown_breaker(b), retry_after=TEST_EVERY) from None
     with _Con(write=True) as con:
         if p.breaker and con.execute("SELECT 1 FROM breakers WHERE name = ? AND state = 'stopped'",
                                      (p.breaker,)).fetchone():
@@ -2162,7 +2318,7 @@ def test_platform(platform_name: str, by: str) -> dict:
                    f'{S.fmt(_time(b["until"]))}.')
     else:
         message = f'{p.label} answers. Posting is allowed again.'
-    return {'ok': True, 'result': result, 'breaker': b, 'message': message}
+    return {'ok': True, 'result': result, 'breaker': _shown_breaker(b), 'message': message}
 
 
 # ---------- reconcile ----------
@@ -2458,7 +2614,7 @@ def _check_job(root: Path, p: Platform, r, now: datetime, by: str) -> dict:
     """resolve_job 'check'."""
     b = breaker(p.breaker)
     if b['state'] != 'closed':
-        raise PublishError(423, 'breaker', _stopped(b), breaker=b)
+        raise PublishError(423, 'breaker', _stopped(b), breaker=_shown_breaker(b))
     last = _time(r['reconcile_at'])
     if last and (now - last).total_seconds() < RECONCILE_EVERY:
         raise PublishError(429, 'rate_limited', 'Wait a moment before checking again.',
@@ -2568,6 +2724,10 @@ def _auto_locked(root: Path, p: Platform, log, now: datetime, slot: str, lock: P
             blocks = [c for c in p.preflight(item, caption, fresh=True) if c.level == 'block']
         except Exception as e:
             blocks = [Check('local', 'block', redact(str(e)) or type(e).__name__)]
+        held = [c for c in blocks if c.code == 'quota']    # the platform says wait: not the video's fault
+        if held:
+            say(f'{p.label}: {item.file.name} waits: {held[0].text}')
+            return
         unread = [c for c in blocks if _unreadable(c)]
         row = v.row(item)
         if unread and not (row and row['unread'] and (now - _time(row['unread'])).total_seconds() >= RETRY_AFTER):
@@ -2618,8 +2778,14 @@ def _unreadable(c: Check) -> bool:
 
 
 def _auto_outcome(p: Platform, j: dict, slot: str, now: datetime, say) -> None:
-    """auto_step step 12: failures and suspension (a done job already reset the failures)."""
+    """auto_step step 12: failures and suspension (a done job already reset the failures). Stores and logs the
+    job's raw error and result from its row, not the page's plain() text (which is cut and drops links)."""
     name = Path(j.get('key') or '').name
+    try:
+        row = _job_row(j.get('id'))
+        j = {**j, 'error': row['error'], 'result': row['result']}
+    except PublishError:
+        pass
     if j.get('state') == 'done':
         say(f'{p.label}: {name} posted {j.get("url") or "(no link yet)"}')
         return
@@ -2772,7 +2938,8 @@ def state(root: Path, platform_name: str, now: datetime | None = None, with_queu
             'settings': v.cfg, 'settings_rev': v.loaded.doc.get('rev'), 'settings_problems': list(v.loaded.problems),
             'presets': [{'id': k, 'label': d['label'], 'values': {f: x for f, x in d.items() if f != 'label'}}
                         for k, d in S.PRESETS.items()],
-            'auto': auto, 'breaker': breaker(p.breaker), 'last_post': v.last_post(),
+            'auto': auto, 'breaker': _shown_breaker(breaker(p.breaker)), 'paused': _paused(p, now),
+            'last_post': v.last_post(),
             'posts_24h': S.posts_in_24h(v.hist, now), 'next_possible': cap.data.get('next_possible') if cap else None,
             'counts': counts}
     if with_queue:
@@ -2816,7 +2983,7 @@ def next_run(root: Path, now: datetime | None = None, views: dict | None = None)
                         'stopped_by_file': f'{p.label}: automatic posting OFF ({n} waiting)',
                         'invalid': f'{p.label}: automatic posting OFF ({n} waiting)',
                         'suspended': f'{p.label}: automatic posting SUSPENDED ({n} waiting)',
-                        'breaker': f'{p.label}: posting stopped: {breaker(p.breaker)["message"]}',
+                        'breaker': f'{p.label}: posting stopped: {plain(breaker(p.breaker)["message"])}',
                         'unresolved': f'{p.label}: an interrupted post needs a check ({n} waiting)',
                         'empty': f'{p.label}: no {p.noun}s waiting'}.get(
                     blk or auto['reason'], f'{p.label}: no automatic slot in the next {S.SEARCH_DAYS} days ({n} waiting)')
@@ -2866,23 +3033,44 @@ def attention(root: Path, now: datetime | None = None, views: dict | None = None
     for name, v in views.items():                                                   # 5
         ended = [j for j in v.jobs if j['state'] in ('done', 'failed') and j['finished']]
         last = max(ended, key=lambda j: j['finished'], default=None)
-        if last and last['state'] == 'failed' and _time(last['finished']) > now - _DAY:
-            out.append(_card(f'post_failed:{last["id"]}', 'red', 'anyone', f'The last {v.p.noun} was not posted',
-                             f'{Path(last["item_key"]).name}: {last["error"]}', link(name)))
+        if not (last and last['state'] == 'failed' and _time(last['finished']) > now - _DAY):
+            continue
+        if last['kind'] in ('rate', 'auth', 'permission'):     # the breaker or paused card says it; then it waits again
+            continue
+        item = next((i for i in v.items if i.key == last['item_key']), None)
+        if item is None or v.state(item) in ('posted', 'skipped', 'failed'):    # 'failed': the F7 card says it
+            continue
+        out.append(_card(f'post_failed:{last["id"]}', 'red', 'anyone',
+                         f'The last {v.p.label} {v.p.noun} was not {_past(v.p)}',
+                         f'{Path(last["item_key"]).name} ({S.fmt(_time(last["finished"]))}): {plain(last["error"])}',
+                         link(name)))
+    paused = {name: _paused(v.p, now) for name, v in views.items()}
     done = set()
     for name, v in views.items():                                                   # 6
         b = breaker(v.p.breaker)
         if v.p.breaker and b['state'] != 'closed' and v.p.breaker not in done:
             done.add(v.p.breaker)
-            out.append(_card(f'breaker:{v.p.breaker}', 'red', 'pc', 'Posting is stopped', _stopped(b),
+            mates = [(n, x.p) for n, x in views.items() if x.p.breaker == v.p.breaker]
+            if b['kind'] == 'rate' and any(paused.get(n) for n, _ in mates):
+                continue                                    # the same cause: the paused card has the time
+            labels = ' and '.join(x.label for _, x in mates)
+            cooling = b['state'] == 'cooling'
+            verb = ('are' if len(mates) > 1 else 'is') + (' paused' if cooling else ' stopped')
+            out.append(_card(f'breaker:{v.p.breaker}', 'yellow' if cooling else 'red', 'anyone' if cooling else 'pc',
+                             f'{labels} {verb}', plain(b['message']) + _hint(b),
+                             None if cooling else                   # cooling: it ends on its own (S9)
                              {'kind': 'call', 'label': 'Test connection', 'endpoint': '/api/platform/test',
-                              'body': {'platform': name}, 'confirm': None, 'ack': None}
-                             if b['state'] == 'stopped' else None))   # cooling: it ends on its own (S9)
+                              'body': {'platform': name}, 'confirm': None, 'ack': None}))
+    for name, v in views.items():                                                   # 6b: the platform says wait
+        if paused.get(name):
+            until, text = _held_until(v.p, paused[name])
+            out.append(_card(f'paused:{name}', 'yellow', 'anyone', f'{v.p.label} {v.p.verb}s wait until {S.fmt(until)}',
+                             f'{text} Nothing to do; it starts again by itself.', link(name)))
     for name, v in views.items():                                                   # 7
         st = _auto_state(name)
         if st and st['suspended']:
             out.append(_card(f'auto_suspended:{name}', 'red', 'anyone', 'Automatic posting is suspended',
-                             f'After {SUSPEND_AFTER} failed tries in a row: {st["suspended_why"]}', link(name)))
+                             f'After {SUSPEND_AFTER} failed tries in a row: {plain(st["suspended_why"])}', link(name)))
     if loaded.problems:                                                             # 8
         out.append(_card('settings_invalid', 'red', 'pc', 'The settings file has a problem',
                          ' '.join(loaded.problems) + ' Automatic posting is off until it is reset.',

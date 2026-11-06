@@ -9,7 +9,7 @@ img{max-width:100%}
 [hidden]{display:none !important}
 .sprite{position:absolute;width:0;height:0;overflow:hidden}
 .ic{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle}
-.wrap{max-width:860px;margin:0 auto;padding:16px 16px calc(var(--tabs) + 32px + env(safe-area-inset-bottom))}
+.wrap{max-width:860px;margin:0 auto;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) calc(var(--tabs) + 32px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
 .hdr{display:flex;align-items:center;gap:12px}
 .hdr img{width:44px;height:44px;border-radius:50%;background:#fff;flex:none}
 .hd{min-width:0}
@@ -17,13 +17,13 @@ h1{font-size:clamp(17px,5vw,21px);font-weight:800;letter-spacing:-0.02em;margin:
 h2{font-size:15px;font-weight:800;margin:0 0 8px}
 .sub,.muted{color:var(--muted)}
 .sub{font-size:13px}
-.who{margin-left:auto;max-width:45%;text-align:right;color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.who{flex:none;margin-left:auto;max-width:45%;text-align:right;color:var(--muted);font-size:12px;overflow-wrap:anywhere}
 .who a{display:inline-block;padding:14px 0 14px 12px;margin:-14px 0}
 .health{color:var(--muted);font-size:12px;margin:8px 0 14px;min-height:17px;overflow-wrap:anywhere}
 .health .bad{color:var(--bad)}
 footer{color:var(--muted);font-size:12px;margin-top:24px;text-align:center}
 footer a{display:inline-block;padding:14px 4px}
-.tabs{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;justify-content:center;height:calc(var(--tabs) + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);background:var(--panel);border-top:1px solid var(--line)}
+.tabs{position:fixed;left:0;right:0;bottom:0;z-index:10;display:flex;justify-content:center;height:calc(var(--tabs) + env(safe-area-inset-bottom));padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:var(--panel);border-top:1px solid var(--line)}
 .tabs a{position:relative;flex:1;max-width:172px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:600;color:var(--muted);text-decoration:none;-webkit-tap-highlight-color:transparent}
 .tabs a[aria-current="page"]{color:var(--yellow)}
 .tabs .ic{width:22px;height:22px}
@@ -56,12 +56,13 @@ button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:6p
 .primary{background:var(--yellow);color:var(--ink);border-color:var(--yellow)}
 .danger{background:transparent;color:var(--danger);border-color:var(--danger)}
 button.small,.btn.small{min-height:36px;padding:6px 12px;font-size:13px}
+@media (pointer:coarse){button.small,.btn.small{min-height:44px}}
 button.link,.btn.link{background:none;border-color:transparent;color:var(--yellow);padding:6px 4px}
 .icon-btn{width:44px;padding:0;background:transparent;border-color:transparent;color:var(--muted)}
 button:disabled{opacity:.45;cursor:default}
 :focus-visible{outline:2px solid var(--yellow);outline-offset:2px}
 .stack>button,.stack>.btn{width:100%;justify-content:flex-start}
-input:not([type=checkbox]):not([type=radio]),select,textarea{max-width:100%;min-height:44px;padding:10px 12px;font:400 15px/1.4 var(--font);color:var(--text);background:var(--deep);border:1px solid var(--line);border-radius:10px}
+input:not([type=checkbox]):not([type=radio]),select,textarea{max-width:100%;min-height:44px;padding:10px 12px;font:400 16px/1.4 var(--font);color:var(--text);background:var(--deep);border:1px solid var(--line);border-radius:10px}
 textarea{display:block;width:100%;resize:vertical}
 input[type=checkbox]{width:22px;height:22px;margin:0;flex:none;accent-color:var(--yellow)}
 .tick{display:flex;align-items:center;gap:10px;min-height:44px;font-weight:600;cursor:pointer}
@@ -108,14 +109,15 @@ input[type=checkbox]{width:22px;height:22px;margin:0;flex:none;accent-color:var(
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .when{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .title{font-weight:600;overflow-wrap:anywhere}
+.title a,a.tall{display:inline-block;padding:12px 0;margin:-12px 0}
 .title a{text-decoration:none}
-.title a:hover{text-decoration:underline}
+@media (hover:hover){.title a:hover{text-decoration:underline}}
 .meta{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:2px;color:var(--muted);font-size:13px}
 .meta b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
 .reel{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:6px;color:var(--muted);font-size:13px}
 .reel .ic{width:16px;height:16px}
 .card .row{margin-top:8px}
-.big{font-size:18px;font-weight:800;letter-spacing:-0.01em}
+.big{font-size:18px;font-weight:800;letter-spacing:-0.01em;overflow-wrap:anywhere}
 .big.is-on{color:var(--green)}
 .big.is-bad{color:var(--bad)}
 .job{border-color:var(--yellow)}
@@ -132,6 +134,7 @@ input[type=checkbox]{width:22px;height:22px;margin:0;flex:none;accent-color:var(
 .qbody{align-self:stretch;display:flex;flex-direction:column;justify-content:center;min-width:0;cursor:pointer}
 dialog.sheet{padding:0;margin:auto 0 0;width:100%;max-width:100%;max-height:92vh;max-height:92dvh;overflow:hidden;color:var(--text);background:var(--panel);border:1px solid var(--line);border-bottom:0;border-radius:16px 16px 0 0}
 dialog.sheet[open]{display:flex;flex-direction:column;animation:sheet-up .22s ease-out}
+dialog.sheet:focus{outline:none}
 dialog.sheet::backdrop{background:rgba(5,8,14,.66)}
 @keyframes sheet-up{from{transform:translateY(100%)}}
 @keyframes sheet-pop{from{transform:translateY(18px);opacity:0}}
@@ -146,7 +149,7 @@ dialog.sheet::backdrop{background:rgba(5,8,14,.66)}
 .cover-lg,.cover-916{display:block;aspect-ratio:9 / 16;margin:4px auto 12px;border-radius:12px;background:var(--deep)}
 .cover-lg{width:min(56%,220px);object-fit:cover}
 .cover-wide{display:block;width:100%;max-width:420px;aspect-ratio:16 / 9;margin:4px auto 12px;border-radius:12px;background:var(--deep);object-fit:cover}
-.seg{margin-bottom:10px}.seg .chip{font-size:13px;padding:6px 14px;text-decoration:none;color:inherit}.seg .chip.on{background:var(--yellow);color:var(--ink)}
+.seg{margin-bottom:10px}.seg .chip{display:inline-flex;align-items:center;min-height:44px;font-size:13px;padding:6px 14px;text-decoration:none;color:inherit}.seg .chip.on{background:var(--yellow);color:var(--ink)}
 .cover-916{position:relative;width:min(62%,240px);overflow:hidden}
 .cover-916 img{display:block;width:100%;height:100%;object-fit:cover}
 .crop{display:none;position:absolute;left:0;right:0;top:12.5%;height:75%;outline:2px solid var(--yellow);outline-offset:-2px;box-shadow:0 0 0 999px rgba(5,8,14,.6)}
@@ -199,7 +202,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 details.log{margin-bottom:10px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
 details.log summary{display:flex;align-items:center;min-height:44px;padding:0 12px;font-weight:700;cursor:pointer}
 details.log pre{max-height:60vh;overflow-y:auto;margin:0;padding:10px 12px;border-top:1px solid var(--line);font:12px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
-.toast{position:fixed;left:16px;right:16px;bottom:calc(var(--tabs) + 16px + env(safe-area-inset-bottom));z-index:30;width:fit-content;max-width:520px;margin:0 auto;padding:10px 16px;border-radius:12px;background:var(--text);color:var(--ink);font-size:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.45)}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(var(--tabs) + 16px + env(safe-area-inset-bottom));z-index:30;width:fit-content;max-width:520px;margin:0 auto;padding:10px 16px;border-radius:12px;background:var(--text);color:var(--ink);font-size:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.45);max-height:30vh;overflow:hidden;overflow-wrap:anywhere;cursor:pointer}
 dialog .toast{bottom:calc(84px + env(safe-area-inset-bottom))}
 
 @media (max-width:420px){
@@ -215,7 +218,7 @@ dialog .toast{bottom:calc(84px + env(safe-area-inset-bottom))}
 .stats,.tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
 }
 @media (min-width:720px){
-dialog.sheet{margin:auto;width:560px;max-height:86vh;border-bottom:1px solid var(--line);border-radius:16px}
+dialog.sheet{margin:auto;width:560px;max-height:86vh;max-height:86dvh;border-bottom:1px solid var(--line);border-radius:16px}
 dialog.sheet[open]{animation-name:sheet-pop}
 .sheet-foot{padding-bottom:10px}
 }
