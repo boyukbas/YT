@@ -48,6 +48,7 @@ class Case(unittest.TestCase):
         self.lock, self.beat = guard.WORK / 'watch.lock', guard.WORK / 'watcher.json'
         self.out = io.StringIO()
         self.addCleanup(self._join)
+        self.patch(easy, 'free_memory_gb', lambda: 64.0)              # the real PC's memory never decides
 
     def _join(self):
         for t in list(P._threads.values()):
@@ -383,6 +384,93 @@ class OverviewNeverRaises(Case):
             self.assertIsNone(overview.write(self.root, idle=True))
         self.assertEqual(self.out.getvalue(), 'overview: OSError: made-up Drive error\n')
         self.assertEqual((self.root / overview.NAME).read_text(encoding='utf-8'), before)
+
+
+class MemoryWait(Case):
+    """2026-11-06: P1 and P2 stopped with 'out of memory' while Chrome held the PC's memory. A full memory is the
+    PC's state: the lesson waits (and tries again every run) instead of stopping, MEMORY_TRIES times at most."""
+    OOM = 'mkl_malloc: failed to allocate memory'
+
+    def setUp(self):
+        super().setUp()
+        self.lesson = self.root / 'Big lesson'
+        fixtures.write_lesson(self.root, 'Big lesson', state='new', video_mtime=time.time() - 3600)
+        self.calls, self.raise_ = 0, RuntimeError(self.OOM)
+
+        def process(lesson, root, log_only=False):       # like the real one: 'working' with the inputs first
+            self.calls += 1
+            work = guard.WORK / tools.slug(Path(lesson).name)
+            work.mkdir(parents=True, exist_ok=True)
+            tools.Status(easy.output_dir(Path(lesson)), work).set(
+                'working', 'Starting', inputs=easy.fingerprint(easy.lesson_videos(Path(lesson))), error='')
+            if self.raise_:
+                raise self.raise_
+        self.patch(easy, 'process', process)
+
+    def status(self) -> dict:
+        return json.loads((tools.extras(easy.output_dir(self.lesson)) / 'status.json').read_text(encoding='utf-8'))
+
+    def run_once(self):
+        with contextlib.redirect_stdout(self.out):
+            return easy.safe_process(self.lesson, self.root)
+
+    def test_the_words(self):
+        for text in ('RuntimeError: mkl_malloc: failed to allocate memory', 'RuntimeError: CUDA failed with error out '
+                     'of memory', 'CUDA out of memory. Tried to allocate 2.00 GiB', 'MemoryError: ',
+                     'numpy.core._exceptions._ArrayMemoryError: Unable to allocate 3.1 GiB'):
+            self.assertTrue(easy.out_of_memory(text), text)
+        for text in ('', None, 'RuntimeError: made-up render failure', 'OSError: [Errno 28] No space left on device'):
+            self.assertFalse(easy.out_of_memory(text), text)
+
+    def test_too_little_free_memory_waits_without_starting(self):
+        self.patch(easy, 'free_memory_gb', lambda: 2.5)
+        self.assertIsNone(self.run_once())
+        self.assertEqual(self.calls, 0)
+        st = self.status()
+        self.assertEqual((st['state'], st['memory']), ('waiting', True))
+        self.assertIn('Waiting for free memory on the PC: 2.5 GB free, 6 GB needed', st['step'])
+        self.assertTrue(easy.changed(self.lesson))                     # looked at again next run
+        self.patch(easy, 'free_memory_gb', lambda: 20.0)
+        self.raise_ = None
+        self.run_once()                                                # memory free again: it runs
+        self.assertEqual(self.calls, 1)
+
+    def test_out_of_memory_waits_then_stops_after_the_tries(self):
+        for n in range(1, easy.MEMORY_TRIES):
+            self.assertIsNone(self.run_once())                         # no raise: not a failure yet
+            st = self.status()
+            self.assertEqual(st['state'], 'waiting')
+            self.assertIn(f'try {n} of {easy.MEMORY_TRIES}', st['step'])
+            self.assertTrue(easy.changed(self.lesson))
+        with self.assertRaisesRegex(RuntimeError, 'mkl_malloc'):
+            self.run_once()
+        st = self.status()
+        self.assertEqual((st['state'], st['memory_gave_up']), ('failed', True))
+        self.assertTrue(st['error'].startswith(f'The PC ran out of memory {easy.MEMORY_TRIES} times. Close some'))
+        self.assertFalse(easy.changed(self.lesson))                    # stopped for good ...
+        easy.retry_marker(self.lesson).parent.mkdir(parents=True, exist_ok=True)
+        easy.retry_marker(self.lesson).write_text('x', encoding='utf-8')
+        self.assertTrue(easy.changed(self.lesson))                     # ... until Retry, which counts again from 1
+        self.run_once()
+        self.assertIn(f'try 1 of {easy.MEMORY_TRIES}', self.status()['step'])
+
+    def test_a_success_clears_the_count(self):
+        self.run_once()
+        self.raise_ = None
+        self.run_once()
+        self.assertFalse((guard.WORK / tools.slug('Big lesson') / 'memory-tries.txt').exists())
+
+    def test_an_old_out_of_memory_stop_is_tried_again(self):
+        """P1 and P2 as the watcher left them: 'failed' with the memory error, same clips."""
+        self.raise_ = RuntimeError('made-up render failure')
+        with self.assertRaises(RuntimeError):
+            self.run_once()
+        self.assertFalse(easy.changed(self.lesson))                    # another failure: waits for Retry, as before
+        st = tools.Status(easy.output_dir(self.lesson), guard.WORK / tools.slug('Big lesson'))
+        st.set('failed', 'Stopped', error='RuntimeError: CUDA failed with error out of memory')
+        st.data.pop('memory', None)
+        st.set('failed', 'Stopped')
+        self.assertTrue(easy.changed(self.lesson))
 
 
 if __name__ == '__main__':

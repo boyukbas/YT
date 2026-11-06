@@ -58,6 +58,8 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   PC folders (cleaned 2026-11-05): `D:\YT` holds only `easy-work` (databases, settings, transcripts, Claude answers),
   `work\venv` (the pipeline's Python), `work\tools`, `tools` (cloudflared) and `voice-samples`. Old hand-made videos and
   build docs are in `<letter>:\My Drive\YT archive (PC)` (outside SINEM-YouTube, so the watcher ignores it).
+  Full memory (2026-11-06: Chrome held 17 GB, P1/P2 stopped): a lesson starts only with 6 GB free commit memory and an
+  out-of-memory error waits and retries next run (6 tries, then Stopped; Retry counts again): `easy.safe_process`.
   **User says "new video(s)" → follow `pipeline/RUNBOOK.md`** (STATUS → `review.py` rule check → look at frames → report).
 - The iOS workflow ignores `docs/**`, `pipeline/**`, `README.md` and `CLAUDE.md` changes.
 

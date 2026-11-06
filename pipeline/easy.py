@@ -13,7 +13,7 @@ Optional <lesson>/settings.json, e.g. {"short": false} = no Short version for th
 long video in the studio layout (picture card + example-sentence board), also from a horizontal recording.
 Work files stay on the PC in D:\\YT\\easy-work\\<lesson>.
 """
-import argparse, hashlib, json, os, shutil, statistics, sys, threading, time, traceback
+import argparse, hashlib, json, os, re, shutil, statistics, sys, threading, time, traceback
 from pathlib import Path
 import cv2
 from PIL import Image
@@ -380,7 +380,11 @@ def changed(lesson):
     if not st.exists():
         return True
     s = json.loads(st.read_text(encoding='utf-8'))
+    if s.get('state') == 'waiting' and s.get('memory'):
+        return True                           # waits for free memory: safe_process looks again every run
     if s.get('state') == 'failed' and s.get('inputs') == fingerprint(videos):
+        if out_of_memory(s.get('error')) and not s.get('memory_gave_up'):
+            return True                       # stopped by a full memory (before 2026-11-06 too): try again
         return retry_marker(lesson).exists()  # don't retry the same failure every 10 minutes (unless asked to)
     return s.get('inputs') != fingerprint(videos)
 
@@ -534,18 +538,96 @@ def name_step(lesson):
     Status(output_dir(target), WORK_ROOT / slug(target.name)).log(f'folder renamed: "{lesson.name}" -> "{target.name}"')
 
 
+# A full memory is the PC's state, not the lesson's fault (2026-11-06: P1 and P2 stopped with 'CUDA ... out of
+# memory' and 'mkl_malloc: failed to allocate memory' while Chrome held 17 GB). So the watcher waits for free
+# memory instead of stopping: a lesson starts only with MEMORY_NEED_GB free, and one that runs out anyway waits
+# and tries again next run, MEMORY_TRIES times before it stops for good (Retry starts the count again).
+MEMORY_NEED_GB = 6.0
+MEMORY_TRIES = 6
+_OOM = re.compile(r'out of memory|mkl_malloc|failed to allocate|unable to allocate|not enough memory|\bMemoryError\b',
+                  re.I)
+
+
+def out_of_memory(text) -> bool:
+    """True for an error text that says the memory (RAM or the GPU's) was full."""
+    return bool(_OOM.search(str(text or '')))
+
+
+def free_memory_gb() -> float | None:
+    """Windows: how much memory the PC can still hand out (its commit limit, RAM + page file, minus what is
+    committed), in GB. None elsewhere or when Windows does not say."""
+    if os.name != 'nt':
+        return None
+    try:
+        import ctypes
+
+        class Status_(ctypes.Structure):
+            _fields_ = [('dwLength', ctypes.c_ulong), ('dwMemoryLoad', ctypes.c_ulong)] + [
+                (n, ctypes.c_ulonglong) for n in ('ullTotalPhys', 'ullAvailPhys', 'ullTotalPageFile',
+                                                  'ullAvailPageFile', 'ullTotalVirtual', 'ullAvailVirtual',
+                                                  'ullAvailExtendedVirtual')]
+        m = Status_()
+        m.dwLength = ctypes.sizeof(m)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+            return None
+        return m.ullAvailPageFile / 2 ** 30
+    except Exception:
+        return None
+
+
+def _memory_tries(work, add=0) -> int:
+    """The lesson's out-of-memory count (work/memory-tries.txt), raised by add and written back."""
+    f = work / 'memory-tries.txt'
+    try:
+        n = int(f.read_text(encoding='utf-8').strip() or 0)
+    except (OSError, ValueError):
+        n = 0
+    if add:
+        n += add
+        work.mkdir(parents=True, exist_ok=True)
+        f.write_text(f'{n}\n', encoding='utf-8')
+    return n
+
+
+HINT = 'Closing some programs on the PC (Chrome tabs) helps.'
+
+
 def safe_process(lesson, root):
     retry_marker(lesson).unlink(missing_ok=True)
+    work = WORK_ROOT / slug(lesson.name)
+    free = free_memory_gb()
+    if free is not None and free < MEMORY_NEED_GB:
+        work.mkdir(parents=True, exist_ok=True)
+        Status(output_dir(lesson), work).set(
+            'waiting', f'Waiting for free memory on the PC: {free:.1f} GB free, {MEMORY_NEED_GB:g} GB needed. It starts '
+            f'by itself; {HINT[0].lower()}{HINT[1:]}', memory=True, memory_gave_up=False)
+        print(f'lesson {lesson.name}: waits for memory ({free:.1f} GB free)')
+        return
     try:
         process(lesson, root)
     except llm.Pending as p:
-        Status(output_dir(lesson), WORK_ROOT / slug(lesson.name)).set('waiting', f'Needs a Claude answer: {p}')
+        Status(output_dir(lesson), work).set('waiting', f'Needs a Claude answer: {p}', memory=False)
     except Exception as e:
-        work = WORK_ROOT / slug(lesson.name)
         work.mkdir(parents=True, exist_ok=True)
         (work / 'error.txt').write_text(traceback.format_exc(), encoding='utf-8')
-        Status(output_dir(lesson), work).set('failed', 'Stopped', error=f'{type(e).__name__}: {e}'[:400])
+        text = f'{type(e).__name__}: {e}'[:400]
+        st = Status(output_dir(lesson), work)
+        if isinstance(e, MemoryError) or out_of_memory(text):
+            n = _memory_tries(work, 1)
+            if n < MEMORY_TRIES:
+                st.set('waiting', f'The PC ran out of memory (try {n} of {MEMORY_TRIES}); it tries again in 10 minutes. '
+                       f'{HINT}', memory=True, memory_gave_up=False, error=text)
+                print(f'lesson {lesson.name}: out of memory, try {n} of {MEMORY_TRIES}')
+                return
+            (work / 'memory-tries.txt').unlink(missing_ok=True)
+            st.set('failed', 'Stopped', memory=False, memory_gave_up=True,
+                   error=f'The PC ran out of memory {MEMORY_TRIES} times. Close some programs on the PC, then press '
+                         f'Retry. ({text})'[:400])
+            raise
+        st.set('failed', 'Stopped', error=text, memory=False)
         raise
+    else:
+        (work / 'memory-tries.txt').unlink(missing_ok=True)
 
 
 if __name__ == '__main__':
