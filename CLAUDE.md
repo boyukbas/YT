@@ -48,7 +48,9 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   Lesson Output folders hold only the finished videos; everything else is in `Output/extras/` (`tools.extras()`).
   Google Drive's drive letter can change after a restart (J: → G: on 2026-11-03); `watch.cmd` looks for
   `<letter>:\My Drive\SINEM-YouTube` on every letter, so use whatever letter has it in manual commands too.
-  YouTube API quota resets at midnight Pacific = 11:00 Istanbul in winter, 10:00 in summer.
+  YouTube API quota resets at midnight Pacific = 11:00 Istanbul in winter, 10:00 in summer. After a quotaExceeded every part (watcher,
+  stats, Upload) waits for the shared note `easy-work\youtube-quota-until.txt` (`youtube.quota_used_up`/`quota_until`);
+  the watcher's re-check of a video waiting to be public costs 1 unit (caption list only when a track changes; 2026-11-06).
   PC folders (cleaned 2026-11-05): `D:\YT` holds only `easy-work` (databases, settings, transcripts, Claude answers),
   `workenv` (the pipeline's Python), `work	ools`, `tools` (cloudflared) and `voice-samples`. Old hand-made videos and
   build docs are in `<letter>:\My Drive\YT archive (PC)` (outside SINEM-YouTube, so the watcher ignores it).

@@ -46,6 +46,35 @@ APPLIED = 'youtube-applied.json'
 SHORTS_TIME = '19:00'                                    # Istanbul; Shorts go public one a day at this time
 SHORTS_WARN = 3                                          # more Shorts than this per lesson → a warning in STATUS
 MANUAL = ['pin the comment', 'end screen (video + subscribe on the right half, last 10 s)']
+QUOTA_FILE = 'youtube-quota-until.txt'          # paths.WORK: when the daily API quota is back (ISO UTC)
+
+
+def quota_used_up(now=None):
+    """Note that YouTube answered quotaExceeded: until the next midnight Pacific time the watcher leaves YouTube
+    alone and the dashboard's Upload says so instead of failing (2026-11-06). Written by whichever part hits the
+    limit first (watcher, stats, an upload). Returns the time it is back. Never raises."""
+    import schedule
+    until = schedule.pacific_midnight_after(now or datetime.now(timezone.utc))
+    try:
+        (paths.WORK / QUOTA_FILE).write_text(until.isoformat(), encoding='utf-8')
+    except OSError as e:
+        print(f'quota note not written: {e}')
+    return until
+
+
+def quota_until(now=None):
+    """The time YouTube's daily quota is back while the quotaExceeded note is in force, else None."""
+    try:
+        until = datetime.fromisoformat((paths.WORK / QUOTA_FILE).read_text(encoding='utf-8').strip())
+    except (OSError, ValueError):
+        return None
+    return until if (now or datetime.now(timezone.utc)) < until else None
+
+
+def quota_text(until):
+    """The plain sentence for a used-up quota."""
+    return (f"YouTube's daily API limit is used up; it is back at {until.astimezone(ISTANBUL):%H:%M} "
+            "(midnight Pacific time).")
 
 
 def credentials(interactive=False):
@@ -361,13 +390,17 @@ def apply_video(yt, vid, out, mp4, w, rec, dry):
             rec['thumbnail'] = sha(th)
         done.append(f'thumbnail ({th.name})')
 
-    # 3. caption tracks (insert 400 / update 450 units), replacing an earlier track in the same language
-    tracks = yt.captions().list(part='snippet', videoId=vid).execute()['items']
+    # 3. caption tracks (insert 400 / update 450 units), replacing an earlier track in the same language. The list
+    # costs 50 units, so it is read only when a track has to go up: the watcher re-checks a video that waits to be
+    # public every 10 min, and that list alone used most of a day's quota (2026-11-06).
+    tracks = None
     for lang in ('tr', 'de'):
         srt = extras(out) / f'{mp4.stem}-subtitles-{lang}.srt'
         if not srt.exists() or rec.get(f'captions_{lang}') == sha(srt):
             continue
-        old = next((t for t in tracks if t['snippet']['language'] == lang and t['snippet']['trackKind'] == 'standard'), None)
+        if tracks is None:
+            tracks = yt.captions().list(part='snippet', videoId=vid).execute()['items']
+        old =next((t for t in tracks if t['snippet']['language'] == lang and t['snippet']['trackKind'] == 'standard'), None)
         if not dry:
             media = MediaFileUpload(str(srt), mimetype='application/octet-stream')
             if old:

@@ -25,6 +25,10 @@ _ID = re.compile(r'^[A-Za-z0-9_-]{11}$')
 _BAD = re.compile(r'[<>]')                   # YouTube refuses these in a title or description
 
 
+class QuotaUsedUp(RuntimeError):
+    """YouTube's daily API quota is used up (a 'rate' error with a readable message)."""
+
+
 class Rejected(RuntimeError):
     """YouTube rejected or failed the upload (its status says so): a content problem, not sent again."""
 
@@ -98,6 +102,9 @@ class YouTubePlatform(publish.Platform):
         """The file is there and readable (up to 12 h; more than 15 min needs a verified channel); a title on the
         first line (1-100 characters), a description under 5,000 bytes, no < or > (YouTube refuses them)."""
         C, out = publish.Check, []
+        until = Y.quota_until(publish._utcnow())
+        if until:                                       # it would fail on the first request (2026-11-06)
+            out.append(C('quota', 'block', Y.quota_text(until), {'until': until.isoformat()}))
         if not item.file.is_file():
             out.append(C('file_missing', 'block', 'The video file is missing on Drive.'))
         else:
@@ -179,6 +186,15 @@ class YouTubePlatform(publish.Platform):
     # ----- NETWORK -----
 
     def post(self, item, caption: str, journal) -> dict:
+        """_post, with YouTube's quotaExceeded turned into a plain sentence (and the shared quota note)."""
+        try:
+            return self._post(item, caption, journal)
+        except Exception as e:
+            if 'quotaExceeded' not in str(e):
+                raise
+            raise QuotaUsedUp(Y.quota_text(Y.quota_used_up(publish._utcnow()))) from e
+
+    def _post(self, item, caption: str, journal) -> dict:
         yt, name = self.yt(), item.file.name
         title, description = split_caption(caption)
         journal.stage('sharing')
@@ -307,6 +323,8 @@ def classify(exc: BaseException) -> str:
     from googleapiclient.errors import HttpError
     if isinstance(exc, Rejected):
         return 'content'
+    if isinstance(exc, QuotaUsedUp):
+        return 'rate'
     if isinstance(exc, HttpError):
         status = exc.resp.status
         text = f'{exc} {getattr(exc, "error_details", "")} {(getattr(exc, "content", b"") or b"")[:4000]!r}'

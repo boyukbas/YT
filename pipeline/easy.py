@@ -496,14 +496,14 @@ def youtube_step(lesson):
     if s.get('state') != 'done' or s.get('youtube_complete') or not (extras(out) / 'youtube.json').exists():
         return
     import youtube as Y
-    if not Y.TOKEN.exists() or _uploading():
+    if not Y.TOKEN.exists() or _uploading() or Y.quota_until():     # quota: no request until it is back
         return
     st = Status(out, WORK_ROOT / slug(lesson.name))
     try:
         r = Y.apply(lesson, log=st.log)
     except Exception as e:
         if 'quota' in str(e):
-            r = ("YouTube's daily API limit is used up; the watcher tries again; it resets at midnight Pacific time (11:00 Istanbul in winter, 10:00 in summer).", False)
+            r = (Y.quota_text(Y.quota_used_up()) + ' The watcher tries again then.', False)
         else:
             r = (f'YouTube step failed: {type(e).__name__}: {e}'[:300], False)
     if r and (r[0] != s.get('youtube') or r[1]):

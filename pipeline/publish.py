@@ -37,7 +37,7 @@ _JOB_STALE = 300                                # reconcile: a running job silen
 _ENDED = 600                                    # current_job(): jobs that ended in the last 10 minutes
 _VISIBLE = 125                                  # caption characters shown before "more"
 _DAY = timedelta(hours=24)
-_ORDER = ('not_set_up', 'breaker', 'unresolved', 'busy', 'posted', 'checking', 'hard_cap', 'file_missing', 'length',
+_ORDER = ('not_set_up', 'breaker', 'quota', 'unresolved', 'busy', 'posted', 'checking', 'hard_cap', 'file_missing', 'length',
           'caption_empty', 'caption_too_long', 'caption_tags_limit', 'gap', 'same_day', 'duplicate', 'skipped',
           'failed_before',
           'not_next', 'cover_missing', 'caption_tags')                   # spec 5.3 table order

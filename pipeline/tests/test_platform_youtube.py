@@ -187,6 +187,29 @@ class Upload(Case):
         self.assertEqual((rec['id'], rec['publish_pending']), (VID, True))
         self.assertIsNone(self.items()[NEW9].posted)
 
+    def test_used_up_quota_reads_plainly_and_blocks_the_next_upload(self):
+        class Used(FakeTube):
+            def find_upload(self, yt, mp4, taken):
+                self.calls.append(('find_upload', mp4.name))
+                raise RuntimeError('<HttpError 403 when requesting youtube/v3/channels returned "The request cannot be '
+                                   'completed because you have exceeded your quota.". Details: "quotaExceeded">')
+        self.faked(Used())
+        self.addCleanup((guard.WORK / Y.QUOTA_FILE).unlink, missing_ok=True)
+        job = self.upload()
+        self.assertEqual((job['state'], job['kind']), ('failed', 'rate'), job)
+        self.assertTrue(job['error'].startswith("YouTube's daily API limit is used up; it is back at "), job['error'])
+        self.assertNotIn('HttpError', job['error'])
+        self.assertEqual([c[0] for c in self.tube.calls], ['find_upload'])                # nothing went up
+        quota = [c for c in P.preview(self.root, 'youtube', P.item_id(NEW9), now=self.now)['checks'] if c['code'] == 'quota']
+        self.assertEqual([c['level'] for c in quota], ['block'])                  # the button says so before trying
+
+    def test_quota_note_from_the_watcher_blocks_upload_too(self):
+        self.addCleanup((guard.WORK / Y.QUOTA_FILE).unlink, missing_ok=True)
+        Y.quota_used_up(self.now)
+        checks = P.preview(self.root, 'youtube', P.item_id(NEW9), now=self.now)['checks']
+        self.assertEqual([(c['code'], c['level']) for c in checks][0], ('quota', 'block'))
+        self.assertIn('back at', checks[0]['text'])
+
     def test_slow_processing_goes_public_after_the_wait(self):
         busy = {'privacy': 'private', 'upload': 'uploaded', 'publish_at': None, 'failure': None}
         self.faked(FakeTube(states=[busy]))
@@ -278,3 +301,107 @@ class WatcherWaits(unittest.TestCase):
                           (None, False)):
             with self.subTest(job=job), mock.patch.object(P, 'current_job', lambda name, job=job: job):
                 self.assertEqual(easy._uploading(), want)
+
+
+class _Call:
+    def __init__(self, log, name, answer):
+        self.log, self.name, self.answer = log, name, answer
+
+    def __call__(self, **kw):
+        self.log.append(self.name)
+        return self
+
+    def execute(self):
+        return self.answer
+
+
+class QuotaTube:
+    """A YouTube client that records which list calls youtube.apply_video makes (no writes expected)."""
+    def __init__(self, snippet, status):
+        self.calls = []
+        self.video = {'snippet': snippet, 'status': status, 'paidProductPlacementDetails': {'hasPaidProductPlacement': False}}
+
+    def videos(self):
+        return mock.Mock(list=_Call(self.calls, 'videos.list', {'items': [self.video]}))
+
+    def captions(self):
+        return mock.Mock(list=_Call(self.calls, 'captions.list', {'items': []}))
+
+
+class QuotaSaving(unittest.TestCase):
+    """2026-11-06: the watcher's 10-minute re-check of one private video (its comment waits until it is public) used
+    most of the daily YouTube quota: 50 units each time for the caption-track list. Now the list is read only when a
+    track has to go up, and after quotaExceeded the watcher leaves YouTube alone until the quota is back."""
+    def setUp(self):
+        self.tmp = guard.TMP / f'yt-quota-{self._testMethodName}'
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        self.out = self.tmp / 'lesson' / 'Output'
+        tools.extras(self.out).mkdir(parents=True)
+
+    def wanted(self):
+        return {'title': 'T', 'description': 'D', 'tags': ['a'], 'categoryId': '27', 'defaultLanguage': 'tr',
+                'defaultAudioLanguage': 'tr', 'madeForKids': False, 'ai': False, 'public': False, 'publish': None,
+                'paid': False, 'thumbnail': None, 'playlist': None, 'comment': 'Alıştırma'}
+
+    def tube(self):
+        w = self.wanted()
+        return QuotaTube({k: w[k] for k in ('title', 'description', 'tags', 'categoryId', 'defaultLanguage',
+                                            'defaultAudioLanguage')} | {'publishedAt': '2026-11-05T10:00:00Z'},
+                         {'privacyStatus': 'private', 'selfDeclaredMadeForKids': False})
+
+    def test_a_video_waiting_to_be_public_costs_one_unit(self):
+        mp4 = self.out / '3-video.mp4'
+        rec = {}
+        for lang in ('tr', 'de'):
+            srt = tools.extras(self.out) / f'3-video-subtitles-{lang}.srt'
+            srt.write_text(f'1\n00:00:00,000 --> 00:00:01,000\n{lang}\n', encoding='utf-8')
+            rec[f'captions_{lang}'] = Y.sha(srt)
+        yt = self.tube()
+        done, waiting, problems = Y.apply_video(yt, 'FAKE_VID_03', self.out, mp4, self.wanted(), rec, dry=False)
+        self.assertEqual((done, waiting, problems), ([], ['comment (posted when the video is public)'], []))
+        self.assertEqual(yt.calls, ['videos.list'])                  # no captions.list (50 units)
+
+    def test_a_changed_track_still_reads_the_list(self):
+        srt = tools.extras(self.out) / '3-video-subtitles-tr.srt'
+        srt.write_text('1\n00:00:00,000 --> 00:00:01,000\nyeni\n', encoding='utf-8')
+        yt = self.tube()
+        done, _, _ = Y.apply_video(yt, 'FAKE_VID_03', self.out, self.out / '3-video.mp4', self.wanted(),
+                                   {'captions_tr': 'old'}, dry=True)
+        self.assertEqual(yt.calls, ['videos.list', 'captions.list'])
+        self.assertEqual(done, ['TR captions (added)'])
+
+    def test_quota_note_lasts_until_midnight_pacific(self):
+        from datetime import datetime, timezone
+        self.addCleanup((guard.WORK / Y.QUOTA_FILE).unlink, missing_ok=True)
+        self.assertIsNone(Y.quota_until())
+        back = Y.quota_used_up(datetime(2026, 11, 6, 3, 42, tzinfo=timezone.utc))          # 05:42 Istanbul
+        self.assertEqual(back, datetime(2026, 11, 6, 8, 0, tzinfo=timezone.utc))         # 11:00 Istanbul
+        self.assertEqual(Y.quota_until(datetime(2026, 11, 6, 7, 59, tzinfo=timezone.utc)), back)
+        self.assertIsNone(Y.quota_until(datetime(2026, 11, 6, 8, 0, tzinfo=timezone.utc)))
+        self.assertEqual(Y.quota_text(back), "YouTube's daily API limit is used up; it is back at 11:00 "
+                                             "(midnight Pacific time).")
+        (guard.WORK / Y.QUOTA_FILE).write_text('garbage', encoding='utf-8')
+        self.assertIsNone(Y.quota_until())
+
+    def test_watcher_skips_youtube_while_the_quota_is_used_up(self):
+        import easy
+        self.addCleanup((guard.WORK / Y.QUOTA_FILE).unlink, missing_ok=True)
+        lesson = self.tmp / 'lesson'
+        (tools.extras(self.out) / easy.OURS).write_text(json.dumps({'state': 'done'}), encoding='utf-8')
+        (tools.extras(self.out) / 'youtube.json').write_text('{}', encoding='utf-8')
+        token = self.tmp / 'token.json'
+        token.write_text('{}', encoding='utf-8')
+        calls = []
+
+        def apply(lesson, log=print):
+            calls.append(lesson.name)
+            raise RuntimeError('<HttpError 403 when requesting youtube/v3/videos returned "quotaExceeded">')
+        with mock.patch.object(easy, 'WORK_ROOT', self.tmp / 'work'), mock.patch.object(Y, 'TOKEN', token),                 mock.patch.object(Y, 'apply', apply), mock.patch.object(easy, '_uploading', lambda: False),                 mock.patch.object(easy, 'output_dir', lambda lesson: self.out):
+            (self.tmp / 'work' / 'lesson').mkdir(parents=True)                # the lesson's work folder
+            easy.youtube_step(lesson)
+            self.assertEqual(calls, ['lesson'])
+            self.assertTrue(Y.quota_until())
+            said = json.loads((tools.extras(self.out) / easy.OURS).read_text(encoding='utf-8'))['youtube']
+            self.assertIn("daily API limit is used up; it is back at", said)
+            easy.youtube_step(lesson)                                    # the next run: no request at all
+            self.assertEqual(calls, ['lesson'])

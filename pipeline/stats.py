@@ -381,6 +381,8 @@ def _failed(source: str, now: datetime, calls: int, e: BaseException, kind: str 
         wait = now + timedelta(seconds=BACKOFF[min(n, len(BACKOFF)) - 1])
         if quota:
             wait = max(S.pacific_midnight_after(now), now + timedelta(seconds=EVERY[source]))
+            import youtube as Y                          # the shared note: the watcher and Upload wait too
+            Y.quota_used_up(now)
         con.execute('INSERT INTO sources (source, last_try, fails, next_try, last_error) VALUES (?, ?, ?, ?, ?) '
                     'ON CONFLICT(source) DO UPDATE SET last_try = excluded.last_try, fails = excluded.fails, '
                     'next_try = excluded.next_try, last_error = excluded.last_error',
