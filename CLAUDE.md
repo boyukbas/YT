@@ -56,7 +56,7 @@ They like step-by-step answers, visuals, and clear "what was verified vs. assume
   stats, Upload) waits for the shared note `easy-work\youtube-quota-until.txt` (`youtube.quota_used_up`/`quota_until`);
   the watcher's re-check of a video waiting to be public costs 1 unit (caption list only when a track changes; 2026-11-06).
   PC folders (cleaned 2026-11-05): `D:\YT` holds only `easy-work` (databases, settings, transcripts, Claude answers),
-  `workenv` (the pipeline's Python), `work	ools`, `tools` (cloudflared) and `voice-samples`. Old hand-made videos and
+  `work\venv` (the pipeline's Python), `work\tools`, `tools` (cloudflared) and `voice-samples`. Old hand-made videos and
   build docs are in `<letter>:\My Drive\YT archive (PC)` (outside SINEM-YouTube, so the watcher ignores it).
   **User says "new video(s)" → follow `pipeline/RUNBOOK.md`** (STATUS → `review.py` rule check → look at frames → report).
 - The iOS workflow ignores `docs/**`, `pipeline/**`, `README.md` and `CLAUDE.md` changes.

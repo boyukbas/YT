@@ -858,5 +858,25 @@ class NoFacebook(unittest.TestCase):
         self.assertIn('def upload(', y)
 
 
+class SourceText(unittest.TestCase):
+    """2026-11-06: splitting instagram.py wrote meta.CLOUDFLARED with a real TAB where '\\t' of 'D:\\YT\\tools' was
+    (the tests patch CLOUDFLARED, so none saw it) and every real Reel failed with 'cloudflared could not start'."""
+
+    def test_the_cloudflared_path(self):
+        self.assertEqual(meta.CLOUDFLARED.name, 'cloudflared.exe')
+        self.assertEqual(meta.CLOUDFLARED.parent.name, 'tools')
+        self.assertFalse(any(ord(c) < 32 for c in str(meta.CLOUDFLARED)))
+
+    def test_no_control_characters_typed_inside_strings(self):
+        import tokenize
+        bad = []
+        for f in sorted(Path(__file__).resolve().parents[1].glob('*.py')):
+            with f.open('rb') as fh:
+                for tok in tokenize.tokenize(fh.readline):
+                    if tok.type == tokenize.STRING and any(ord(c) < 32 and c not in '\r\n' for c in tok.string):
+                        bad.append(f'{f.name}:{tok.start[0]}')
+        self.assertEqual(bad, [], 'a tab or other control character typed inside a string (write it as an escape)')
+
+
 if __name__ == '__main__':
     unittest.main()

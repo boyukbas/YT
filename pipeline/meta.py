@@ -8,7 +8,7 @@ from pathlib import Path
 
 import requests
 
-CLOUDFLARED = Path(r'D:\YT	ools\cloudflared.exe')
+CLOUDFLARED = Path(r'D:\YT\tools\cloudflared.exe')
 
 
 class MetaError(RuntimeError):
