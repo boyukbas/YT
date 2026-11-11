@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instagram login</title>
+<style>
+  body { margin: 0; padding: 32px 16px; background: #101628; color: #E8EAF0; font: 17px/1.5 system-ui, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { color: #FFD21A; font-size: 22px; }
+  a { color: #FFD21A; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Instagram login</h1>
+  <p id="msg">Nothing to do here.</p>
+</main>
+<script>
+  // Meta's login sends the answer here (an https address it accepts); this page hands it on to the PC's
+  // instagram.py, which waits on localhost. Nothing is stored or sent anywhere else.
+  const q = location.search;
+  if (/[?&](code|error)=/.test(q)) {
+    const pc = 'http://localhost:8765/' + q;
+    document.getElementById('msg').innerHTML =
+      'Sending the answer to the PC… If nothing happens, <a href="' + pc + '">click here</a> ' +
+      '(only works on the PC where instagram.py is waiting).';
+    location.replace(pc);
+  }
+</script>
+</body>
+</html>

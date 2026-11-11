@@ -1,0 +1,268 @@
+// Draws subtitles on a canvas. Used for both the live preview and the exported video,
+// so what you see is what you get.
+import { captionWords } from './core.js';
+
+export const FONTS = {
+  modern: { family: '"Bricolage Grotesque", system-ui, -apple-system, sans-serif', weight: 800, label: 'Modern' },
+  bold: { family: 'Anton, Impact, "Arial Narrow", sans-serif', weight: 400, label: 'Bold' },
+  rounded: { family: 'Nunito, ui-rounded, system-ui, sans-serif', weight: 900, label: 'Rounded' },
+};
+export const FONT = FONTS.modern.family;
+export const fontCss = (key, px) => { const f = FONTS[key] || FONTS.modern; return `${f.weight} ${px}px ${f.family}`; };
+
+const PAIR_GAP = 1.0; // seconds between a line and its translation to show them together
+const POP = 0.14;     // seconds for the pop-in animation
+
+/**
+ * Which captions are on screen at time t (original-video time).
+ * layout "single": one line at a time. layout "pair": a main-language line stays up and
+ * its second-language translation appears under it.
+ */
+const HOLD = 1.2; // keep a line up through short pauses, so speech never runs without a subtitle
+
+export function blocksAt(t, caps, layout, primary) {
+  let i = caps.findIndex(c => t >= c.start && t < c.end && c.text.trim());
+  if (i < 0) {
+    // In a short gap between two lines, keep showing the previous one.
+    const prev = caps.findLastIndex(c => c.end <= t && c.text.trim());
+    if (prev >= 0 && prev + 1 < caps.length && caps[prev + 1].start - caps[prev].end <= HOLD && t < caps[prev + 1].start) i = prev;
+  }
+  if (layout !== 'pair') return i >= 0 ? [caps[i]] : [];
+  const partner = pairsOf(caps);
+  if (i >= 0) {
+    const p = partner.get(i);
+    if (p !== undefined && p < i) return [caps[p], caps[i]];   // translation: show both, in spoken order
+    return [caps[i]];
+  }
+  // In the short gap between a line and its translation, keep the first line up.
+  const prev = caps.findLastIndex(c => c.end <= t);
+  const p = partner.get(prev);
+  if (prev >= 0 && p !== undefined && p > prev && t < caps[p].start) return [caps[prev]];
+  return [];
+}
+
+/**
+ * Pairs each line with the next one when it's in the other language and follows closely —
+ * whichever language comes first. Each line belongs to at most one pair.
+ */
+const pairCache = new WeakMap();
+function pairsOf(caps) {
+  const key = caps.map(c => `${c.lang}${c.start}${c.end}`).join('|');
+  const hit = pairCache.get(caps);
+  if (hit && hit.key === key) return hit.map;
+  // Candidates: neighbours in different languages. The tightest links win, so a word and its
+  // translation (said right after it) pair up before an explanation and the next new word do.
+  const cands = [];
+  for (let i = 0; i + 1 < caps.length; i++) {
+    const a = caps[i], b = caps[i + 1], gap = b.start - a.end;
+    if (a.lang !== b.lang && gap <= PAIR_GAP && a.text.trim() && b.text.trim()) cands.push({ i, gap });
+  }
+  cands.sort((x, y) => x.gap - y.gap);
+  const map = new Map();
+  for (const { i } of cands) {
+    if (map.has(i) || map.has(i + 1)) continue;
+    map.set(i, i + 1); map.set(i + 1, i);
+  }
+  pairCache.set(caps, { key, map });
+  return map;
+}
+
+function layoutWords(ctx, words, maxW, space) {
+  const lines = [];
+  let cur = [], width = 0;
+  for (const w of words) {
+    const add = cur.length ? space + w.width : w.width;
+    if (cur.length && width + add > maxW) { lines.push({ words: cur, width }); cur = [w]; width = w.width; }
+    else { cur.push(w); width += add; }
+  }
+  if (cur.length) lines.push({ words: cur, width });
+  return lines;
+}
+
+/**
+ * style: { size (fraction of the short side), pos (0 bottom..1 top), posX (0 left..1 right),
+ *          box, highlight, caps, font, anim, colorFor(lang) }
+ * Each word gets its own language's color. With two blocks (a line and its translation),
+ * the second one is smaller and in italics.
+ */
+const TRANSLATION = 0.78;   // size of the translation line
+export function drawCaptions(ctx, W, H, t, blocks, style) {
+  if (!blocks.length) return;
+  const px0 = Math.round(Math.min(W, H) * style.size);
+  const cx = W * (style.posX ?? 0.5);
+  // Keep lines inside the frame even when the subtitles are moved to a side.
+  const maxW = Math.max(W * 0.35, Math.min(W * 0.86, 2 * Math.min(cx, W - cx) * 0.94));
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.lineJoin = 'round';
+
+  const laid = blocks.map((c, b) => {
+    const small = blocks.length > 1 && b > 0;
+    const px = small ? Math.round(px0 * TRANSLATION) : px0;
+    const font = (small ? 'italic ' : '') + fontCss(style.font, px);
+    ctx.font = font;
+    const space = ctx.measureText(' ').width + px * 0.12;
+    const words = captionWords(c).map(w => {
+      const text = style.caps ? safeUpper(w.text, w.lang || c.lang) : w.text;
+      return { ...w, text, width: ctx.measureText(text).width };
+    });
+    return { c, px, font, space, lh: px * 1.18, lines: layoutWords(ctx, words, maxW, space) };
+  });
+  const blockGap = px0 * 0.3;
+  const total = laid.reduce((a, b) => a + b.lines.length * b.lh, 0) + blockGap * (laid.length - 1);
+  let y = H * (1 - style.pos) - total / 2;
+
+  for (const { c, px, font, space, lh, lines } of laid) {
+    y += lh / 2;
+    const blockH = lines.length * lh;
+    ctx.save();
+    ctx.font = font;
+    if (style.anim) {
+      // Pop-in when a line appears.
+      const k = Math.min(1, Math.max(0, (t - c.start) / POP));
+      const s = 0.82 + 0.18 * (1 - (1 - k) * (1 - k));
+      const midY = y - lh / 2 + blockH / 2;
+      ctx.translate(cx, midY); ctx.scale(s, s); ctx.translate(-cx, -midY);
+      ctx.globalAlpha = 0.4 + 0.6 * k;
+    }
+    const baseAlpha = ctx.globalAlpha;
+    for (const line of lines) {
+      let x = cx - line.width / 2;
+      if (style.box) {
+        const padX = px * 0.28, padY = px * 0.1;
+        ctx.fillStyle = 'rgba(0,0,0,0.62)';
+        roundRect(ctx, x - padX, y - lh / 2 - padY / 2, line.width + padX * 2, lh + padY, px * 0.22);
+        ctx.fill();
+      }
+      for (const w of line.words) {
+        const active = t >= w.start && t < w.end;
+        ctx.globalAlpha = baseAlpha * (style.highlight && !active ? 0.55 : 1);
+        ctx.lineWidth = px * 0.18;
+        ctx.strokeStyle = '#000';
+        ctx.fillStyle = style.colorFor(w.lang || c.lang);
+        if (style.highlight && active) {
+          ctx.save();
+          ctx.translate(x + w.width / 2, y);
+          ctx.scale(1.05, 1.05);
+          if (!style.box) ctx.strokeText(w.text, -w.width / 2, 0);
+          ctx.fillText(w.text, -w.width / 2, 0);
+          ctx.restore();
+        } else {
+          if (!style.box) ctx.strokeText(w.text, x, y);
+          ctx.fillText(w.text, x, y);
+        }
+        x += w.width + space;
+      }
+      y += lh;
+    }
+    ctx.restore();
+    y += blockGap - lh / 2;
+  }
+}
+
+/** Opening title ("hook") shown near the top for the first seconds of the video. */
+export function drawHook(ctx, W, H, text, outT, style) {
+  if (!text.trim()) return;
+  const px = Math.round(Math.min(W, H) * style.size * 1.15);
+  const lh = px * 1.15;
+  ctx.save();
+  ctx.font = fontCss(style.font, px);
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.lineJoin = 'round';
+  const space = ctx.measureText(' ').width;
+  const lines = [];
+  for (const para of text.split('\n')) {
+    const words = para.split(/\s+/).filter(Boolean).map(w => ({ text: w, width: ctx.measureText(w).width }));
+    lines.push(...layoutWords(ctx, words, W * 0.84, space));
+  }
+  const k = style.anim ? Math.min(1, outT / POP) : 1;
+  ctx.globalAlpha = 0.3 + 0.7 * k;
+  let y = H * 0.17 - (lines.length - 1) * lh / 2;
+  const padX = px * 0.35, padY = px * 0.18;
+  for (const line of lines) {
+    let x = (W - line.width) / 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    roundRect(ctx, x - padX, y - lh / 2 - padY / 2, line.width + padX * 2, lh + padY, px * 0.25);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    for (const w of line.words) { ctx.fillText(w.text, x, y); x += w.width + space; }
+    y += lh;
+  }
+  ctx.restore();
+}
+
+/** Shades the areas YouTube Shorts covers with its own buttons and text (preview only). */
+export function drawSafeZones(ctx, W, H) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 90, 90, 0.22)';
+  ctx.strokeStyle = 'rgba(255, 120, 120, 0.9)';
+  ctx.setLineDash([6, 6]);
+  ctx.lineWidth = 2;
+  const zones = [
+    [0, 0, W, H * 0.08],                    // top bar
+    [0, H * 0.79, W, H * 0.21],             // title, channel, music
+    [W * 0.84, H * 0.42, W * 0.16, H * 0.37], // like / comment / share buttons
+  ];
+  for (const [x, y, w, h] of zones) { ctx.fillRect(x, y, w, h); ctx.strokeRect(x + 1, y + 1, w - 2, h - 2); }
+  ctx.restore();
+}
+
+export function safeUpper(text, lang) {
+  try { return text.toLocaleUpperCase(lang); } catch { return text.toUpperCase(); }
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  if (ctx.roundRect) { ctx.roundRect(x, y, w, h, r); return; }
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+/**
+ * Channel branding on the video: a corner logo (watermark) and a short "subscribe" reminder.
+ * brand: { wm, wmPos ('tl'|'tr'|'bl'|'br'), rem, remAt ('start'|'middle'|'end'), remText, name }
+ */
+export function drawBrand(ctx, W, H, outT, total, brand, logo, fontKey = 'modern') {
+  if (!brand?.on) return;
+  const m = Math.min(W, H);
+  if (brand.wm && logo?.complete !== false && logo?.width) {
+    const s = m * 0.11, pad = m * 0.03;
+    const x = brand.wmPos?.includes('l') ? pad : W - pad - s;
+    const y = brand.wmPos?.includes('t') ? pad : H - pad - s;
+    ctx.save(); ctx.globalAlpha = 0.85; ctx.drawImage(logo, x, y, s, s); ctx.restore();
+  }
+  if (!brand.rem || total < 8) return;
+  const len = 4.5;
+  const at = brand.remAt === 'middle' ? total / 2 - len / 2 : brand.remAt === 'end' ? Math.max(0, total - len - 1) : Math.min(4, total * 0.1);
+  if (outT < at || outT > at + len) return;
+  const k = Math.min(1, (outT - at) / 0.35, (at + len - outT) / 0.35);   // slide/fade in and out
+  const h = m * 0.12, r = h / 2, logoS = h * 0.78;
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, k);
+  ctx.font = fontCss(fontKey, Math.round(h * 0.34));
+  const name = brand.name || '';
+  const btnText = (brand.remText || 'Abone ol').toLocaleUpperCase('tr') + '  🔔';
+  const nameW = ctx.measureText(name).width;
+  ctx.font = fontCss(fontKey, Math.round(h * 0.3));
+  const btnW = ctx.measureText(btnText).width + h * 0.6;
+  const w = h * 0.2 + logoS + h * 0.25 + nameW + h * 0.35 + btnW + h * 0.15;
+  const x = (W - w) / 2, y = H * 0.9 - h / 2 + (1 - k) * h * 0.6;
+  ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = h * 0.3;
+  ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, y, w, h, r) : ctx.rect(x, y, w, h); ctx.fill();
+  ctx.shadowBlur = 0;
+  let cx = x + h * 0.2;
+  if (logo?.width) { ctx.drawImage(logo, cx, y + (h - logoS) / 2, logoS, logoS); }
+  cx += logoS + h * 0.25;
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.font = fontCss(fontKey, Math.round(h * 0.34)); ctx.fillStyle = '#15171c'; ctx.fillText(name, cx, y + h / 2);
+  cx += nameW + h * 0.35;
+  const bh = h * 0.62;
+  ctx.fillStyle = '#e30a17'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(cx, y + (h - bh) / 2, btnW, bh, bh / 2) : ctx.rect(cx, y + (h - bh) / 2, btnW, bh); ctx.fill();
+  ctx.font = fontCss(fontKey, Math.round(h * 0.3)); ctx.fillStyle = '#ffffff'; ctx.fillText(btnText, cx + h * 0.3, y + h / 2);
+  ctx.restore();
+}
